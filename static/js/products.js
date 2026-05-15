@@ -1263,18 +1263,20 @@ async function doImport() {
 
 async function renderAdmin(el) {
   if (!isAdmin()) { toast('无权限', 'warning'); switchTab('dashboard'); return; }
-  const [userData, fieldData, regData, logData, logStats] = await Promise.all([
+  const [userData, fieldData, regData, logData, logStats, settingsData] = await Promise.all([
     api('/api/admin/users'),
     api('/api/admin/fields'),
     api('/api/admin/registration'),
     api('/api/download-logs'),
     api('/api/download-logs/stats'),
+    api('/api/admin/settings'),
   ]);
   const users = userData.users || [];
   const fields = fieldData.fields || [];
   const regOpen = regData.registration_open !== false;
   const logs = logData.logs || [];
   const logUsers = logStats.users || [];
+  const settings = settingsData.settings || {};
 
   el.innerHTML = `
     <div class="row g-4">
@@ -1312,6 +1314,15 @@ async function renderAdmin(el) {
             <label class="switch"><input type="checkbox" ${regOpen?'checked':''} onchange="toggleRegistration(this.checked)"><span class="slider"></span></label>
           </div>
           <div class="text-muted small mt-1">关闭后只有管理员可以手动添加用户</div>
+        </div>
+        <div class="card-modern mt-3"><div class="card-title-modern"><i class="bi bi-gear me-2"></i>系统设置</div>
+          <div class="mb-2"><label class="form-label small fw-medium">公司名称（显示在导出报价单顶部）</label>
+            <input class="form-control form-control-sm" id="setCompany" value="${escHtml(settings.company_name||'')}" placeholder="如：XX科技有限公司">
+          </div>
+          <div class="mb-2"><label class="form-label small fw-medium">页脚文字（显示在导出报价单底部）</label>
+            <textarea class="form-control form-control-sm" id="setFooter" rows="3" placeholder="如：开户行：XX银行 XX支行  账号：123456789">${escHtml(settings.footer_text||'')}</textarea>
+          </div>
+          <button class="btn btn-sm btn-modern btn-primary" onclick="saveSystemSettings()"><i class="bi bi-check me-1"></i>保存设置</button>
         </div>
       </div>
     </div>
@@ -1364,6 +1375,13 @@ async function updateFieldVisibility(field, visible) {
 async function toggleRegistration(open) {
   await api('/api/admin/registration', 'PUT', {registration_open: open});
   registrationOpen = open;
+}
+
+async function saveSystemSettings() {
+  const company = ($('setCompany')?.value || '').trim();
+  const footer = ($('setFooter')?.value || '').trim();
+  await api('/api/admin/settings', 'PUT', {company_name: company, footer_text: footer});
+  toast('系统设置已保存', 'success');
 }
 
 document.addEventListener('DOMContentLoaded', async () => {

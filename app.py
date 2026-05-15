@@ -226,6 +226,14 @@ class FieldSetting(db.Model):
     user_visible = db.Column(db.Boolean, default=True)
 
 
+class SystemSetting(db.Model):
+    """系统设置 key-value 存储 (v1.3.8)"""
+    __tablename__ = 'system_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    value = db.Column(db.Text, nullable=True, default='')
+
+
 # ─── JWT & Auth Helpers ──────────────────────────────────────
 
 def hash_password(password):
@@ -379,6 +387,36 @@ def set_registration():
     if 'registration_open' in data:
         app.config['REGISTRATION_OPEN'] = bool(data['registration_open'])
     return jsonify({'registration_open': app.config['REGISTRATION_OPEN']})
+
+# ─── 系统设置 API ─────────────────────────────────
+def get_setting(key, default=''):
+    """读取单个系统设置"""
+    s = SystemSetting.query.filter_by(key=key).first()
+    return s.value if s else default
+
+def get_all_settings():
+    """读取所有系统设置 (返回dict)"""
+    return {s.key: s.value for s in SystemSetting.query.all()}
+
+@app.route('/api/admin/settings', methods=['GET'])
+@require_admin
+def get_settings():
+    return jsonify({'settings': get_all_settings()})
+
+@app.route('/api/admin/settings', methods=['PUT'])
+@require_admin
+def update_settings():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '数据为空'}), 400
+    for key, value in data.items():
+        s = SystemSetting.query.filter_by(key=key).first()
+        if s:
+            s.value = str(value) if value else ''
+        else:
+            db.session.add(SystemSetting(key=key, value=str(value) if value else ''))
+    db.session.commit()
+    return jsonify({'settings': get_all_settings()})
 
 @app.route('/api/admin/fields', methods=['GET'])
 @require_admin
@@ -1251,9 +1289,10 @@ def export_quote_excel(quote_id):
     for ci, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
-    # ── 第1行：客户信息（最上面） ──
+    # ── 第1行：公司名 + 客户信息（最上面） ──
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
-    parts = []
+    company = get_setting('company_name', '').strip()
+    parts = [f'公司：{company}'] if company else []
     if quote.client: parts.append(f'客户：{quote.client}')
     if quote.contact: parts.append(f'联系人：{quote.contact}')
     if quote.phone: parts.append(f'电话：{quote.phone}')
@@ -1368,6 +1407,18 @@ def export_quote_excel(quote_id):
     nc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
     for ci in range(1, COL_COUNT + 1):
         ws.cell(row=row, column=ci).border = thin_border
+
+    # ── 页脚行（公司自定义） ──
+    footer = get_setting('footer_text', '').strip()
+    if footer:
+        row += 1
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+        fc = ws.cell(row=row, column=1, value=footer)
+        fc.font = Font(name='微软雅黑', size=9, color='888888')
+        fc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        ws.row_dimensions[row].height = 30
+        for ci in range(1, COL_COUNT + 1):
+            ws.cell(row=row, column=ci).border = Border()
 
     # ── 打印：纵向 ──
     ws.page_setup.orientation = 'portrait'
@@ -1672,6 +1723,12 @@ with app.app_context():
                 q.created_by = admin_user.id
             db.session.commit()
             print(f'[Init] 已为 {len(orphan_quotes)} 条历史报价单分配创建者: admin')
+    # 初始化默认系统设置
+    defaults = {'company_name': '', 'footer_text': ''}
+    for k, v in defaults.items():
+        if not SystemSetting.query.filter_by(key=k).first():
+            db.session.add(SystemSetting(key=k, value=v))
+    db.session.commit()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
