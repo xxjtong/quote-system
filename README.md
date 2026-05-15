@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Bootstrap SPA — 产品管理、报价单生成、Excel 导入导出、OCR 智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.3.7-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.5.5-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -28,15 +28,17 @@
 
 | 模块 | 功能 |
 |------|------|
-| 🔐 **认证系统** | JWT 登录/注册、管理员面板、字段可见性控制、注册开关、个人信息修改 |
-| 📦 **产品管理** | CRUD、拼音/缩写智能搜索、分类/厂商筛选、批量删除、图片上传预览 |
-| 📊 **概览仪表盘** | 产品总数、报价单统计、下载量、最近报价单列表 |
-| 📝 **报价单** | 创建/编辑/删除、状态流转、产品多选添加、利润概览、客户聚合统计 |
+| 🔐 **认证系统** | JWT 登录/注册、管理员面板、字段可见性控制、注册开关、个人信息修改、全站鉴权门 |
+| 📦 **产品管理** | CRUD、拼音/缩写智能搜索、分类/厂商筛选、批量删除、图片上传预览、**产品上线/下线** |
+| 📊 **概览仪表盘** | 产品总数/报价单/下载/总金额统计卡片、最近报价单、快速操作 |
+| 📝 **报价单** | 创建/编辑/删除、状态流转、**拖拽排序**、**每行备注**、利润概览、客户聚合、**台湾税率支持** |
 | 📥 **Excel 导入** | 多 Sheet 导入、列名智能映射、自动同步 SKU/规格 |
-| 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、下载计数统计 |
-| 👁️ **预览** | HTML 预览报价单，功能描述与备注分离 |
-| 🔍 **智能识别** | 粘贴文本自动解析产品信息、图片 OCR 识别 |
-| ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹智能缓存、前端本地拼音过滤 |
+| 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、**自定义公司名/页脚**、下载计数统计 |
+| 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权） |
+| 📧 **邮件** | SMTP 配置，一键发送报价单 Excel 附件 |
+| 🔍 **智能识别** | 粘贴文本自动解析产品信息、图片 OCR 识别、**发票 OCR → 批量更新成本价** |
+| 🎨 **UI** | 统一页面风格、上下布局、`.page-header` / `.card-modern` / `.form-label-modern` 一致样式体系 |
+| ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹、前端本地拼音过滤 |
 
 ---
 
@@ -105,6 +107,7 @@
 | `function_desc` | TEXT | **功能描述** — 出现在报价单 Excel 和预览中 |
 | `remark` | TEXT | **内部备注** — 仅内部可见，不导出到报价单 |
 | `image_url` | VARCHAR(500) | 产品图片路径 |
+| `is_active` | BOOLEAN | 上下线状态，默认 True（v1.4.0） |
 | `created_at` | DATETIME | 创建时间 |
 | `updated_at` | DATETIME | 更新时间（自动刷新） |
 
@@ -119,7 +122,8 @@
 | `phone` | VARCHAR(50) | 联系电话 |
 | `quote_date` | VARCHAR(20) | 报价日期 |
 | `valid_days` | INTEGER | 有效期（天），默认 15 |
-| `status` | VARCHAR(20) | 状态：draft/sent/confirmed/completed |
+| `tax_rate` | FLOAT | 税率(%)，默认 0（v1.5.0）。`税前价 = 含税价 / (1 + 税率/100)` |
+| `status` | VARCHAR(20) | 状态：draft/sent/confirmed/rejected |
 | `total_amount` | FLOAT | 合计金额 |
 | `download_count` | INTEGER | 导出下载次数 |
 | `created_by` | FK → User | 创建者（可选） |
@@ -137,11 +141,11 @@
 | `product_sku` | VARCHAR(100) | SKU 快照 |
 | `product_spec` | VARCHAR(500) | 规格型号快照 |
 | `product_unit` | VARCHAR(20) | 单位快照 |
-| `quantity` | FLOAT | 数量，默认 1 |
+| `quantity` | INTEGER | 数量，默认 1（v1.4.1 改为整数） |
 | `unit_price` | FLOAT | 单价 |
 | `amount` | FLOAT | 小计 = 数量 × 单价 |
-| `remark` | VARCHAR(500) | 行备注 |
-| `sort_order` | INTEGER | 排序序号 |
+| `remark` | VARCHAR(500) | 行备注（v1.4.3） |
+| `sort_order` | INTEGER | 排序序号（v1.3.8） |
 
 ### FieldSetting（字段可见性）
 
@@ -159,6 +163,14 @@
 | `quote_id` | FK → Quote | 所属报价单 |
 | `user_name` | VARCHAR(100) | 下载者用户名 |
 | `downloaded_at` | DATETIME | 下载时间 |
+
+### SystemSetting（系统设置，v1.3.9）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER PK | 主键 |
+| `key` | VARCHAR(100) UNIQUE | 设置键（company_name, footer_text, smtp_* 等） |
+| `value` | TEXT | 设置值 |
 
 ---
 
@@ -273,13 +285,14 @@ Base URL: `http://127.0.0.1:5000`
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/quotes` | 列表（含 `search`, `status` 筛选） |
-| `GET` | `/api/quotes/<id>` | 详情（含 items + 利润） |
-| `POST` | `/api/quotes` | 新建 |
+| `GET` | `/api/quotes/<id>` | 详情（含 items + 利润，含 `tax_rate`） |
+| `POST` | `/api/quotes` | 新建（含 `tax_rate`, 行 `remark`） |
 | `PUT` | `/api/quotes/<id>` | 编辑 |
 | `DELETE` | `/api/quotes/<id>` | 删除 |
 | `PATCH` | `/api/quotes/<id>/status` | 切换状态 `{status: "sent"}` |
 | `GET` | `/api/quotes/<id>/export-excel` | 导出 Excel（递增下载计数） |
-| `GET` | `/api/quotes/<id>/preview` | HTML 预览 |
+| `GET` | `/api/quotes/<id>/preview` | HTML 预览（含备注列） |
+| `POST` | `/api/quotes/<id>/send-email` | 发送邮件（v1.4.0），body: `{to_email, subject?, body?}` |
 | `GET` | `/api/quotes/stats` | 客户维度聚合统计 |
 
 **新建报价单请求体：**
@@ -312,15 +325,19 @@ Base URL: `http://127.0.0.1:5000`
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/admin/users` | 用户列表（管理员） |
-| `PATCH` | `/api/admin/users/<id>/password` | 修改用户密码（管理员） |
-| `PATCH` | `/api/admin/users/<id>/role` | 修改用户角色（管理员） |
-| `PATCH` | `/api/admin/users/<id>/active` | 启用/禁用用户（管理员） |
+| `PUT` | `/api/admin/users/<id>` | 修改用户（启用/禁用/角色切换） |
+| `PUT` | `/api/admin/users/<id>/password` | 修改用户密码（管理员） |
 | `GET` | `/api/admin/fields` | 字段可见性配置 |
 | `PUT` | `/api/admin/fields` | 更新字段可见性 |
 | `GET` | `/api/admin/registration` | 注册开关状态 |
 | `PUT` | `/api/admin/registration` | 设置注册开关 |
+| `GET` | `/api/admin/settings` | 系统设置（公司名/页脚/SMTP） |
+| `PUT` | `/api/admin/settings` | 更新系统设置 |
 | `GET` | `/api/download-logs` | 下载记录列表 |
 | `GET` | `/api/download-logs/stats` | 下载统计 |
+| `POST` | `/api/products/ocr-cost` | 发票 OCR 识别（v1.5.2） |
+| `POST` | `/api/products/update-costs` | 批量更新成本价（v1.5.2，管理员） |
+| `PUT` | `/api/products/<id>/toggle-active` | 产品上下线切换（v1.4.0） |
 
 ### 通用
 
@@ -517,18 +534,26 @@ static/js/
 
 ```
 /opt/quote-system/
-├── app.py                     # Flask 应用主文件（后端全部逻辑，1668行）
+├── app.py                     # Flask 应用主文件
 ├── templates/
-│   └── index.html             # 前端 SPA 骨架（HTML + CSS，480行）
+│   └── index.html             # 前端 SPA 骨架（HTML + CSS，540行）
 ├── static/
 │   └── js/
-│       ├── app.js             # 状态管理 / 工具 / 导航 / Dashboard（292行）
+│       ├── app.js             # 状态管理 / 工具 / 导航 / Dashboard（308行）
 │       ├── auth.js            # 认证相关（153行）
-│       └── products.js        # 产品 / 报价 / 导入 / 管理（1357行）
+│       └── products.js        # 产品 / 报价 / 导入 / 管理（1631行）
+├── tests/                     # pytest 测试套件（98 项）
+│   ├── conftest.py            # fixtures（登录、session）
+│   ├── test_auth.py           # 认证（13 项）
+│   ├── test_products.py       # 产品（24 项）
+│   ├── test_quotes.py         # 报价单（18 项）
+│   ├── test_admin.py          # 管理（17 项）
+│   └── test_edge_cases.py     # 边界&安全（22 项）
 ├── quote-system.service       # systemd 服务配置
-├── version.txt                # 版本号
-├── CHANGELOG.md               # 更新日志
+├── version.txt                # 版本号（手动递增）
+├── CHANGELOG.md               # 更新日志（v1.5.5）
 ├── README.md                  # 本文件
+├── REQUIREMENTS.md            # 需求规格书
 ├── template.xlsx              # 导入模板
 ├── uploads/
 │   └── images/                # 产品图片

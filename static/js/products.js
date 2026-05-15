@@ -1257,41 +1257,34 @@ async function saveQuote() {
 // ─── Import ─────────────────────────────────────────────
 function renderImport(el) {
   el.innerHTML = `
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="fw-bold mb-0"><i class="bi bi-upload me-2"></i>从Excel导入产品</h5>
+    <div class="page-header">
+      <h5><i class="bi bi-upload"></i>从Excel导入产品</h5>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary btn-modern" onclick="doImport()"><i class="bi bi-upload me-1"></i> 开始导入</button>
+        <button class="btn btn-outline-secondary btn-modern" onclick="window.open(BASE_URL + '/api/products/export-template')"><i class="bi bi-download me-1"></i> 下载模板</button>
+      </div>
     </div>
-    <div class="row g-3">
-      <div class="col-md-7">
-        <div class="card-modern">
-          <div class="card-title-modern"><i class="bi bi-file-earmark-excel text-success"></i>上传Excel文件</div>
-          <div class="mb-3">
-            <p class="text-muted small mb-1"><i class="bi bi-check-circle me-1 text-success"></i> 支持 <strong>多Sheet</strong> 导入，每张Sheet自动成为产品厂商</p>
-            <p class="text-muted small">支持的字段：产品名称、规格型号、功能描述、单位、销售单价、成本价、供应商、备注</p>
-            <p class="text-muted small">表头名称自动识别，支持多种格式。</p>
-          </div>
-          <div class="mb-3">
-            <input class="form-control" type="file" id="importFile" accept=".xlsx,.xls">
-          </div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-primary btn-modern" onclick="doImport()"><i class="bi bi-upload me-1"></i> 开始导入</button>
-            <button class="btn btn-outline-secondary btn-modern" onclick="window.open(BASE_URL + '/api/products/export-template')"><i class="bi bi-download me-1"></i> 下载原始模板</button>
-          </div>
-          <div id="importResult" class="mt-3"></div>
-        </div>
+    <div class="card-modern">
+      <div class="card-title-modern"><i class="bi bi-file-earmark-excel text-success"></i>上传Excel文件</div>
+      <div class="mb-3">
+        <p class="text-muted small mb-1"><i class="bi bi-check-circle me-1 text-success"></i> 支持 <strong>多Sheet</strong> 导入，每张Sheet自动成为产品厂商</p>
+        <p class="text-muted small">支持的字段：产品名称、规格型号、功能描述、单位、销售单价、成本价、供应商、备注</p>
+        <p class="text-muted small">表头名称自动识别，支持多种格式。</p>
       </div>
-      <div class="col-md-5">
-        <div class="card-modern">
-          <div class="card-title-modern"><i class="bi bi-info-circle text-primary"></i>导入说明</div>
-          <ul class="small text-muted mb-0" style="line-height:1.8">
-            <li><strong>多Sheet支持</strong> — 所有Sheet自动导入</li>
-            <li>每张Sheet名称自动设为<b>厂商</b></li>
-            <li>支持 <code>.xlsx</code> / <code>.xls</code> 格式</li>
-            <li>表头名称智能匹配，无需特定顺序</li>
-            <li>自动跳过空行、「小计/合计」行</li>
-            <li>当前已有 ${$('#mainContent') ? '...' : '0'} 个产品</li>
-          </ul>
-        </div>
+      <div class="mb-3">
+        <input class="form-control" type="file" id="importFile" accept=".xlsx,.xls">
       </div>
+      <div id="importResult" class="mt-3"></div>
+    </div>
+    <div class="card-modern">
+      <div class="card-title-modern"><i class="bi bi-info-circle text-primary"></i>导入说明</div>
+      <ul class="small text-muted mb-0" style="line-height:1.8">
+        <li><strong>多Sheet支持</strong> — 所有Sheet自动导入</li>
+        <li>每张Sheet名称自动设为<b>厂商</b></li>
+        <li>支持 <code>.xlsx</code> / <code>.xls</code> 格式</li>
+        <li>表头名称智能匹配，无需特定顺序</li>
+        <li>自动跳过空行、「小计/合计」行</li>
+      </ul>
     </div>
   `;
 }

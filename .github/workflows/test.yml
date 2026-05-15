@@ -1,0 +1,64 @@
+name: API Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      app:
+        image: python:3.11-slim
+        ports:
+          - 5000:5000
+        # 注意：CI 环境需要完整的部署步骤，
+        # 以下为示例框架，实际部署需根据项目调整
+        options: >-
+          --health-cmd "curl -f http://localhost:5000/api/version || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl pypinyin pyjwt
+          pip install pytest requests
+
+      - name: Start application
+        run: |
+          export QUOTE_JWT_SECRET="test-secret-ci-$(openssl rand -hex 16)"
+          export QUOTE_ADMIN_PASSWORD="admin123"
+          mkdir -p uploads/images exports
+          python -c "
+          from app import app, db
+          with app.app_context():
+              db.create_all()
+          "
+          python app.py &
+          sleep 3
+          curl -f http://127.0.0.1:5000/api/version
+
+      - name: Run tests
+        run: |
+          cd tests
+          python -m pytest -v --tb=short --junitxml=../test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml

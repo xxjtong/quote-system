@@ -118,10 +118,10 @@ async function prefetchDashboard() {
 function renderDashboardHTML(data) {
   const { prodCount, quotes, totalAmount, downloadTotal, catCount } = data;
   return `
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h5 class="fw-bold mb-0">系统概览</h5>
+    <div class="page-header">
+      <h5><i class="bi bi-speedometer2"></i>系统概览</h5>
     </div>
-    <div class="row g-3 mb-4 anim-in">
+    <div class="row g-3 mb-3 anim-in">
       <div class="col-6 col-md-3">
         <div class="stat-card">
           <div class="d-flex align-items-center gap-3">
@@ -177,27 +177,23 @@ function renderDashboardHTML(data) {
         </div>
       </div>
     </div>
-    <div class="row g-3">
-      <div class="col-md-6">
-        <div class="card-modern anim-in">
-          <div class="card-title-modern"><i class="bi bi-clock-history text-primary"></i>最近报价</div>
-          ${quotes.length ? quotes.slice(0, 10).map(qq => `
-            <div class="d-flex justify-content-between align-items-center py-2" style="border-bottom:1px solid var(--gray-100);cursor:pointer" onclick="viewQuote(${qq.id})" title="点击查看预览">
-              <span><i class="bi bi-file-text me-2 text-muted"></i>${escHtml(qq.title || '未命名')}</span>
-              <span class="text-muted small fw-medium">${formatMoney(qq.total_amount)}</span>
-            </div>
-          `).join('') : '<div class="text-muted text-center py-3 small">暂无报价单</div>'}
+
+    <div class="card-modern anim-in">
+      <div class="card-title-modern"><i class="bi bi-clock-history text-primary"></i>最近报价</div>
+      ${quotes.length ? quotes.slice(0, 10).map(qq => `
+        <div class="d-flex justify-content-between align-items-center py-2" style="border-bottom:1px solid var(--gray-100);cursor:pointer" onclick="viewQuote(${qq.id})" title="点击查看预览">
+          <span><i class="bi bi-file-text me-2 text-muted"></i>${escHtml(qq.title || '未命名')}</span>
+          <span class="text-muted small fw-medium">${formatMoney(qq.total_amount)}</span>
         </div>
-      </div>
-      <div class="col-md-6">
-        <div class="card-modern anim-in">
-          <div class="card-title-modern"><i class="bi bi-lightning text-primary"></i>快速操作</div>
-          <div class="d-grid gap-2">
-            <button class="btn btn-outline-primary text-start btn-modern" onclick="switchTab('import')"><i class="bi bi-upload me-2"></i>从Excel导入产品（支持多Sheet）</button>
-            <button class="btn btn-outline-primary text-start btn-modern" onclick="switchTab('newquote')"><i class="bi bi-plus-circle me-2"></i>新建报价单</button>
-            <button class="btn btn-outline-primary text-start btn-modern" onclick="switchTab('products')"><i class="bi bi-box-seam me-2"></i>管理产品库</button>
-          </div>
-        </div>
+      `).join('') : '<div class="text-muted text-center py-3 small">暂无报价单</div>'}
+    </div>
+
+    <div class="card-modern anim-in">
+      <div class="card-title-modern"><i class="bi bi-lightning text-primary"></i>快速操作</div>
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-primary btn-modern" onclick="switchTab('import')"><i class="bi bi-upload me-1"></i>从Excel导入产品</button>
+        <button class="btn btn-outline-primary btn-modern" onclick="switchTab('newquote')"><i class="bi bi-plus-circle me-1"></i>新建报价单</button>
+        <button class="btn btn-outline-primary btn-modern" onclick="switchTab('products')"><i class="bi bi-box-seam me-1"></i>管理产品库</button>
       </div>
     </div>
   `;
