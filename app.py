@@ -149,7 +149,7 @@ class QuoteItem(db.Model):
     product_sku = db.Column(db.String(100), nullable=True)
     product_spec = db.Column(db.String(500), nullable=True)
     product_unit = db.Column(db.String(20), nullable=True)
-    quantity = db.Column(db.Float, default=1)
+    quantity = db.Column(db.Integer, default=1)
     unit_price = db.Column(db.Float, default=0)
     amount = db.Column(db.Float, default=0)
     remark = db.Column(db.String(500), nullable=True)
@@ -1172,7 +1172,7 @@ def create_quote():
     items_data = data.get('items', [])
     total = 0
     for i, item in enumerate(items_data):
-        qty = float(item.get('quantity', 1))
+        qty = int(item.get('quantity', 1))
         up = float(item.get('unit_price', 0))
         amt = round(qty * up, 2)
         qi = QuoteItem(
@@ -1224,7 +1224,7 @@ def update_quote(quote_id):
         QuoteItem.query.filter_by(quote_id=quote_id).delete()
         total = 0
         for i, item in enumerate(data['items']):
-            qty = float(item.get('quantity', 1))
+            qty = int(item.get('quantity', 1))
             up = float(item.get('unit_price', 0))
             amt = round(qty * up, 2)
             qi = QuoteItem(
@@ -1450,6 +1450,8 @@ def export_quote_excel(quote_id):
         log = DownloadLog(quote_id=quote_id, user_name=user_name)
         db.session.add(log)
         db.session.commit()
+
+    return send_file(str(filepath), download_name=dl_name, as_attachment=True)
 
 
 # ─── 邮件发送 (v1.4.0) ───

@@ -948,7 +948,7 @@ function renderQuoteItems() {
         <input class="form-control form-control-sm border-0 bg-transparent" value="${escHtml(item.product_name)}" onchange="quoteItems[${i}].product_name=this.value;updateQuoteTotal()" readonly>
       </td>
       <td><input class="form-control form-control-sm border-0 bg-transparent small text-muted" value="${escHtml(item.product_spec||'')}" readonly></td>
-      <td><input class="form-control form-control-sm" type="number" step="1" min="0.01" value="${item.quantity}" onchange="quoteItems[${i}].quantity=parseFloat(this.value)||1;recalcItem(${i});updateQuoteTotal()"></td>
+      <td><input class="form-control form-control-sm" type="number" step="1" min="1" value="${item.quantity}" onchange="quoteItems[${i}].quantity=parseInt(this.value)||1;recalcItem(${i});updateQuoteTotal()" oninput="this.value=this.value.replace(/[^0-9]/g,'')"></td>
       <td><input class="form-control form-control-sm" type="number" step="0.01" min="0" value="${item.unit_price}" onchange="quoteItems[${i}].unit_price=parseFloat(this.value)||0;recalcItem(${i});updateQuoteTotal()"></td>
       <td class="fw-medium" style="font-size:.87rem">${formatMoney(item.amount)}</td>
       <td style="font-size:.82rem;color:${pc}">${p !== 0 ? formatMoney(p) : '-'}</td>
