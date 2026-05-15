@@ -1,0 +1,32 @@
+# 敏感/环境文件
+.env
+*.token
+
+# 数据库（包含真实数据，不上传）
+*.db
+quote.db
+database.db
+data.db
+
+# 上传的图片（产品图片，含真实数据）
+uploads/
+
+# 导出的报价单（含真实客户数据）
+exports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# 日志
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
