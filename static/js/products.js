@@ -1341,9 +1341,7 @@ async function renderAdmin(el) {
   const settings = settingsData.settings || {};
 
   el.innerHTML = `
-    <div class="row g-4">
-      <div class="col-lg-6">
-        <div class="card-modern"><div class="card-title-modern"><i class="bi bi-people me-2"></i>用户管理</div>
+    <div class="card-modern mb-3"><div class="card-title-modern"><i class="bi bi-people me-2"></i>用户管理</div>
           <div style="max-height:50vh;overflow-y:auto">
             <table class="table table-sm table-modern">
               <thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead>
@@ -1360,8 +1358,9 @@ async function renderAdmin(el) {
             </table>
           </div>
         </div>
-      </div>
-      <div class="col-lg-6">
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
         <div class="card-modern"><div class="card-title-modern"><i class="bi bi-eye-slash me-2"></i>字段可见性</div>
           <p class="text-muted small">控制普通用户能看到哪些字段</p>
           <div id="fieldSettings">${fields.map(f => `
@@ -1370,14 +1369,21 @@ async function renderAdmin(el) {
               <label class="switch"><input type="checkbox" ${f.user_visible?'checked':''} onchange="updateFieldVisibility('${f.field_name}', this.checked)"><span class="slider"></span></label>
             </div>`).join('')}</div>
         </div>
-        <div class="card-modern mt-3"><div class="card-title-modern"><i class="bi bi-sliders me-2"></i>注册设置</div>
+      </div>
+      <div class="col-md-6">
+        <div class="card-modern"><div class="card-title-modern"><i class="bi bi-sliders me-2"></i>注册设置</div>
           <div class="d-flex justify-content-between align-items-center">
             <span>允许自主注册</span>
             <label class="switch"><input type="checkbox" ${regOpen?'checked':''} onchange="toggleRegistration(this.checked)"><span class="slider"></span></label>
           </div>
           <div class="text-muted small mt-1">关闭后只有管理员可以手动添加用户</div>
         </div>
-        <div class="card-modern mt-3"><div class="card-title-modern"><i class="bi bi-gear me-2"></i>系统设置</div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <div class="card-modern"><div class="card-title-modern"><i class="bi bi-gear me-2"></i>系统设置</div>
           <div class="mb-2"><label class="form-label small fw-medium">公司名称（显示在导出报价单顶部）</label>
             <input class="form-control form-control-sm" id="setCompany" value="${escHtml(settings.company_name||'')}" placeholder="如：XX科技有限公司">
           </div>
@@ -1386,7 +1392,9 @@ async function renderAdmin(el) {
           </div>
           <button class="btn btn-sm btn-modern btn-primary" onclick="saveSystemSettings()"><i class="bi bi-check me-1"></i>保存设置</button>
         </div>
-        <div class="card-modern mt-3"><div class="card-title-modern"><i class="bi bi-envelope me-2"></i>邮件SMTP设置</div>
+      </div>
+      <div class="col-md-6">
+        <div class="card-modern"><div class="card-title-modern"><i class="bi bi-envelope me-2"></i>邮件SMTP设置</div>
           <div class="row g-2">
             <div class="col-6"><label class="form-label small">SMTP服务器</label><input class="form-control form-control-sm" id="setSmtpHost" value="${escHtml(settings.smtp_host||'')}" placeholder="smtp.qq.com"></div>
             <div class="col-3"><label class="form-label small">端口</label><input class="form-control form-control-sm" id="setSmtpPort" value="${escHtml(settings.smtp_port||'587')}" placeholder="587"></div>
@@ -1397,34 +1405,32 @@ async function renderAdmin(el) {
           </div>
           <button class="btn btn-sm btn-modern btn-primary mt-2" onclick="saveSmtpSettings()"><i class="bi bi-check me-1"></i>保存SMTP</button>
         </div>
-        <div class="card-modern mt-3"><div class="card-title-modern"><i class="bi bi-receipt me-2"></i>发票OCR → 更新成本价 <span class="badge bg-warning text-dark" style="font-size:.65rem">管理员</span></div>
-          <p class="text-muted small">上传进货发票/采购单图片，自动识别产品+成本价，匹配现有产品并更新</p>
-          <div class="mb-2">
-            <input type="file" id="receiptFile" accept="image/*" class="form-control form-control-sm" onchange="uploadReceiptOCR()">
-          </div>
-          <div id="receiptResult" style="display:none;max-height:60vh;overflow-y:auto;margin-top:.5rem"></div>
-        </div>
       </div>
     </div>
-    <div class="row g-4 mt-2">
-      <div class="col-12">
-        <div class="card-modern"><div class="card-title-modern"><i class="bi bi-download me-2"></i>下载记录</div>
-          <div class="d-flex gap-3 mb-2">
-            <span class="text-muted small">总下载：<strong>${logs.length}</strong> 次</span>
-            <span class="text-muted small">用户数：<strong>${logUsers.length}</strong></span>
-          </div>
-          <div style="max-height:40vh;overflow-y:auto">
-            ${logs.length ? `<table class="table table-sm table-modern">
-              <thead><tr><th>时间</th><th>用户</th><th>报价单</th><th>客户</th></tr></thead>
-              <tbody>${logs.map(l => `<tr>
-                <td class="text-muted small">${l.downloaded_at}</td>
-                <td>${escHtml(l.user_name)}</td>
-                <td><a style="cursor:pointer;color:var(--primary)" onclick="viewQuote(${l.quote_id})">#${l.quote_id} ${escHtml(l.quote_title)}</a></td>
-                <td>${escHtml(l.quote_client)}</td>
-              </tr>`).join('')}</tbody>
-            </table>` : '<div class="text-muted small py-3 text-center">暂无下载记录</div>'}
-          </div>
-        </div>
+
+    <div class="card-modern mb-3"><div class="card-title-modern"><i class="bi bi-receipt me-2"></i>发票OCR → 更新成本价 <span class="badge bg-warning text-dark" style="font-size:.65rem">管理员</span></div>
+      <p class="text-muted small">上传进货发票/采购单图片，自动识别产品+成本价，匹配现有产品并更新</p>
+      <div class="mb-2">
+        <input type="file" id="receiptFile" accept="image/*" class="form-control form-control-sm" onchange="uploadReceiptOCR()">
+      </div>
+      <div id="receiptResult" style="display:none;max-height:60vh;overflow-y:auto;margin-top:.5rem"></div>
+    </div>
+
+    <div class="card-modern"><div class="card-title-modern"><i class="bi bi-download me-2"></i>下载记录</div>
+      <div class="d-flex gap-3 mb-2">
+        <span class="text-muted small">总下载：<strong>${logs.length}</strong> 次</span>
+        <span class="text-muted small">用户数：<strong>${logUsers.length}</strong></span>
+      </div>
+      <div style="max-height:40vh;overflow-y:auto">
+        ${logs.length ? `<table class="table table-sm table-modern">
+          <thead><tr><th>时间</th><th>用户</th><th>报价单</th><th>客户</th></tr></thead>
+          <tbody>${logs.map(l => `<tr>
+            <td class="text-muted small">${l.downloaded_at}</td>
+            <td>${escHtml(l.user_name)}</td>
+            <td><a style="cursor:pointer;color:var(--primary)" onclick="viewQuote(${l.quote_id})">#${l.quote_id} ${escHtml(l.quote_title)}</a></td>
+            <td>${escHtml(l.quote_client)}</td>
+          </tr>`).join('')}</tbody>
+        </table>` : '<div class="text-muted small py-3 text-center">暂无下载记录</div>'}
       </div>
     </div>
   `;
