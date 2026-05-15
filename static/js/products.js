@@ -1171,7 +1171,7 @@ function searchProductsForQuote(query) {
     if (!list.length) { resultsDiv.style.display = 'none'; return; }
     resultsDiv.style.display = 'block';
     resultsDiv.innerHTML = list.map(p =>
-      `<div class="p-2 border-bottom" style="cursor:pointer" onclick="addProductToQuote(${p.id}, '${escHtml(p.name)}', '${escHtml(p.spec)}', '${escHtml(p.unit)}', ${p.price||0}); $('prodSearch').value=''; $('searchResults').style.display='none'">
+      `<div class="p-2 border-bottom" style="cursor:pointer" onclick="addProductToQuote(${p.id}, '${escJs(p.name)}', '${escJs(p.spec)}', '${escJs(p.unit)}', ${p.price||0}); $('prodSearch').value=''; $('searchResults').style.display='none'">
         <strong style="font-size:.85rem">${escHtml(p.name)}</strong> <span class="text-muted small">${escHtml(p.spec||'')}</span>
         <span class="float-end text-primary fw-medium">${formatMoney(p.price)}</span>
       </div>`
@@ -1192,6 +1192,11 @@ async function saveQuote() {
   const quote_date = ($('qf_date')?.value || new Date().toISOString().slice(0,10)).trim();
   const valid_days = parseInt($('qf_valid')?.value) || 15;
   const remark = ($('qf_remark')?.value || '').trim();
+  // 必填校验
+  if (!title) { toast('请填写报价标题', 'warning'); return; }
+  if (!client) { toast('请填写客户名称', 'warning'); return; }
+  if (!contact) { toast('请填写联系人', 'warning'); return; }
+  if (!phone) { toast('请填写电话', 'warning'); return; }
   if (!quoteItems.length) { toast('请至少添加一个产品', 'warning'); return; }
   const payload = {title, client, contact, phone, quote_date, valid_days, remark, items: quoteItems.map((item, i) => ({product_id: item.product_id||null, product_name: item.product_name, product_sku: item.product_sku||'', product_spec: item.product_spec||'', product_unit: item.product_unit||'', quantity: item.quantity, unit_price: item.unit_price, sort_order: i, remark: item.remark||''}))};
   try {
