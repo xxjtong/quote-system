@@ -837,9 +837,9 @@ async function renderQuoteForm(existingQuote, targetEl) {
           </div>
           <div class="table-responsive">
             <table class="table table-modern table-sm" id="quoteItemsTable">
-              <thead><tr><th style="width:32px">#</th><th>产品名称</th><th>规格型号</th><th style="width:60px">数量</th><th style="width:85px">单价</th><th style="width:85px">金额</th><th style="width:65px">毛利</th><th style="width:50px">%</th><th style="width:36px"></th></tr></thead>
+              <thead><tr><th style="width:28px"></th><th style="width:32px">#</th><th>产品名称</th><th>规格型号</th><th style="width:60px">数量</th><th style="width:85px">单价</th><th style="width:85px">金额</th><th style="width:65px">毛利</th><th style="width:50px">%</th><th style="width:36px"></th></tr></thead>
               <tbody id="quoteItemsBody"></tbody>
-              <tfoot><tr><td colspan="5" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td></td><td></td></tr></tfoot>
+              <tfoot><tr><td colspan="6" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td></td><td></td></tr></tfoot>
             </table>
           </div>
           ${quoteItems.length === 0 ? '<div class="text-center text-muted py-3 small"><i class="bi bi-inbox d-block fs-2 mb-2"></i>点击「从产品库选择」或搜索添加产品</div>' : ''}
@@ -918,7 +918,8 @@ function renderQuoteItems() {
     const r = item._rate || item.profit_rate || 0;
     const pc = p >= 0 ? 'var(--success)' : 'var(--danger)';
     return `
-    <tr>
+    <tr draggable="true" class="quote-item-row" data-idx="${i}">
+      <td class="drag-handle" style="cursor:grab;color:var(--gray-400);font-size:1.1rem;padding:0.3rem 0.2rem;text-align:center;user-select:none" title="拖拽排序">⋮⋮</td>
       <td class="text-muted small">${i+1}</td>
       <td>
         <input class="form-control form-control-sm border-0 bg-transparent" value="${escHtml(item.product_name)}" onchange="quoteItems[${i}].product_name=this.value;updateQuoteTotal()" readonly>
@@ -1174,7 +1175,7 @@ async function saveQuote() {
   const valid_days = parseInt($('qf_valid')?.value) || 15;
   const remark = ($('qf_remark')?.value || '').trim();
   if (!quoteItems.length) { toast('请至少添加一个产品', 'warning'); return; }
-  const payload = {title, client, contact, phone, quote_date, valid_days, remark, items: quoteItems.map(item => ({product_id: item.product_id||null, product_name: item.product_name, product_sku: item.product_sku||'', product_spec: item.product_spec||'', product_unit: item.product_unit||'', quantity: item.quantity, unit_price: item.unit_price, remark: item.remark||''}))};
+  const payload = {title, client, contact, phone, quote_date, valid_days, remark, items: quoteItems.map((item, i) => ({product_id: item.product_id||null, product_name: item.product_name, product_sku: item.product_sku||'', product_spec: item.product_spec||'', product_unit: item.product_unit||'', quantity: item.quantity, unit_price: item.unit_price, sort_order: i, remark: item.remark||''}))};
   try {
     if (editingQuoteId) { await api(`/api/quotes/${editingQuoteId}`, 'PUT', payload); toast('报价单已更新'); }
     else {
@@ -1375,3 +1376,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (el && d.version) el.textContent = 'v' + d.version;
   }).catch(() => {});
 });
+
+// ─── 拖拽排序 (v1.3.8) ──────────────────────────
+let dragSrcIdx = null;
+document.addEventListener('dragstart', function(e) {
+  const row = e.target.closest('.quote-item-row');
+  if (!row) return;
+  dragSrcIdx = parseInt(row.dataset.idx);
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', dragSrcIdx);
+  row.style.opacity = '0.4';
+  // Prevent drag from inputs inside the row
+  if (e.target.tagName === 'INPUT') e.preventDefault();
+});
+document.addEventListener('dragend', function(e) {
+  const row = e.target.closest('.quote-item-row');
+  if (row) row.style.opacity = '';
+  // Clean up all drag-over styles
+  document.querySelectorAll('.quote-item-row').forEach(r => r.classList.remove('drag-over'));
+  dragSrcIdx = null;
+});
+document.addEventListener('dragover', function(e) {
+  const row = e.target.closest('.quote-item-row');
+  if (!row || dragSrcIdx === null) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  // Visual indicator
+  document.querySelectorAll('.quote-item-row').forEach(r => r.classList.remove('drag-over'));
+  row.classList.add('drag-over');
+});
+document.addEventListener('drop', function(e) {
+  const row = e.target.closest('.quote-item-row');
+  if (!row || dragSrcIdx === null) return;
+  e.preventDefault();
+  row.classList.remove('drag-over');
+  const dstIdx = parseInt(row.dataset.idx);
+  if (dragSrcIdx !== dstIdx) {
+    // Reorder the array
+    const [moved] = quoteItems.splice(dragSrcIdx, 1);
+    quoteItems.splice(dstIdx, 0, moved);
+    renderQuoteItems();
+  }
+  dragSrcIdx = null;
+});
+
+// Inject drag-over CSS
+(function() {
+  const style = document.createElement('style');
+  style.textContent = '.quote-item-row.drag-over { border-top: 2px solid var(--primary) !important; } .quote-item-row { transition: opacity .15s; } .drag-handle:hover { color: var(--primary) !important; }';
+  document.head.appendChild(style);
+})();

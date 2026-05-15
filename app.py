@@ -108,7 +108,7 @@ class Quote(db.Model):
     remark = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
-    items = db.relationship('QuoteItem', backref='quote', lazy='dynamic', cascade='all, delete-orphan')
+    items = db.relationship('QuoteItem', backref='quote', lazy='dynamic', cascade='all, delete-orphan', order_by='QuoteItem.sort_order')
 
     def to_dict(self, products_map=None, users_map=None):
         creator_name = None
