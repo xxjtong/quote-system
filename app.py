@@ -70,6 +70,7 @@ class Product(db.Model):
     function_desc = db.Column(db.Text, nullable=True)
     remark = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(500), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -87,6 +88,7 @@ class Product(db.Model):
             'function_desc': self.function_desc or '',
             'remark': self.remark or '',
             'image_url': self.image_url or '',
+            'is_active': self.is_active if self.is_active is not None else True,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
         }
@@ -576,6 +578,8 @@ def list_products():
         col = Product.id
 
     query = Product.query
+    if hasattr(g, 'current_user') and g.current_user and g.current_user.role != 'admin':
+        query = query.filter(Product.is_active == True)
     if category:
         query = query.filter(Product.category.ilike(f'%{category}%'))
     if supplier:
@@ -817,22 +821,16 @@ def ocr_image():
 
 @app.route('/api/products/recognize', methods=['POST'])
 def recognize_product():
-    """识别粘贴的文本，提取产品信息"""
+    """识别粘贴的文本，提取产品信息（每次只识别1个，空格/Tab分割）"""
     data = request.get_json()
     if not data or not data.get('text', '').strip():
         return jsonify({'error': '请粘贴要识别的内容'}), 400
 
     text = data['text'].strip()
-    lines = [l.strip() for l in text.split('\n') if l.strip()]
-
-    results = []
-    for line in lines:
-        product = parse_product_line(line)
-        if product:
-            results.append(product)
-
-    if results:
-        return jsonify({'products': results})
+    # 整段文本作为1个产品，用空格/Tab分割字段
+    product = parse_product_line(text)
+    if product:
+        return jsonify({'products': [product]})
     return jsonify({'products': [], 'error': '未能从内容中识别出产品信息，请检查粘贴格式'})
 
 
@@ -909,6 +907,17 @@ def parse_product_line(line):
         result['price'] = price_val
 
     return result if result.get('name') else None
+
+@app.route('/api/products/<int:product_id>/toggle-active', methods=['PUT'])
+@require_admin
+def toggle_product_active(product_id):
+    product = db.session.get(Product, product_id)
+    if not product:
+        return jsonify({'error': '产品不存在'}), 404
+    product.is_active = not product.is_active
+    product.updated_at = datetime.now()
+    db.session.commit()
+    return jsonify({'id': product.id, 'is_active': product.is_active})
 
 @app.route('/api/products/import', methods=['POST'])
 def import_products():
@@ -1442,7 +1451,151 @@ def export_quote_excel(quote_id):
         db.session.add(log)
         db.session.commit()
 
-    return send_file(filepath, download_name=dl_name, as_attachment=True)
+
+# ─── 邮件发送 (v1.4.0) ───
+@app.route('/api/quotes/<int:quote_id>/send-email', methods=['POST'])
+def send_quote_email(quote_id):
+    quote, err, status = check_quote_owner(quote_id)
+    if not quote:
+        return err, status
+    data = request.get_json() or {}
+    to_email = data.get('to_email', '').strip()
+    if not to_email:
+        return jsonify({'error': '请填写收件人邮箱'}), 400
+    subject = data.get('subject', '').strip()
+    body_text = data.get('body', '').strip()
+    smtp_host = get_setting('smtp_host', '')
+    if not smtp_host:
+        return jsonify({'error': 'SMTP未配置'}), 400
+    smtp_port = int(get_setting('smtp_port', '587'))
+    smtp_user = get_setting('smtp_user', '')
+    smtp_password = get_setting('smtp_password', '')
+    smtp_from = get_setting('smtp_from', smtp_user)
+    smtp_use_tls = get_setting('smtp_use_tls', 'true').lower() == 'true'
+
+    # 生成附件
+    filepath = EXPORT_DIR / f'报价单_{quote_id}.xlsx'
+    pmap = preload_products_for_quote(quote)
+    _build_excel(quote, pmap, str(filepath))
+
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
+    msg = MIMEMultipart()
+    msg['From'] = smtp_from
+    msg['To'] = to_email
+    msg['Subject'] = subject or f'{quote.title or quote.client or ""}'
+    msg.attach(MIMEText(body_text or f'{quote.title or ""}\n{quote.client or ""}\n{quote.quote_date or ""}', 'plain', 'utf-8'))
+    with open(filepath, 'rb') as f:
+        part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        part.set_payload(f.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', 'attachment', filename=f'{quote.client or ""}_{quote.title or ""}.xlsx')
+        msg.attach(part)
+    try:
+        if smtp_use_tls:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15)
+        server.login(smtp_user, smtp_password)
+        server.send_message(msg)
+        server.quit()
+        return jsonify({'success': True, 'message': f'{to_email}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def _build_excel(quote, pmap, filepath):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = quote.title or ''
+    YELLOW_FILL = PatternFill(start_color='FFFFFF00', end_color='FFFFFF00', fill_type='solid')
+    title_font = Font(name='微软雅黑', size=10, bold=True)
+    header_font = Font(name='微软雅黑', size=10, bold=True)
+    data_font = Font(name='微软雅黑', size=11, bold=True)
+    total_font = Font(name='微软雅黑', size=10, bold=True)
+    note_font = Font(name='微软雅黑', size=10, bold=False)
+    thin = Side(style='thin')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    ca = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    money_fmt = '#,##0.00'
+    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16]
+    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注']
+    COL_COUNT = len(headers)
+    for ci, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
+    t = ws.cell(row=1, column=1, value=quote.title or '')
+    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
+    for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=1, column=ci).border = thin_border
+    ws.row_dimensions[1].height = 18
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
+    company = get_setting('company_name', '').strip()
+    parts = [f'公司：{company}'] if company else []
+    if quote.client: parts.append(f'客户：{quote.client}')
+    if quote.contact: parts.append(f'联系人：{quote.contact}')
+    if quote.phone: parts.append(f'电话：{quote.phone}')
+    if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
+    info = '  |  '.join(parts) if parts else ''
+    c1 = ws.cell(row=2, column=1, value=info)
+    c1.font = Font(name='微软雅黑', size=9, color='666666'); c1.alignment = Alignment(horizontal='left', vertical='center')
+    for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=2, column=ci).border = thin_border
+    ws.row_dimensions[2].height = 17
+    HEAD = 3
+    ws.row_dimensions[HEAD].height = 17
+    for ci, h in enumerate(headers, 1):
+        cell = ws.cell(row=HEAD, column=ci, value=h)
+        cell.font = header_font; cell.alignment = ca; cell.border = thin_border
+    row = HEAD
+    for i, item in enumerate(quote.items, 1):
+        row += 1
+        ws.row_dimensions[row].height = 54
+        qty = item.quantity if item.quantity else 1
+        up = item.unit_price if item.unit_price else 0
+        subtotal = round(qty * up, 2)
+        product_function_desc = ''
+        if item.product_id:
+            product = pmap.get(item.product_id)
+            if product: product_function_desc = product.function_desc or ''
+        vals = [i, item.product_name, item.product_spec or '', item.product_spec or item.product_sku or '', product_function_desc, up, qty, subtotal, 0, subtotal, '']
+        for ci, val in enumerate(vals, 1):
+            cell = ws.cell(row=row, column=ci, value=val)
+            cell.font = data_font; cell.alignment = ca; cell.border = thin_border
+    row += 1
+    ws.row_dimensions[row].height = 22
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    total_amt = quote.total_amount or 0
+    tlabel = ws.cell(row=row, column=1, value=f'合计（大写）：{number_to_cn(total_amt)}')
+    tlabel.font = total_font; tlabel.alignment = Alignment(horizontal='right', vertical='center'); tlabel.border = thin_border
+    for ci in range(2, 9):
+        c = ws.cell(row=row, column=ci); c.font = total_font; c.border = thin_border
+    tc = ws.cell(row=row, column=10, value=total_amt)
+    tc.font = total_font; tc.number_format = money_fmt; tc.alignment = ca; tc.border = thin_border
+    ws.cell(row=row, column=9).font = total_font; ws.cell(row=row, column=9).border = thin_border
+    ws.cell(row=row, column=11).border = thin_border; ws.cell(row=row, column=11).font = total_font
+    row += 1
+    ws.row_dimensions[row].height = 18
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+    nc = ws.cell(row=row, column=1, value=quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。')
+    nc.font = note_font; nc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=row, column=ci).border = thin_border
+    footer = get_setting('footer_text', '').strip()
+    if footer:
+        row += 1
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+        fc = ws.cell(row=row, column=1, value=footer)
+        fc.font = Font(name='微软雅黑', size=9, color='888888')
+        fc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        ws.row_dimensions[row].height = 30
+        for ci in range(1, COL_COUNT + 1):
+            ws.cell(row=row, column=ci).border = Border()
+    wb.save(filepath)
 
 
 # ─── 下载日志 API ───

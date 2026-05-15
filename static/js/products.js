@@ -26,11 +26,13 @@ function renderProductsHTML(d) {
   productIndex = {};
   products.forEach(p => productIndex[p.id] = p);
 
-  const rows = products.map(p => `
-    <tr class="${selectedIds.has(p.id) ? 'table-primary' : ''}">
+  const rows = products.map(p => {
+    const isOff = p.is_active === false;
+    return `
+    <tr class="${selectedIds.has(p.id) ? 'table-primary' : ''}${isOff ? ' opacity-50' : ''}">
       <td><input type="checkbox" class="form-check-input product-check" value="${p.id}" ${selectedIds.has(p.id) ? 'checked' : ''} onchange="toggleSelect(${p.id})"></td>
       <td class="tip-cell">
-        <strong style="font-size:.85rem;cursor:pointer" onclick="viewProductDetail(${p.id})">${escHtml(p.name)}</strong>
+        <strong style="font-size:.85rem;cursor:pointer" onclick="viewProductDetail(${p.id})">${escHtml(p.name)}</strong>${isOff ? ' <span class="badge" style="background:#fee2e2;color:#dc2626;font-size:.65rem">已下线</span>' : ''}
         <div class="tip-pop">${escHtml(p.name)}${p.spec ? '\n规格: ' + p.spec : ''}${p.supplier ? '\n厂商: ' + p.supplier : ''}${p.category ? '\n分类: ' + p.category : ''}${p.price ? '\n单价: ¥' + p.price : ''}${p.function_desc ? '\n功能: ' + p.function_desc : ''}</div>
         ${p.spec ? `<br><span class="text-muted" style="font-size:.75rem">${escHtml(p.spec)}</span>` : ''}
       </td>
@@ -48,9 +50,11 @@ function renderProductsHTML(d) {
       <td style="white-space:nowrap">
         <button class="btn btn-sm btn-modern btn-outline-secondary" onclick="editProduct(${p.id})" title="编辑"><i class="bi bi-pencil"></i></button>
         <button class="btn btn-sm btn-modern btn-outline-danger" onclick="deleteProduct(${p.id})" title="删除"><i class="bi bi-trash"></i></button>
+        ${isAdmin() ? `<button class="btn btn-sm btn-modern ${isOff ? 'btn-outline-success' : 'btn-outline-warning'}" onclick="toggleProductActive(${p.id})" title="${isOff ? '上线' : '下线'}"><i class="bi ${isOff ? 'bi-eye' : 'bi-eye-slash'}"></i></button>` : ''}
       </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   // Pagination
   function paginationHTML() {
@@ -315,7 +319,7 @@ function formBodyHtml(p, catOpts) {
           </div>
         </div>
         <div class="text-muted mt-1" style="font-size:.72rem">
-          <i class="bi bi-info-circle"></i> 格式：<strong>产品名称</strong> ｜ 规格型号 ｜ 厂商 ｜ 功能描述 ｜ 售价（Tab/空格/换行分隔，每行一个产品）
+          <i class="bi bi-info-circle"></i> 格式：<strong>产品名称</strong> ｜ 规格型号 ｜ 厂商 ｜ 功能描述 ｜ 售价（Tab/多个空格分隔，每次识别一个产品）
         </div>
         <div id="pf_recognize_results" class="mt-2"></div>
       </div>
@@ -495,15 +499,10 @@ async function recognizePastedText() {
     const res = await api('/api/products/recognize', 'POST', {text});
     recognizedResults = res.products || [];
     if (!recognizedResults.length) { rd.innerHTML = `<div class="alert alert-warning py-2 mb-0 small">${res.error || '未能识别出产品信息'}</div>`; return; }
-    rd.innerHTML = `<div class="p-2 rounded" style="background:var(--gray-50);border:1px solid var(--gray-200)">` +
-      `<div class="small fw-medium mb-1 text-success"><i class="bi bi-check-circle"></i> 识别到 ${recognizedResults.length} 个产品，点击填入</div>` +
-      recognizedResults.map((p, i) =>
-        `<div class="d-flex align-items-center justify-content-between py-1" style="cursor:pointer;border-bottom:1px solid var(--gray-100)" onclick="fillProductFromResult(${i})">
-          <span><strong style="font-size:.83rem">${escHtml(p.name)}</strong>${p.spec ? ` <code class="small">${escHtml(p.spec)}</code>` : ''}</span>
-          <span class="text-primary small">${p.price ? '¥' + p.price : ''} <i class="bi bi-arrow-right"></i></span>
-        </div>`
-      ).join('') + `</div>`;
-    toast(`识别到 ${recognizedResults.length} 个产品`);
+    // 自动填入第一个（也是唯一一个）识别结果
+    fillProductFromResult(0);
+    rd.innerHTML = `<div class="p-2 rounded" style="background:#dcfce7;border:1px solid #bbf7d0"><div class="small fw-medium text-success"><i class="bi bi-check-circle\"></i> 已识别并填入：<strong>${escHtml(recognizedResults[0].name)}</strong>${recognizedResults[0].price ? ' ¥' + recognizedResults[0].price : ''}</div></div>`;
+    toast('已自动填入识别结果');
   } catch(e) { rd.innerHTML = `<div class="alert alert-danger py-2 mb-0 small">识别失败: ${e.message}</div>`; }
 }
 
@@ -661,6 +660,7 @@ async function renderQuotes(el) {
               <td style="white-space:nowrap">
                 <button class="btn btn-sm btn-modern btn-outline-primary" onclick="viewQuote(${q.id})" title="查看"><i class="bi bi-eye"></i></button>
                 <button class="btn btn-sm btn-modern btn-outline-info" onclick="previewQuote(${q.id})" title="预览输出格式"><i class="bi bi-file-earmark-pdf"></i></button>
+                <button class="btn btn-sm btn-modern btn-outline-success" onclick="emailQuote(${q.id})" title="发送邮件"><i class="bi bi-envelope"></i></button>
                 <button class="btn btn-sm btn-modern btn-outline-danger" onclick="deleteQuote(${q.id})" title="删除"><i class="bi bi-trash"></i></button>
               </td>
             </tr>
@@ -764,6 +764,17 @@ async function deleteQuote(id) {
 
 async function exportQuote(id) { downloadQuote(id); }
 
+async function emailQuote(id) {
+  const email = prompt('收件人邮箱：');
+  if (!email || !email.includes('@')) { toast('请输入有效邮箱', 'warning'); return; }
+  const subject = prompt('邮件主题（可选）：', '报价单');
+  try {
+    const r = await api('/api/quotes/' + id + '/send-email', 'POST', {to_email: email.trim(), subject: (subject||'').trim(), body: ''});
+    if (r.success) toast(r.message, 'success');
+    else toast(r.error || '发送失败', 'warning');
+  } catch(e) { toast('发送失败: ' + e.message, 'warning'); }
+}
+
 async function downloadQuote(id) {
   try {
     const d = new Date();
@@ -794,7 +805,7 @@ async function downloadQuote(id) {
 }
 
 async function previewQuote(id) {
-  showFormModal('报价单预览', `<iframe src="${BASE_URL}/api/quotes/${id}/preview" style="width:100%;height:75vh;border:none;border-radius:8px"></iframe>`, '', null, '关闭', true);
+  showFormModal('报价单预览', `<div id="previewFrame" class="text-center py-5"><div class="spinner-border text-primary" role="status"></div><p class="text-muted small mt-2">加载预览...</p></div>`, '', null, '关闭', true);
   // 注入下载按钮
   const footer = $('formModalFooter');
   if (footer) {
@@ -803,6 +814,18 @@ async function previewQuote(id) {
     btn.innerHTML = '<i class="bi bi-download me-1"></i>下载Excel';
     btn.onclick = () => downloadQuote(id);
     footer.insertBefore(btn, footer.firstChild);
+  }
+  // 通过 api() 带 token 获取预览 HTML，再注入 iframe
+  try {
+    const resp = await fetch(BASE_URL + '/api/quotes/' + id + '/preview', { headers: {'Authorization': 'Bearer ' + authToken} });
+    const html = await resp.text();
+    const blob = new Blob([html], {type: 'text/html'});
+    const url = URL.createObjectURL(blob);
+    const frame = $('previewFrame');
+    if (frame) frame.innerHTML = `<iframe src="${url}" style="width:100%;height:75vh;border:none;border-radius:8px"></iframe>`;
+  } catch(e) {
+    const frame = $('previewFrame');
+    if (frame) frame.innerHTML = '<div class="text-danger py-4">加载预览失败: ' + escHtml(e.message) + '</div>';
   }
 }
 
@@ -1324,6 +1347,17 @@ async function renderAdmin(el) {
           </div>
           <button class="btn btn-sm btn-modern btn-primary" onclick="saveSystemSettings()"><i class="bi bi-check me-1"></i>保存设置</button>
         </div>
+        <div class="card-modern mt-3"><div class="card-title-modern"><i class="bi bi-envelope me-2"></i>邮件SMTP设置</div>
+          <div class="row g-2">
+            <div class="col-6"><label class="form-label small">SMTP服务器</label><input class="form-control form-control-sm" id="setSmtpHost" value="${escHtml(settings.smtp_host||'')}" placeholder="smtp.qq.com"></div>
+            <div class="col-3"><label class="form-label small">端口</label><input class="form-control form-control-sm" id="setSmtpPort" value="${escHtml(settings.smtp_port||'587')}" placeholder="587"></div>
+            <div class="col-3"><label class="form-label small">TLS</label><select class="form-select form-select-sm" id="setSmtpTls"><option value="true" ${settings.smtp_use_tls!=='false'?'selected':''}>是</option><option value="false" ${settings.smtp_use_tls==='false'?'selected':''}>否</option></select></div>
+            <div class="col-6"><label class="form-label small">发件邮箱</label><input class="form-control form-control-sm" id="setSmtpUser" value="${escHtml(settings.smtp_user||'')}" placeholder="xxx@qq.com"></div>
+            <div class="col-6"><label class="form-label small">授权码/密码</label><input class="form-control form-control-sm" type="password" id="setSmtpPass" value="${escHtml(settings.smtp_password||'')}" placeholder="SMTP授权码"></div>
+            <div class="col-6"><label class="form-label small">发件人显示名</label><input class="form-control form-control-sm" id="setSmtpFrom" value="${escHtml(settings.smtp_from||'')}" placeholder="XX公司 <xxx@qq.com>"></div>
+          </div>
+          <button class="btn btn-sm btn-modern btn-primary mt-2" onclick="saveSmtpSettings()"><i class="bi bi-check me-1"></i>保存SMTP</button>
+        </div>
       </div>
     </div>
     <div class="row g-4 mt-2">
@@ -1368,6 +1402,11 @@ async function changeUserPassword(id, username) {
   else toast(result.error || '修改失败', 'warning');
 }
 
+
+async function toggleProductActive(id) {
+  const r = await api(`/api/products/${id}/toggle-active`, 'PUT');
+  if (r.id) { clearCaches(); renderProducts($('mainContent')); toast(r.is_active ? '产品已上线' : '产品已下线'); }
+}
 async function updateFieldVisibility(field, visible) {
   await api('/api/admin/fields', 'PUT', {fields: [{field_name: field, user_visible: visible}]});
 }
@@ -1375,6 +1414,19 @@ async function updateFieldVisibility(field, visible) {
 async function toggleRegistration(open) {
   await api('/api/admin/registration', 'PUT', {registration_open: open});
   registrationOpen = open;
+}
+
+async function saveSmtpSettings() {
+  const data = {
+    smtp_host: ($('setSmtpHost')?.value||'').trim(),
+    smtp_port: ($('setSmtpPort')?.value||'').trim(),
+    smtp_user: ($('setSmtpUser')?.value||'').trim(),
+    smtp_password: ($('setSmtpPass')?.value||'').trim(),
+    smtp_from: ($('setSmtpFrom')?.value||'').trim(),
+    smtp_use_tls: $('setSmtpTls')?.value||'true'
+  };
+  await api('/api/admin/settings', 'PUT', data);
+  toast('SMTP设置已保存', 'success');
 }
 
 async function saveSystemSettings() {
