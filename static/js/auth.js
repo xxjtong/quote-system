@@ -32,6 +32,9 @@ function updateUserUI() {
 }
 
 function showLoginPage() {
+  // 隐藏侧边栏，主区域居中显示登录
+  $('sidebar').style.display = 'none';
+  $('mainWrapper').style.marginLeft = '0';
   const regHtml = registrationOpen ? '<p class="mt-3 text-muted">没有账号？<a style="cursor:pointer;color:var(--primary)" onclick="showRegisterPage()">注册新账号</a></p>' : '';
   $('mainContent').innerHTML = `
     <div class="d-flex justify-content-center align-items-center" style="min-height:70vh">
@@ -57,6 +60,8 @@ async function doLogin() {
       setToken(d.token);
       currentUser = d.user;
       updateUserUI();
+      $('sidebar').style.display = '';
+      $('mainWrapper').style.marginLeft = '';
       renderPage();
     } else {
       $('loginError').textContent = d.error || '登录失败';
@@ -91,6 +96,8 @@ async function doRegister() {
       setToken(d.token);
       currentUser = d.user;
       updateUserUI();
+      $('sidebar').style.display = '';
+      $('mainWrapper').style.marginLeft = '';
       renderPage();
     } else {
       $('regError').textContent = d.error || '注册失败';

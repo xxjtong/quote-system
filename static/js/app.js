@@ -85,6 +85,7 @@ function switchTab(tab) {
 }
 
 function renderPage() {
+  if (!isLoggedIn()) { showLoginPage(); return; }
   const el = $('mainContent');
   if (currentTab === 'dashboard') renderDashboard(el);
   else if (currentTab === 'products') renderProducts(el);
