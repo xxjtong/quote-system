@@ -9,7 +9,7 @@
 | 层 | 技术 | 说明 |
 |---|------|------|
 | Web 服务器 | nginx | 反向代理，`/quote/` → `127.0.0.1:5000/`，处理 TLS |
-| 应用服务器 | Gunicorn | 1 worker (`--preload`)，绑定 `127.0.0.1:5000` |
+| 应用服务器 | Gunicorn | 2 worker (`--preload`)，绑定 `127.0.0.1:5000` |
 | 后端框架 | Flask + SQLAlchemy | REST JSON API |
 | 数据库 | SQLite | 单文件 `/opt/quote-system/quote.db` |
 | 前端 | 原生 JS SPA | Bootstrap 5 + 少量自定义 CSS，单页应用，所有 HTML 由 JS 模板字符串动态生成 |
