@@ -923,11 +923,11 @@ function renderQuoteItems() {
   const taxRate = parseFloat($('qf_tax_rate')?.value) || 0;
   const profitData = quoteItems.map(item => {
     let profit = 0, rate = 0;
-    // Determine pre-tax unit price
     let pretaxPrice = item.unit_price || 0;
     if (taxRate > 0) {
       pretaxPrice = Math.round((item.unit_price || 0) / (1 + taxRate / 100) * 100) / 100;
     }
+    // Try real-time calc from productsCache first
     if (item.product_id && productsCache?.products) {
       const p = productsCache.products.find(p => p.id === item.product_id);
       if (p && p.cost_price) {
@@ -935,6 +935,11 @@ function renderQuoteItems() {
         profit = Math.round(perUnitProfit * (item.quantity || 1) * 100) / 100;
         rate = pretaxPrice > 0 ? Math.round(perUnitProfit / pretaxPrice * 1000) / 10 : 0;
       }
+    }
+    // Fallback: use backend-stored profit (multiply by quantity for display)
+    if (profit === 0 && rate === 0 && item.profit !== undefined) {
+      profit = Math.round((item.profit || 0) * (item.quantity || 1) * 100) / 100;
+      rate = item.profit_rate || 0;
     }
     return {...item, _profit: profit, _rate: rate};
   });
@@ -982,6 +987,9 @@ function updateQuoteTotal() {
         if (taxRate > 0) pretaxPrice = (item.unit_price || 0) / (1 + taxRate / 100);
         tProfit += (pretaxPrice - p.cost_price) * (item.quantity || 1);
       }
+    } else if (item.profit !== undefined) {
+      // Fallback: use backend-stored per-unit profit × quantity
+      tProfit += (item.profit || 0) * (item.quantity || 1);
     }
   });
   // Update total profit (green/red like per-row profit)
