@@ -984,30 +984,27 @@ function updateQuoteTotal() {
       }
     }
   });
-  // Update total profit
+  // Update total profit (green/red like per-row profit)
   const tp = $('quoteTotalProfit');
   if (tp) {
-    const tCost = quoteItems.reduce((s, item) => {
-      if (item.product_id && productsCache?.products) {
-        const p = productsCache.products.find(p_ => p_.id === item.product_id);
-        if (p && p.cost_price) return s + p.cost_price * (item.quantity || 1);
-      }
-      return s;
-    }, 0);
-    const tCostRounded = Math.round(tCost * 100) / 100;
     const tProfitRounded = Math.round(tProfit * 100) / 100;
-    if (tCostRounded > 0 || tProfitRounded !== 0) {
-      tp.innerHTML = (tCostRounded > 0 ? `<span class="text-muted">成本</span> ${formatMoney(tCostRounded)} ` : '') +
-        (tProfitRounded !== 0 ? `<span style="color:${tProfitRounded >= 0 ? 'var(--success)' : 'var(--danger)'}">毛利 ${formatMoney(tProfitRounded)}</span>` : '');
+    if (tProfitRounded !== 0) {
+      const profitColor = tProfitRounded >= 0 ? 'var(--success)' : 'var(--danger)';
+      tp.innerHTML = `<span style="color:${profitColor}">${formatMoney(tProfitRounded)}</span>`;
     } else {
       tp.textContent = '';
     }
   }
-  // Update total profit rate
+  // Update total profit rate (green/red like per-row rate)
   const tr = $('quoteTotalRate');
   if (tr) {
     const tRate = total > 0 ? Math.round(tProfit / total * 1000) / 10 : 0;
-    tr.textContent = tRate !== 0 ? tRate + '%' : '';
+    if (tRate !== 0) {
+      const rateColor = tRate >= 0 ? 'var(--success)' : 'var(--danger)';
+      tr.innerHTML = `<span style="color:${rateColor}">${tRate}%</span>`;
+    } else {
+      tr.textContent = '';
+    }
   }
   // Update tax amount display
   const tx = $('quoteTax');
