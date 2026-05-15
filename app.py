@@ -110,11 +110,14 @@ class Quote(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     items = db.relationship('QuoteItem', backref='quote', lazy='dynamic', cascade='all, delete-orphan')
 
-    def to_dict(self, products_map=None):
+    def to_dict(self, products_map=None, users_map=None):
         creator_name = None
         if self.created_by:
-            creator = db.session.get(User, self.created_by)
-            creator_name = creator.username if creator else None
+            if users_map is not None:
+                creator_name = users_map.get(self.created_by)
+            else:
+                creator = db.session.get(User, self.created_by)
+                creator_name = creator.username if creator else None
         return {
             'id': self.id,
             'title': self.title or '',
@@ -1051,7 +1054,13 @@ def list_quotes():
     if status_filter:
         query = query.filter(Quote.status == status_filter)
     quotes = query.all()
-    return jsonify({'quotes': [q.to_dict() for q in quotes]})
+    # 预加载所有创建者用户名，避免 N+1 查询
+    creator_ids = list(set(q.created_by for q in quotes if q.created_by))
+    users_map = {}
+    if creator_ids:
+        users = User.query.filter(User.id.in_(creator_ids)).all()
+        users_map = {u.id: u.username for u in users}
+    return jsonify({'quotes': [q.to_dict(users_map=users_map) for q in quotes]})
 
 
 @app.route('/api/quotes/stats', methods=['GET'])
