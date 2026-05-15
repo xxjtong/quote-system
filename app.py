@@ -8,13 +8,18 @@ import os
 import json
 import io
 import random
-from datetime import datetime
+import hashlib
+import hmac
+import secrets
+from datetime import datetime, timedelta
+from functools import wraps
 from pathlib import Path
 
-from flask import Flask, request, jsonify, send_file, send_from_directory, render_template
+from flask import Flask, request, jsonify, send_file, send_from_directory, render_template, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import func
+import jwt
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.drawing.image import Image as XLImage
@@ -32,8 +37,22 @@ EXPORT_DIR.mkdir(exist_ok=True)
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{BASE_DIR}/quote.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
+app.config['JWT_SECRET'] = os.environ.get('QUOTE_JWT_SECRET', secrets.token_hex(32))
+app.config['JWT_EXPIRY_HOURS'] = 72
+app.config['DEFAULT_ADMIN_PASSWORD'] = os.environ.get('QUOTE_ADMIN_PASSWORD', 'admin123')
+app.config['REGISTRATION_OPEN'] = os.environ.get('QUOTE_REGISTRATION', 'true').lower() == 'true'
 
 db = SQLAlchemy(app)
+
+# ─── Helpers ─────────────────────────────────────────────────────
+
+def preload_products_for_quote(quote):
+    """批量加载报价单所有明细关联的产品，返回 {product_id: Product}"""
+    pids = [item.product_id for item in quote.items if item.product_id]
+    if not pids:
+        return {}
+    products = Product.query.filter(Product.id.in_(pids)).all()
+    return {p.id: p for p in products}
 
 # ─── Models ───────────────────────────────────────────────────
 
@@ -85,12 +104,17 @@ class Quote(db.Model):
     status = db.Column(db.String(20), default='draft')
     total_amount = db.Column(db.Float, default=0)
     download_count = db.Column(db.Integer, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     remark = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     items = db.relationship('QuoteItem', backref='quote', lazy='dynamic', cascade='all, delete-orphan')
 
-    def to_dict(self):
+    def to_dict(self, products_map=None):
+        creator_name = None
+        if self.created_by:
+            creator = db.session.get(User, self.created_by)
+            creator_name = creator.username if creator else None
         return {
             'id': self.id,
             'title': self.title or '',
@@ -102,10 +126,12 @@ class Quote(db.Model):
             'status': self.status,
             'total_amount': self.total_amount or 0,
             'download_count': self.download_count or 0,
+            'created_by': self.created_by,
+            'created_by_name': creator_name,
             'remark': self.remark or '',
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
-            'items': [item.to_dict() for item in self.items],
+            'items': [item.to_dict(products_map) for item in self.items],
         }
 
 
@@ -124,7 +150,15 @@ class QuoteItem(db.Model):
     remark = db.Column(db.String(500), nullable=True)
     sort_order = db.Column(db.Integer, default=0)
 
-    def to_dict(self):
+    def to_dict(self, products_map=None):
+        # 利润计算
+        profit = 0
+        profit_rate = 0
+        if self.product_id:
+            product = products_map.get(self.product_id) if products_map else db.session.get(Product, self.product_id)
+            if product and product.cost_price:
+                profit = round((self.unit_price or 0) - (product.cost_price or 0), 2)
+                profit_rate = round(profit / (self.unit_price or 1) * 100, 1) if self.unit_price else 0
         return {
             'id': self.id,
             'quote_id': self.quote_id,
@@ -138,33 +172,355 @@ class QuoteItem(db.Model):
             'amount': self.amount,
             'remark': self.remark or '',
             'sort_order': self.sort_order,
+            'profit': profit,
+            'profit_rate': profit_rate,
         }
+
+
+class DownloadLog(db.Model):
+    __tablename__ = 'download_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    quote_id = db.Column(db.Integer, db.ForeignKey('quotes.id', ondelete='CASCADE'), nullable=False)
+    user_name = db.Column(db.String(100), nullable=False)
+    downloaded_at = db.Column(db.DateTime, default=datetime.now)
+    quote = db.relationship('Quote', backref='download_logs')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'quote_id': self.quote_id,
+            'user_name': self.user_name,
+            'downloaded_at': self.downloaded_at.strftime('%Y-%m-%d %H:%M') if self.downloaded_at else '',
+            'quote_title': self.quote.title if self.quote else '',
+            'quote_client': self.quote.client if self.quote else '',
+        }
+
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(128), nullable=False)
+    role = db.Column(db.String(10), default='user')  # 'admin' or 'user'
+    is_active = db.Column(db.Boolean, default=True)
+    email = db.Column(db.String(200), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'username': self.username,
+            'role': self.role, 'is_active': self.is_active,
+            'email': self.email or '',
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+        }
+
+
+class FieldSetting(db.Model):
+    __tablename__ = 'field_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    field_name = db.Column(db.String(50), unique=True, nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+    user_visible = db.Column(db.Boolean, default=True)
+
+
+# ─── JWT & Auth Helpers ──────────────────────────────────────
+
+def hash_password(password):
+    salt = secrets.token_hex(16)
+    h = hashlib.sha256((salt + password).encode()).hexdigest()
+    return f'{salt}${h}'
+
+def verify_password(password, password_hash):
+    try:
+        salt, h = password_hash.split('$', 1)
+        return hashlib.sha256((salt + password).encode()).hexdigest() == h
+    except:
+        return False
+
+def create_token(user):
+    payload = {
+        'user_id': user.id, 'username': user.username, 'role': user.role,
+        'exp': datetime.utcnow() + timedelta(hours=app.config['JWT_EXPIRY_HOURS']),
+    }
+    return jwt.encode(payload, app.config['JWT_SECRET'], algorithm='HS256')
+
+def get_current_user():
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not token:
+        return None
+    try:
+        data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
+        user = db.session.get(User, data['user_id'])
+        if user and user.is_active:
+            return user
+    except:
+        pass
+    return None
+
+def require_auth(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return jsonify({'error': '请先登录'}), 401
+        g.current_user = user
+        return fn(*args, **kwargs)
+    return wrapper
+
+def require_admin(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return jsonify({'error': '请先登录'}), 401
+        if user.role != 'admin':
+            return jsonify({'error': '需要管理员权限'}), 403
+        g.current_user = user
+        return fn(*args, **kwargs)
+    return wrapper
+
+def check_quote_owner(quote_id):
+    """非管理员只能操作自己的报价单。返回 (quote_or_error, status_code)."""
+    quote = db.session.get(Quote, quote_id)
+    if not quote:
+        return None, jsonify({'error': '报价单不存在'}), 404
+    if g.current_user.role != 'admin' and quote.created_by != g.current_user.id:
+        return None, jsonify({'error': '无权操作此报价单'}), 403
+    return quote, None, None
+
+
+# ─── Auth API ────────────────────────────────────────────────
+
+@app.route('/api/auth/register', methods=['POST'])
+def auth_register():
+    if not app.config['REGISTRATION_OPEN']:
+        return jsonify({'error': '暂不开放自主注册'}), 403
+    data = request.get_json()
+    if not data or not data.get('username', '').strip() or not data.get('password', '').strip():
+        return jsonify({'error': '用户名和密码不能为空'}), 400
+    username = data['username'].strip()
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': '用户名已存在'}), 409
+    user = User(
+        username=username,
+        password_hash=hash_password(data['password'].strip()),
+        role='user', is_active=True,
+        email=data.get('email', '').strip(),
+    )
+    db.session.add(user)
+    db.session.commit()
+    token = create_token(user)
+    return jsonify({'token': token, 'user': user.to_dict()}), 201
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    data = request.get_json()
+    if not data or not data.get('username', '').strip() or not data.get('password', '').strip():
+        return jsonify({'error': '用户名和密码不能为空'}), 400
+    user = User.query.filter_by(username=data['username'].strip()).first()
+    if not user or not verify_password(data['password'].strip(), user.password_hash):
+        return jsonify({'error': '用户名或密码错误'}), 401
+    if not user.is_active:
+        return jsonify({'error': '账号已被停用'}), 403
+    token = create_token(user)
+    return jsonify({'token': token, 'user': user.to_dict()})
+
+
+@app.route('/api/auth/me', methods=['GET'])
+@require_auth
+def auth_me():
+    return jsonify({'user': g.current_user.to_dict()})
+
+@app.route('/api/auth/profile', methods=['PUT'])
+@require_auth
+def update_profile():
+    """修改当前用户邮箱和密码"""
+    data = request.get_json()
+    user = g.current_user
+    changed = False
+
+    # 改邮箱
+    if 'email' in data:
+        user.email = (data['email'] or '').strip()
+        changed = True
+
+    # 改密码
+    new_pw = (data.get('new_password') or '').strip()
+    if new_pw:
+        current_pw = (data.get('current_password') or '').strip()
+        if not verify_password(current_pw, user.password_hash):
+            return jsonify({'error': '当前密码错误'}), 400
+        if len(new_pw) < 3:
+            return jsonify({'error': '新密码至少3位'}), 400
+        user.password_hash = hash_password(new_pw)
+        changed = True
+
+    if changed:
+        db.session.commit()
+        return jsonify({'user': user.to_dict(), 'message': '个人信息已更新'})
+    return jsonify({'error': '没有需要修改的内容'}), 400
+
+
+# ─── Admin API ───────────────────────────────────────────────
+
+@app.route('/api/admin/registration', methods=['GET'])
+@require_admin
+def get_registration():
+    return jsonify({'registration_open': app.config['REGISTRATION_OPEN']})
+
+@app.route('/api/admin/registration', methods=['PUT'])
+@require_admin
+def set_registration():
+    data = request.get_json()
+    if 'registration_open' in data:
+        app.config['REGISTRATION_OPEN'] = bool(data['registration_open'])
+    return jsonify({'registration_open': app.config['REGISTRATION_OPEN']})
+
+@app.route('/api/admin/fields', methods=['GET'])
+@require_admin
+def get_field_settings():
+    fields = FieldSetting.query.all()
+    if not fields:
+        # 初始化默认字段
+        defaults = [
+            ('cost_price', '成本价', True),
+            ('remark', '内部备注', True),
+            ('supplier', '供应商', True),
+            ('function_desc', '功能描述', True),
+        ]
+        for fname, label, visible in defaults:
+            if not FieldSetting.query.filter_by(field_name=fname).first():
+                db.session.add(FieldSetting(field_name=fname, label=label, user_visible=visible))
+        db.session.commit()
+        fields = FieldSetting.query.all()
+    return jsonify({'fields': [{'field_name': f.field_name, 'label': f.label, 'user_visible': f.user_visible} for f in fields]})
+
+@app.route('/api/admin/fields', methods=['PUT'])
+@require_admin
+def set_field_settings():
+    data = request.get_json()
+    if 'fields' in data:
+        for item in data['fields']:
+            f = FieldSetting.query.filter_by(field_name=item['field_name']).first()
+            if f:
+                f.user_visible = bool(item.get('user_visible', True))
+        db.session.commit()
+    return get_field_settings()
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_admin
+def list_users():
+    users = User.query.order_by(User.created_at.desc()).all()
+    return jsonify({'users': [u.to_dict() for u in users]})
+
+@app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
+@require_admin
+def update_user(user_id):
+    if user_id == g.current_user.id:
+        return jsonify({'error': '不能修改自己的状态'}), 400
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+    data = request.get_json()
+    if 'is_active' in data:
+        user.is_active = bool(data['is_active'])
+    if 'role' in data and data['role'] in ('admin', 'user'):
+        user.role = data['role']
+    db.session.commit()
+    return jsonify({'user': user.to_dict()})
+
+@app.route('/api/admin/users/<int:user_id>/password', methods=['PUT'])
+@require_admin
+def reset_user_password(user_id):
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+    data = request.get_json()
+    new_pw = (data.get('password') or '').strip()
+    if len(new_pw) < 3:
+        return jsonify({'error': '密码至少3位'}), 400
+    user.password_hash = hash_password(new_pw)
+    db.session.commit()
+    return jsonify({'success': True, 'username': user.username})
 
 
 # ─── API Routes ──────────────────────────────────────────────
 
+# 公开路由（无需登录）
+PUBLIC_ROUTES = {'auth_login', 'auth_register', 'get_version', 'index', 'serve_upload'}
+
+@app.before_request
+def check_auth():
+    if not request.path.startswith('/api/'):
+        return None
+    # 提取路由名
+    endpoint = request.endpoint
+    if endpoint in PUBLIC_ROUTES or (endpoint and endpoint.startswith('static')):
+        return None
+    # 鉴权
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not token:
+        return jsonify({'error': '请先登录'}), 401
+    try:
+        data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
+        user = db.session.get(User, data['user_id'])
+        if not user or not user.is_active:
+            return jsonify({'error': '账号无效或已停用'}), 403
+        g.current_user = user
+    except jwt.ExpiredSignatureError:
+        return jsonify({'error': '登录已过期，请重新登录'}), 401
+    except:
+        return jsonify({'error': '认证失败'}), 401
+
+# 字段可见性缓存
+_field_cache = None
+_field_cache_time = None
+
+def get_field_visibility():
+    global _field_cache, _field_cache_time
+    now = datetime.utcnow()
+    if _field_cache and _field_cache_time and (now - _field_cache_time).seconds < 300:
+        return _field_cache
+    _field_cache = {f.field_name: f.user_visible for f in FieldSetting.query.all()}
+    _field_cache_time = now
+    return _field_cache
+
+def filter_fields_for_user(data_dict, is_admin):
+    if is_admin:
+        return data_dict
+    visibility = get_field_visibility()
+    for field in ['cost_price', 'remark', 'supplier', 'function_desc']:
+        if field in data_dict and not visibility.get(field, True):
+            data_dict[field] = '(无权限查看)'
+    return data_dict
+
 # ----- Products -----
+
+def add_pinyin_field(p_dict):
+    """给产品字典添加 _py 字段（全拼+首字母），供前端拼音搜索用。"""
+    from pypinyin import pinyin, Style
+    texts = [p_dict.get('name',''), p_dict.get('spec',''), p_dict.get('supplier',''), p_dict.get('function_desc','')]
+    py_parts = []
+    initials_parts = []
+    for t in texts:
+        if t:
+            py_list = pinyin(t, style=Style.NORMAL, heteronym=False)
+            py_parts.append(''.join(p[0] for p in py_list).lower())
+            initials_parts.append(''.join(p[0][0] for p in py_list).lower())
+    p_dict['_py'] = ' '.join(py_parts)
+    p_dict['_py_initials'] = ' '.join(initials_parts)
+    return p_dict
 
 @app.route('/api/products', methods=['GET'])
 def list_products():
-    """产品列表，支持搜索和分类筛选"""
+    """产品列表，支持搜索（含拼音）和分类筛选"""
+    import re
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     search = request.args.get('search', '').strip()
     category = request.args.get('category', '').strip()
     supplier = request.args.get('supplier', '').strip()
-
-    query = Product.query
-    if search:
-        like = f'%{search}%'
-        query = query.filter(
-            db.or_(Product.name.ilike(like), Product.spec.ilike(like),
-                    Product.supplier.ilike(like), Product.function_desc.ilike(like))
-        )
-    if category:
-        query = query.filter(Product.category.ilike(f'%{category}%'))
-    if supplier:
-        query = query.filter(Product.supplier == supplier)
 
     # 排序
     sort_by = request.args.get('sort_by', 'id')
@@ -177,13 +533,54 @@ def list_products():
         col = Product.category
     else:
         col = Product.id
-    if sort_order == 'asc':
-        query = query.order_by(col.asc())
-    else:
-        query = query.order_by(col.desc())
 
-    total = query.count()
-    products = query.offset((page - 1) * per_page).limit(per_page).all()
+    query = Product.query
+    if category:
+        query = query.filter(Product.category.ilike(f'%{category}%'))
+    if supplier:
+        query = query.filter(Product.supplier == supplier)
+
+    # 拼音搜索：纯ASCII（无汉字）时启用
+    is_pinyin = search and not re.search(r'[\u4e00-\u9fff]', search)
+    if is_pinyin:
+        from pypinyin import pinyin, Style
+        q_lower = search.lower().strip()
+        all_products = query.order_by(col.asc() if sort_order == 'asc' else col.desc()).all()
+
+        def pinyin_match(prod):
+            """匹配产品名/规格/厂商/功能描述中的拼音"""
+            texts = [prod.name, prod.spec or '', prod.supplier or '', prod.function_desc or '']
+            for text in texts:
+                if not text:
+                    continue
+                # 全拼匹配
+                py_list = pinyin(text, style=Style.NORMAL, heteronym=False)
+                full_py = ''.join(p[0] for p in py_list).lower()
+                if q_lower in full_py:
+                    return True
+                # 首字母匹配
+                initials = ''.join(p[0][0] for p in py_list).lower()
+                if q_lower in initials:
+                    return True
+                # 模糊：逐字首字母子串（如 "hwsb" 匹配 "华为设备"）
+                if len(q_lower) >= 2 and len(initials) >= 2:
+                    if q_lower in initials:
+                        return True
+            return False
+
+        filtered = [p for p in all_products if pinyin_match(p)]
+        total = len(filtered)
+        products = filtered[(page - 1) * per_page: page * per_page]
+    else:
+        query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
+        if search:
+            like = f'%{search}%'
+            query = query.filter(
+                db.or_(Product.name.ilike(like), Product.spec.ilike(like),
+                        Product.supplier.ilike(like), Product.function_desc.ilike(like))
+            )
+        total = query.count()
+        products = query.offset((page - 1) * per_page).limit(per_page).all()
 
     # 获取所有分类标签（支持逗号分隔的多标签）
     raw_cats = [r[0] for r in db.session.query(Product.category).filter(Product.category.isnot(None)).all() if r[0]]
@@ -200,7 +597,7 @@ def list_products():
     total_all = Product.query.count()
 
     return jsonify({
-        'products': [p.to_dict() for p in products],
+        'products': [add_pinyin_field(p.to_dict()) for p in products],
         'total': total,
         'page': page,
         'per_page': per_page,
@@ -646,8 +1043,57 @@ def export_product_template():
 
 @app.route('/api/quotes', methods=['GET'])
 def list_quotes():
-    quotes = Quote.query.order_by(Quote.id.desc()).all()
+    status_filter = request.args.get('status', '').strip()
+    query = Quote.query.order_by(Quote.id.desc())
+    # 非管理员只看自己的报价单
+    if hasattr(g, 'current_user') and g.current_user and g.current_user.role != 'admin':
+        query = query.filter(Quote.created_by == g.current_user.id)
+    if status_filter:
+        query = query.filter(Quote.status == status_filter)
+    quotes = query.all()
     return jsonify({'quotes': [q.to_dict() for q in quotes]})
+
+
+@app.route('/api/quotes/stats', methods=['GET'])
+def quote_stats():
+    """按客户统计报价单（客户维度聚合）"""
+    qf = Quote.client.isnot(None), Quote.client != ''
+    if hasattr(g, 'current_user') and g.current_user and g.current_user.role != 'admin':
+        qf = qf + (Quote.created_by == g.current_user.id,)
+    rows = db.session.query(
+        Quote.client, Quote.id, Quote.title, Quote.total_amount,
+        Quote.status, Quote.quote_date, Quote.download_count
+    ).filter(*qf)\
+     .order_by(Quote.client, Quote.id.desc()).all()
+
+    customers = {}
+    for client, qid, title, amt, status, qdate, dl in rows:
+        if client not in customers:
+            customers[client] = {'client': client, 'quotes': [], 'total_amount': 0, 'quote_count': 0}
+        customers[client]['quotes'].append({
+            'id': qid, 'title': title, 'total_amount': amt or 0,
+            'status': status, 'quote_date': qdate, 'download_count': dl or 0
+        })
+        customers[client]['total_amount'] += (amt or 0)
+        customers[client]['quote_count'] += 1
+
+    return jsonify({'customers': sorted(customers.values(), key=lambda x: x['total_amount'], reverse=True)})
+
+
+@app.route('/api/quotes/<int:quote_id>/status', methods=['PATCH'])
+def update_quote_status(quote_id):
+    """修改报价单状态"""
+    quote, err, status = check_quote_owner(quote_id)
+    if not quote:
+        return err, status
+    data = request.get_json()
+    new_status = data.get('status', '')
+    valid_statuses = ['draft', 'sent', 'confirmed', 'rejected', 'expired']
+    if new_status not in valid_statuses:
+        return jsonify({'error': f'无效状态，可选: {valid_statuses}'}), 400
+    quote.status = new_status
+    db.session.commit()
+    return jsonify({'quote': quote.to_dict()})
 
 
 @app.route('/api/quotes', methods=['POST'])
@@ -664,6 +1110,7 @@ def create_quote():
         quote_date=data.get('quote_date', datetime.now().strftime('%Y-%m-%d')),
         valid_days=int(data.get('valid_days', 15)),
         remark=data.get('remark', ''),
+        created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
     )
 
     items_data = data.get('items', [])
@@ -695,17 +1142,18 @@ def create_quote():
 
 @app.route('/api/quotes/<int:quote_id>', methods=['GET'])
 def get_quote(quote_id):
-    quote = db.session.get(Quote, quote_id)
+    quote, err, status = check_quote_owner(quote_id)
     if not quote:
-        return jsonify({'error': '报价单不存在'}), 404
-    return jsonify({'quote': quote.to_dict()})
+        return err, status
+    pmap = preload_products_for_quote(quote)
+    return jsonify({'quote': quote.to_dict(pmap)})
 
 
 @app.route('/api/quotes/<int:quote_id>', methods=['PUT'])
 def update_quote(quote_id):
-    quote = db.session.get(Quote, quote_id)
+    quote, err, status = check_quote_owner(quote_id)
     if not quote:
-        return jsonify({'error': '报价单不存在'}), 404
+        return err, status
     data = request.get_json()
     if data.get('title') is not None: quote.title = data['title']
     if data.get('client') is not None: quote.client = data['client']
@@ -746,9 +1194,9 @@ def update_quote(quote_id):
 
 @app.route('/api/quotes/<int:quote_id>', methods=['DELETE'])
 def delete_quote(quote_id):
-    quote = db.session.get(Quote, quote_id)
+    quote, err, status = check_quote_owner(quote_id)
     if not quote:
-        return jsonify({'error': '报价单不存在'}), 404
+        return err, status
     db.session.delete(quote)
     db.session.commit()
     return jsonify({'message': '已删除'})
@@ -757,13 +1205,15 @@ def delete_quote(quote_id):
 @app.route('/api/quotes/<int:quote_id>/export-excel', methods=['GET'])
 def export_quote_excel(quote_id):
     """导出报价单 — 样式精确克隆模板.xlsx"""
-    quote = db.session.get(Quote, quote_id)
+    quote, err, status = check_quote_owner(quote_id)
     if not quote:
-        return jsonify({'error': '报价单不存在'}), 404
+        return err, status
 
     # 记录下载次数
     quote.download_count = (quote.download_count or 0) + 1
     db.session.commit()
+
+    pmap = preload_products_for_quote(quote)
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -839,7 +1289,7 @@ def export_quote_excel(quote_id):
         product_function_desc = ''
         image_url = None
         if item.product_id:
-            product = db.session.get(Product, item.product_id)
+            product = pmap.get(item.product_id)
             if product:
                 product_function_desc = product.function_desc or ''
                 image_url = product.image_url
@@ -917,18 +1367,49 @@ def export_quote_excel(quote_id):
 
     filepath = EXPORT_DIR / f'报价单_{quote.id}.xlsx'
     wb.save(filepath)
-    date_str = (quote.quote_date or '').replace('-','')
+    # 优先使用前端传来的浏览器本地日期，兜底用服务器日期
+    download_date = request.args.get('download_date', '').strip()
+    if download_date:
+        date_str = download_date
+    else:
+        date_str = datetime.now().strftime('%Y%m%d')
     dl_name = f'{quote.client or ""}_{quote.title or ""}_{quote.contact or ""}_{date_str}'.strip('_').replace(' ','') + '.xlsx'
+
+    # 记录下载日志
+    user_name = g.current_user.username if hasattr(g, 'current_user') and g.current_user else request.args.get('user_name', '').strip()
+    if user_name:
+        log = DownloadLog(quote_id=quote_id, user_name=user_name)
+        db.session.add(log)
+        db.session.commit()
+
     return send_file(filepath, download_name=dl_name, as_attachment=True)
+
+
+# ─── 下载日志 API ───
+@app.route('/api/download-logs', methods=['GET'])
+def list_download_logs():
+    logs = DownloadLog.query.order_by(DownloadLog.downloaded_at.desc()).limit(200).all()
+    return jsonify({'logs': [log.to_dict() for log in logs]})
+
+
+@app.route('/api/download-logs/stats', methods=['GET'])
+def download_logs_stats():
+    """按用户汇总下载次数"""
+    rows = db.session.query(
+        DownloadLog.user_name, func.count(DownloadLog.id)
+    ).group_by(DownloadLog.user_name).order_by(func.count(DownloadLog.id).desc()).all()
+    return jsonify({'users': [{'user_name': name, 'count': cnt} for name, cnt in rows]})
 
 
 # ─── 报价单 HTML 预览 ───
 @app.route('/api/quotes/<int:quote_id>/preview', methods=['GET'])
 def preview_quote_html(quote_id):
     """返回报价单的HTML预览（17列格式匹配原模板）"""
-    quote = db.session.get(Quote, quote_id)
+    quote, err, status = check_quote_owner(quote_id)
     if not quote:
-        return jsonify({'error': '报价单不存在'}), 404
+        return err, status
+
+    pmap = preload_products_for_quote(quote)
 
     def fmt(n):
         if n is None: return '0.00'
@@ -950,7 +1431,7 @@ def preview_quote_html(quote_id):
     for i, item in enumerate(quote.items, 1):
         supplier = ''; supplier_sku = ''; cost = 0; prod_function_desc = ''
         if item.product_id:
-            prod = db.session.get(Product, item.product_id)
+            prod = pmap.get(item.product_id)
             if prod:
                 supplier = prod.supplier or ''
                 supplier_sku = prod.spec or prod.sku or ''
@@ -1120,28 +1601,6 @@ def index():
     return render_template('index.html')
 
 
-def bump_version():
-    """Auto-increment patch version: 0.1.1 → 0.1.2 … 0.1.9 → 0.2.0, etc."""
-    version_file = BASE_DIR / 'version.txt'
-    try:
-        ver = version_file.read_text().strip()
-        parts = [int(x) for x in ver.split('.')]
-        if len(parts) != 3:
-            parts = [0, 1, 1]
-    except:
-        parts = [0, 1, 1]
-    parts[2] += 1
-    if parts[2] >= 10:
-        parts[2] = 0
-        parts[1] += 1
-    if parts[1] >= 10:
-        parts[1] = 0
-        parts[0] += 1
-    new_ver = f'{parts[0]}.{parts[1]}.{parts[2]}'
-    version_file.write_text(new_ver)
-    return new_ver
-
-
 @app.route('/api/version', methods=['GET'])
 def get_version():
     version_file = BASE_DIR / 'version.txt'
@@ -1150,6 +1609,30 @@ def get_version():
     except:
         ver = '0.1.1'
     return jsonify({'version': ver})
+
+# 前端获取当前用户信息 + 字段可见性
+@app.route('/api/session', methods=['GET'])
+@require_auth
+def session_info():
+    is_admin = g.current_user.role == 'admin'
+    # 剩余不足24h自动续签token
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    new_token = None
+    try:
+        data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
+        remaining = data['exp'] - int(datetime.utcnow().timestamp())
+        if remaining < 86400:
+            new_token = create_token(g.current_user)
+    except:
+        pass
+    resp = jsonify({
+        'user': g.current_user.to_dict(),
+        'field_visibility': get_field_visibility() if not is_admin else {},
+        'registration_open': app.config['REGISTRATION_OPEN'],
+    })
+    if new_token:
+        resp.headers['X-New-Token'] = new_token
+    return resp
 
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
@@ -1161,6 +1644,25 @@ def serve_upload(filename):
 
 with app.app_context():
     db.create_all()
+    # 预置管理员账号
+    if not User.query.filter_by(username='admin').first():
+        admin = User(
+            username='admin',
+            password_hash=hash_password(app.config['DEFAULT_ADMIN_PASSWORD']),
+            role='admin', is_active=True
+        )
+        db.session.add(admin)
+        db.session.commit()
+        print(f'[Init] 已创建管理员: admin / {app.config["DEFAULT_ADMIN_PASSWORD"]}')
+    # 迁移：历史报价单 assign 给 admin (user_id=1)
+    orphan_quotes = Quote.query.filter(Quote.created_by.is_(None)).all()
+    if orphan_quotes:
+        admin_user = User.query.filter_by(username='admin').first()
+        if admin_user:
+            for q in orphan_quotes:
+                q.created_by = admin_user.id
+            db.session.commit()
+            print(f'[Init] 已为 {len(orphan_quotes)} 条历史报价单分配创建者: admin')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
