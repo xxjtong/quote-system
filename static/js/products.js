@@ -847,71 +847,65 @@ async function renderQuoteForm(existingQuote, targetEl) {
       <button class="btn btn-success btn-modern" onclick="saveQuote()"><i class="bi bi-check-lg me-1"></i> 保存报价单</button>
       ${q.id ? `<button class="btn btn-outline-info btn-modern" onclick="previewQuote(${q.id})"><i class="bi bi-eye me-1"></i> 预览</button>` : ''}
     </div>
-    <div class="row g-3">
-      <div class="col-lg-8">
-        <div class="card-modern">
-          <div class="card-title-modern"><i class="bi bi-cart"></i>报价明细</div>
-          <div class="mb-2 position-relative">
-            <div class="input-group">
-              <input class="form-control search-box border" placeholder="搜索名称/规格/型号/功能/厂家...（支持拼音/缩写）" id="prodSearch" oninput="searchProductsForQuote(this.value)">
-              <button class="btn btn-primary btn-modern" onclick="showProductPicker()"><i class="bi bi-plus-lg"></i> 从产品库选择</button>
-            </div>
-            <div id="searchResults" style="display:none" class="search-results" style="width:calc(100% - 120px)"></div>
-          </div>
-          <div class="table-responsive">
-            <table class="table table-modern table-sm" id="quoteItemsTable">
-              <thead><tr><th style="width:28px"></th><th style="width:32px">#</th><th>产品名称</th><th>规格型号</th><th style="width:60px">数量</th><th style="width:85px">单价</th><th style="width:85px">金额</th><th style="width:65px">毛利</th><th style="width:50px">%</th><th style="width:36px"></th></tr></thead>
-              <tbody id="quoteItemsBody"></tbody>
-              <tfoot><tr><td colspan="6" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td></td><td></td></tr></tfoot>
-            </table>
-          </div>
-          ${quoteItems.length === 0 ? '<div class="text-center text-muted py-3 small"><i class="bi bi-inbox d-block fs-2 mb-2"></i>点击「从产品库选择」或搜索添加产品</div>' : ''}
+
+    <!-- 基本信息区域（上半部分） -->
+    <div class="card-modern mb-3">
+      <div class="card-title-modern"><i class="bi bi-info-circle"></i>基本信息</div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">报价标题</label>
+          <input class="form-control form-control-sm" id="qf_title" value="${escHtml(q.title)}" placeholder="例：XX项目报价单">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">客户名称</label>
+          <input class="form-control form-control-sm" id="qf_client" value="${escHtml(q.client)}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">联系人</label>
+          <input class="form-control form-control-sm" id="qf_contact" value="${escHtml(q.contact)}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">电话</label>
+          <input class="form-control form-control-sm" id="qf_phone" value="${escHtml(q.phone)}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">报价日期</label>
+          <input class="form-control form-control-sm" id="qf_date" type="date" value="${q.quote_date}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">有效期(天)</label>
+          <input class="form-control form-control-sm" id="qf_valid" type="number" value="${q.valid_days}">
+        </div>
+        <div class="col-md-8">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">报价备注</label>
+          <input class="form-control form-control-sm" id="qf_remark" value="${escHtml(q.remark)}" placeholder="报价备注">
         </div>
       </div>
-      <div class="col-lg-4">
-        <div class="card-modern">
-          <div class="card-title-modern"><i class="bi bi-info-circle"></i>基本信息</div>
-          <div class="mb-2">
-            <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">报价标题</label>
-            <input class="form-control form-control-sm" id="qf_title" value="${escHtml(q.title)}" placeholder="例：XX项目报价单">
-          </div>
-          <div class="mb-2">
-            <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">客户名称</label>
-            <input class="form-control form-control-sm" id="qf_client" value="${escHtml(q.client)}">
-          </div>
-          <div class="row g-1 mb-2">
-            <div class="col-6">
-              <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">联系人</label>
-              <input class="form-control form-control-sm" id="qf_contact" value="${escHtml(q.contact)}">
-            </div>
-            <div class="col-6">
-              <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">电话</label>
-              <input class="form-control form-control-sm" id="qf_phone" value="${escHtml(q.phone)}">
-            </div>
-          </div>
-          <div class="row g-1 mb-2">
-            <div class="col-6">
-              <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">报价日期</label>
-              <input class="form-control form-control-sm" id="qf_date" type="date" value="${q.quote_date}">
-            </div>
-            <div class="col-6">
-              <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">有效期(天)</label>
-              <input class="form-control form-control-sm" id="qf_valid" type="number" value="${q.valid_days}">
-            </div>
-          </div>
-          <div class="mb-2">
-            <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">备注</label>
-            <textarea class="form-control form-control-sm" id="qf_remark" rows="3">${escHtml(q.remark)}</textarea>
-          </div>
+    </div>
+
+    <!-- 报价明细表格（下半部分） -->
+    <div class="card-modern">
+      <div class="card-title-modern"><i class="bi bi-cart"></i>报价明细</div>
+      <div class="mb-2 position-relative">
+        <div class="input-group">
+          <input class="form-control search-box border" placeholder="搜索名称/规格/型号/功能/厂家...（支持拼音/缩写）" id="prodSearch" oninput="searchProductsForQuote(this.value)">
+          <button class="btn btn-primary btn-modern" onclick="showProductPicker()"><i class="bi bi-plus-lg"></i> 从产品库选择</button>
         </div>
-        <div class="card-modern">
-          <div class="d-grid gap-2">
-            <button class="btn btn-success" onclick="saveQuote()"><i class="bi bi-check-lg me-1"></i> 保存报价单</button>
-            ${q.id ? `<button class="btn btn-outline-info btn-modern" onclick="previewQuote(${q.id})"><i class="bi bi-eye me-1"></i> 预览报价单</button>` : ''}
-            <button class="btn btn-outline-secondary btn-modern" onclick="switchTab('quotes')"><i class="bi bi-arrow-left me-1"></i> 返回列表</button>
-          </div>
-        </div>
+        <div id="searchResults" style="display:none" class="search-results" style="width:calc(100% - 120px)"></div>
       </div>
+      <div class="table-responsive">
+        <table class="table table-modern table-sm" id="quoteItemsTable">
+          <thead><tr><th style="width:28px"></th><th style="width:32px">#</th><th>产品名称</th><th>规格型号</th><th style="width:60px">数量</th><th style="width:85px">单价</th><th style="width:85px">金额</th><th style="width:65px">毛利</th><th style="width:50px">%</th><th style="width:100px">备注</th><th style="width:36px"></th></tr></thead>
+          <tbody id="quoteItemsBody"></tbody>
+          <tfoot><tr><td colspan="6" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td></td><td></td><td></td></tr></tfoot>
+        </table>
+      </div>
+      ${quoteItems.length === 0 ? '<div class="text-center text-muted py-3 small"><i class="bi bi-inbox d-block fs-2 mb-2"></i>点击「从产品库选择」或搜索添加产品</div>' : ''}
+    </div>
+
+    <div class="d-flex justify-content-between mt-3">
+      <button class="btn btn-outline-secondary btn-modern" onclick="switchTab('quotes')"><i class="bi bi-arrow-left me-1"></i> 返回列表</button>
+      <button class="btn btn-success" onclick="saveQuote()"><i class="bi bi-check-lg me-1"></i> 保存报价单</button>
     </div>
   `;
   renderQuoteItems();
@@ -953,6 +947,7 @@ function renderQuoteItems() {
       <td class="fw-medium" style="font-size:.87rem">${formatMoney(item.amount)}</td>
       <td style="font-size:.82rem;color:${pc}">${p !== 0 ? formatMoney(p) : '-'}</td>
       <td style="font-size:.78rem;color:${pc}">${r !== 0 ? r + '%' : '-'}</td>
+      <td><input class="form-control form-control-sm" value="${escHtml(item.remark||'')}" onchange="quoteItems[${i}].remark=this.value.trim()" placeholder="备注"></td>
       <td><button class="btn btn-sm btn-modern btn-outline-danger border-0" onclick="removeQuoteItem(${i})"><i class="bi bi-x"></i></button></td>
     </tr>
   `}).join('');
