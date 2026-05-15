@@ -1,8 +1,8 @@
 # 报价管理系统 (Quote Management System)
 
-> Flask + SQLite + Bootstrap SPA — 产品管理、报价单生成、Excel 导入导出、OCR 智能识别
+> Flask + SQLite + Bootstrap SPA — 产品管理、报价单生成、Excel 导入导出、OCR 智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.2.21-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.3.7-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -28,14 +28,15 @@
 
 | 模块 | 功能 |
 |------|------|
-| 📦 **产品管理** | CRUD、多条件搜索、分类/厂商筛选、批量删除、图片上传预览 |
+| 🔐 **认证系统** | JWT 登录/注册、管理员面板、字段可见性控制、注册开关、个人信息修改 |
+| 📦 **产品管理** | CRUD、拼音/缩写智能搜索、分类/厂商筛选、批量删除、图片上传预览 |
 | 📊 **概览仪表盘** | 产品总数、报价单统计、下载量、最近报价单列表 |
-| 📝 **报价单** | 创建/编辑/删除、产品多选添加、数量/价格行内编辑、排序 |
+| 📝 **报价单** | 创建/编辑/删除、状态流转、产品多选添加、利润概览、客户聚合统计 |
 | 📥 **Excel 导入** | 多 Sheet 导入、列名智能映射、自动同步 SKU/规格 |
 | 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、下载计数统计 |
 | 👁️ **预览** | HTML 预览报价单，功能描述与备注分离 |
 | 🔍 **智能识别** | 粘贴文本自动解析产品信息、图片 OCR 识别 |
-| ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹智能缓存 |
+| ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹智能缓存、前端本地拼音过滤 |
 
 ---
 
@@ -44,12 +45,13 @@
 ```
 ┌──────────────┐     ┌──────────┐     ┌──────────────┐
 │   浏览器      │────▶│  nginx   │────▶│   Gunicorn   │
-│  Bootstrap 5  │     │  :443    │     │  4 workers   │
-│  SPA (原生JS) │     │  proxy   │     │  :5000       │
+│  Bootstrap 5  │     │  :443    │     │  2 workers   │
+│  SPA (3 JS)   │     │  proxy   │     │  :5000       │
 └──────────────┘     └──────────┘     └──────┬───────┘
                                              │
                                         ┌────▼───────┐
                                         │   Flask     │
+                                        │ JWT Auth    │
                                         │ SQLAlchemy  │
                                         └────┬───────┘
                                              │
@@ -62,16 +64,30 @@
 | 层 | 技术 | 说明 |
 |---|------|------|
 | Web 服务器 | nginx | 反向代理，TLS 终端，路径 `/quote/` → Gunicorn |
-| 应用服务器 | Gunicorn | 4 worker 进程，绑定 `127.0.0.1:5000` |
-| 后端框架 | Flask + SQLAlchemy | RESTful JSON API |
+| 应用服务器 | Gunicorn | 2 worker 进程（`--preload`），绑定 `127.0.0.1:5000` |
+| 后端框架 | Flask + SQLAlchemy | RESTful JSON API，字段可见性控制 |
+| 认证 | JWT (PyJWT) | 无状态 token，SHA256+盐密码，自动续签 |
 | 数据库 | SQLite | 单文件，零配置 |
-| 前端 | 原生 JavaScript SPA | Bootstrap 5 UI，无框架依赖 |
+| 前端 | 原生 JavaScript SPA (3 模块) | Bootstrap 5 UI，无框架依赖 |
+| 拼音 | pypinyin | 后端拼音搜索 + 前端本地拼音过滤 |
 | Excel | openpyxl | 读写 `.xlsx`，含格式化 |
 | OCR | OCR.space API | 免费 tier 图片文字识别 |
 
 ---
 
 ## 数据模型
+
+### User（用户）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER PK | 自增主键 |
+| `username` | VARCHAR(80) | 用户名（唯一，必填） |
+| `password_hash` | VARCHAR(128) | SHA256+盐密码哈希 |
+| `email` | VARCHAR(120) | 邮箱（选填） |
+| `role` | VARCHAR(20) | 角色：`admin` / `user` |
+| `is_active` | BOOLEAN | 账户启用状态，默认 True |
+| `created_at` | DATETIME | 注册时间 |
 
 ### Product（产品）
 
@@ -103,9 +119,10 @@
 | `phone` | VARCHAR(50) | 联系电话 |
 | `quote_date` | VARCHAR(20) | 报价日期 |
 | `valid_days` | INTEGER | 有效期（天），默认 15 |
-| `status` | VARCHAR(20) | 状态，默认 `draft` |
+| `status` | VARCHAR(20) | 状态：draft/sent/confirmed/completed |
 | `total_amount` | FLOAT | 合计金额 |
 | `download_count` | INTEGER | 导出下载次数 |
+| `created_by` | FK → User | 创建者（可选） |
 | `remark` | TEXT | 备注 |
 | `items` | relationship | 一对多 → QuoteItem |
 
@@ -125,6 +142,23 @@
 | `amount` | FLOAT | 小计 = 数量 × 单价 |
 | `remark` | VARCHAR(500) | 行备注 |
 | `sort_order` | INTEGER | 排序序号 |
+
+### FieldSetting（字段可见性）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER PK | 主键 |
+| `field_name` | VARCHAR(50) | 字段名 |
+| `user_visible` | BOOLEAN | 普通用户是否可见 |
+
+### DownloadLog（下载记录）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER PK | 主键 |
+| `quote_id` | FK → Quote | 所属报价单 |
+| `user_name` | VARCHAR(100) | 下载者用户名 |
+| `downloaded_at` | DATETIME | 下载时间 |
 
 ---
 
@@ -146,9 +180,13 @@ cd /opt/quote-system
 # 2. 创建虚拟环境并安装依赖
 python3 -m venv venv
 source venv/bin/activate
-pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl
+pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl pypinyin pyjwt
 
-# 3. 初始化数据库
+# 3. 生成 JWT Secret
+python3 -c "import secrets; print(secrets.token_hex(32))"
+# 将输出填入 step 5 的 QUOTE_JWT_SECRET
+
+# 4. 初始化数据库
 python3 -c "
 from app import app, db
 with app.app_context():
@@ -156,15 +194,15 @@ with app.app_context():
     print('数据库已创建')
 "
 
-# 4. 创建上传/导出目录
+# 5. 创建上传/导出目录
 mkdir -p uploads/images exports
 
-# 5. 安装 systemd 服务
+# 6. 安装 systemd 服务（编辑 Environment 填入 JWT secret）
 sudo cp quote-system.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now quote-system
 
-# 6. 配置 nginx（示例）
+# 7. 配置 nginx（示例）
 # location /quote/ {
 #     proxy_pass http://127.0.0.1:5000/;
 #     proxy_set_header Host $host;
@@ -176,7 +214,7 @@ sudo systemctl enable --now quote-system
 ### 版本号管理
 
 ```bash
-echo "1.2.22" > version.txt
+echo "1.3.8" > version.txt
 sudo systemctl restart quote-system
 ```
 
@@ -185,6 +223,17 @@ sudo systemctl restart quote-system
 ## REST API
 
 Base URL: `http://127.0.0.1:5000`
+
+> ⚠️ 除公开路由外，所有 API 需 `Authorization: Bearer <token>` 请求头。
+
+### 认证
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/auth/login` | 登录 `{username, password}` → `{token, user}` |
+| `POST` | `/api/auth/register` | 注册 `{username, password, email?}` |
+| `GET` | `/api/session` | 验签/续签 token（自动返回 `X-New-Token`） |
+| `PUT` | `/api/auth/profile` | 修改个人信息 `{email?, current_password?, new_password?}` |
 
 ### 产品
 
@@ -198,23 +247,24 @@ Base URL: `http://127.0.0.1:5000`
 | `POST` | `/api/products/batch-delete` | 批量删除 `{ids: [1,2]}` |
 | `POST` | `/api/products/import` | 导入 Excel（multipart） |
 | `GET` | `/api/products/export-template` | 下载导入模板 |
-| `GET` | `/api/products/version` | 版本检查 `{count, max_updated_at}` |
 | `POST` | `/api/products/upload-image` | 上传图片 |
 | `POST` | `/api/products/ocr` | 图片 OCR 识别 |
 | `POST` | `/api/products/recognize` | 文本智能解析 |
 
-**搜索匹配字段：** `name`、`spec`、`supplier`、`function_desc`（ILIKE 模糊匹配）
+**搜索匹配字段：** `name`、`spec`、`supplier`、`function_desc`（ILIKE）+ **拼音全拼+首字母**（无汉字输入时自动切换）
+
+每个产品返回 `_py`（全拼）和 `_py_initials`（首字母）字段供前端本地过滤。
 
 **响应格式：**
 ```json
 {
-  "products": [{...}],
+  "products": [{"id":1, "name":"交换机", "_py":"jiaohuanji", "_py_initials":"jhj", ...}],
   "total": 392,
   "page": 1,
   "per_page": 20,
   "categories": ["网络设备", "安防监控", ...],
   "suppliers": ["华为", "海康", ...],
-  "version": {"count": 392, "max_updated_at": "2026-05-14T08:12:09"}
+  "version": {"count": 392, "max_updated_at": "2026-05-15T03:17:42"}
 }
 ```
 
@@ -222,13 +272,15 @@ Base URL: `http://127.0.0.1:5000`
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/quotes` | 列表 |
-| `GET` | `/api/quotes/<id>` | 详情（含 items） |
+| `GET` | `/api/quotes` | 列表（含 `search`, `status` 筛选） |
+| `GET` | `/api/quotes/<id>` | 详情（含 items + 利润） |
 | `POST` | `/api/quotes` | 新建 |
 | `PUT` | `/api/quotes/<id>` | 编辑 |
 | `DELETE` | `/api/quotes/<id>` | 删除 |
+| `PATCH` | `/api/quotes/<id>/status` | 切换状态 `{status: "sent"}` |
 | `GET` | `/api/quotes/<id>/export-excel` | 导出 Excel（递增下载计数） |
 | `GET` | `/api/quotes/<id>/preview` | HTML 预览 |
+| `GET` | `/api/quotes/stats` | 客户维度聚合统计 |
 
 **新建报价单请求体：**
 ```json
@@ -255,16 +307,51 @@ Base URL: `http://127.0.0.1:5000`
 }
 ```
 
+### 管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/admin/users` | 用户列表（管理员） |
+| `PATCH` | `/api/admin/users/<id>/password` | 修改用户密码（管理员） |
+| `PATCH` | `/api/admin/users/<id>/role` | 修改用户角色（管理员） |
+| `PATCH` | `/api/admin/users/<id>/active` | 启用/禁用用户（管理员） |
+| `GET` | `/api/admin/fields` | 字段可见性配置 |
+| `PUT` | `/api/admin/fields` | 更新字段可见性 |
+| `GET` | `/api/admin/registration` | 注册开关状态 |
+| `PUT` | `/api/admin/registration` | 设置注册开关 |
+| `GET` | `/api/download-logs` | 下载记录列表 |
+| `GET` | `/api/download-logs/stats` | 下载统计 |
+
 ### 通用
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/api/version` | 系统版本号 |
-| `GET` | `/api/stats` | 统计数据 |
+| `GET` | `/api/version` | 系统版本号（公开） |
 
 ---
 
 ## 前端功能详解
+
+### 前端架构（v1.3.7+）
+
+```
+static/js/
+├── app.js       # 状态管理 / 工具函数 / 导航 / Dashboard / Modal
+├── auth.js      # 登录 / 注册 / 登出 / Session / 个人信息
+└── products.js  # 产品 / 报价 / 导入 / 管理面板 / 初始化
+```
+
+三个模块通过全局变量共享状态，`index.html` 仅保留 HTML 结构和 CSS。
+
+### 认证系统
+
+- **登录页**：用户名 + 密码，支持注册开关
+- **注册页**：用户名 + 密码 + 邮箱（选填）
+- **Token 管理**：localStorage 存储，每次请求自动附带 `Authorization` 头
+- **自动续签**：`/api/session` 返回新 token 时自动更新
+- **401 处理**：token 过期自动跳转登录页
+- **管理员面板**：用户管理、角色切换、改密、字段可见性、注册开关
+- **个人信息**：右上角下拉 → 修改邮箱/密码
 
 ### 概览仪表盘
 
@@ -279,7 +366,8 @@ Base URL: `http://127.0.0.1:5000`
 - 表格展示：复选框 | 缩略图 | 产品名称 | 分类 | 规格型号 | 厂商 | 单价 | 操作
 - 图片悬浮预览（最大 300px，白底防透明 PNG 透字）
 - 产品名称悬浮 tooltip（名称+规格+厂商+分类+价格+功能描述）
-- 搜索框：Enter 触发（避免中文输入法干扰），匹配名称/规格/功能描述/厂商
+- **搜索框**：输入即搜（500ms 防抖），支持名称/规格/型号/功能/厂家/**拼音/缩写**
+- IME 输入法适配：组字过程中不触发搜索，选字完成后自动搜索
 - 搜索框右侧 ✕ 清除按钮（有内容时显示）
 - 分类下拉 + 厂商下拉筛选
 - 分页 + 排序（ID/名称/价格/分类）
@@ -313,14 +401,17 @@ Base URL: `http://127.0.0.1:5000`
 
 **列表页：**
 - 表格：ID、标题、客户、金额、状态、下载次数、日期、操作
+- 状态颜色区分、一键循环切换状态
 - 编辑、预览、导出 Excel、删除
 
 **新建/编辑报价单：**
 - 头部信息：标题、客户、联系人、电话、日期、有效期、备注
+- 快速搜索栏：输入产品名/拼音即时匹配，支持拼音/缩写
 - 明细行表格：产品名称、规格型号、数量、单价、金额、备注
+- **利润概览**：毛利 / 毛利率列（绿色盈利、红色亏损）
 - 行内编辑：数量/单价修改即算金额
 - 产品选择器（详见下方）
-- 删除行、拖拽排序
+- 删除行
 
 **预览：**
 - HTML 渲染报价单
@@ -340,7 +431,7 @@ Base URL: `http://127.0.0.1:5000`
 
 **交互：**
 1. 点击「+从产品库选择」→ 模态框
-2. 搜索框：即时客户端过滤（`oninput`），匹配名称/规格/功能描述/厂商
+2. 搜索框：即时客户端过滤，匹配名称/规格/功能描述/厂商 + **拼音全拼/首字母**
 3. 分类快速过滤按钮（前 12 个分类）
 4. 产品列表（最大高度 60vh 可滚动）
 5. 每行：复选框 + 产品名称 + 厂商标签 + 分类标签 + 规格 + 价格
@@ -426,18 +517,23 @@ Base URL: `http://127.0.0.1:5000`
 
 ```
 /opt/quote-system/
-├── app.py                  # Flask 应用主文件（后端全部逻辑）
+├── app.py                     # Flask 应用主文件（后端全部逻辑，1668行）
 ├── templates/
-│   └── index.html          # 前端 SPA（全部 HTML/CSS/JS）
-├── quote-system.service    # systemd 服务配置
-├── version.txt             # 版本号
-├── REQUIREMENTS.md         # 完整需求规格书
-├── README.md               # 本文件
-├── template.xlsx           # 导入模板
+│   └── index.html             # 前端 SPA 骨架（HTML + CSS，480行）
+├── static/
+│   └── js/
+│       ├── app.js             # 状态管理 / 工具 / 导航 / Dashboard（292行）
+│       ├── auth.js            # 认证相关（153行）
+│       └── products.js        # 产品 / 报价 / 导入 / 管理（1357行）
+├── quote-system.service       # systemd 服务配置
+├── version.txt                # 版本号
+├── CHANGELOG.md               # 更新日志
+├── README.md                  # 本文件
+├── template.xlsx              # 导入模板
 ├── uploads/
-│   └── images/             # 产品图片
-├── exports/                # 导出的报价单 Excel
-└── quote.db                # SQLite 数据库（不加入版本控制）
+│   └── images/                # 产品图片
+├── exports/                   # 导出的报价单 Excel
+└── quote.db                   # SQLite 数据库（不加入版本控制）
 ```
 
 ---
@@ -448,13 +544,14 @@ Base URL: `http://127.0.0.1:5000`
 |------|------|
 | `function_desc` ≠ `remark` | 前者对客户可见（导出），后者仅内部 |
 | `sku` = `spec` | 写入时自动同步 |
-| 搜索匹配 | `name` + `spec` + `supplier` + `function_desc` |
-| 中文搜索用 Enter | 不用 `oninput`，避免拼音干扰 |
+| 搜索匹配 | `name` + `spec` + `supplier` + `function_desc` + 拼音全拼 + 首字母 |
+| 搜索防抖 | 500ms，IME 组字中不触发 |
 | 修改模板必重启 | `sudo systemctl restart quote-system` |
 | 修改 JS 必强刷 | 提示用户 `Ctrl+Shift+R` |
 | 版本号手动递增 | `echo "x.x.x" > version.txt` + 重启 |
 | 图片预览白底 | 防透明 PNG 背景透字 |
 | 新增产品清空图片 | `window._pfImageUrl = ''` |
+| JWT Secret | 通过 systemd 环境变量固定，避免多 worker 不一致 |
 
 ### 常用命令
 
@@ -475,7 +572,7 @@ conn.close()
 "
 
 # 更新版本号
-echo "1.2.22" > version.txt && sudo systemctl restart quote-system
+echo "1.3.8" > version.txt && sudo systemctl restart quote-system
 
 # 推送到 GitHub
 cd /opt/quote-system
