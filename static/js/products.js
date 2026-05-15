@@ -917,15 +917,18 @@ function renderQuoteItems() {
   if (!quoteItems.length) { tbody.innerHTML = ''; updateQuoteTotal(); return; }
   // Profit calculation from backend data or local calc
   const profitData = quoteItems.map(item => {
-    // If backend already gave us profit (from saved quote), use it
-    if (item.profit !== undefined && item.profit_rate !== undefined) return item;
+    // If backend already gave us profit (from saved quote), use it — but multiply by quantity for display
+    if (item.profit !== undefined && item.profit_rate !== undefined) {
+      return {...item, _profit: (item.profit || 0) * (item.quantity || 1), _rate: item.profit_rate};
+    }
     // Otherwise estimate from productsCache
     let profit = 0, rate = 0;
     if (item.product_id && productsCache?.products) {
       const p = productsCache.products.find(p => p.id === item.product_id);
       if (p && p.cost_price) {
-        profit = Math.round(((item.unit_price || 0) - p.cost_price) * 100) / 100;
-        rate = (item.unit_price || 0) > 0 ? Math.round(profit / item.unit_price * 1000) / 10 : 0;
+        const perUnitProfit = Math.round(((item.unit_price || 0) - p.cost_price) * 100) / 100;
+        profit = Math.round(perUnitProfit * (item.quantity || 1) * 100) / 100;
+        rate = (item.unit_price || 0) > 0 ? Math.round(perUnitProfit / item.unit_price * 1000) / 10 : 0;
       }
     }
     return {...item, _profit: profit, _rate: rate};

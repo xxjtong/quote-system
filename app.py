@@ -1355,7 +1355,7 @@ def export_quote_excel(quote_id):
 
         vals = [i, item.product_name, item.product_spec or '',
                 item.product_spec or item.product_sku or '', desc,
-                up, qty, subtotal, 0, subtotal, '']
+                up, qty, subtotal, 0, subtotal, item.remark or '']
 
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
@@ -1564,7 +1564,7 @@ def _build_excel(quote, pmap, filepath):
         if item.product_id:
             product = pmap.get(item.product_id)
             if product: product_function_desc = product.function_desc or ''
-        vals = [i, item.product_name, item.product_spec or '', item.product_spec or item.product_sku or '', product_function_desc, up, qty, subtotal, 0, subtotal, '']
+        vals = [i, item.product_name, item.product_spec or '', item.product_spec or item.product_sku or '', product_function_desc, up, qty, subtotal, 0, subtotal, item.remark or '']
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
             cell.font = data_font; cell.alignment = ca; cell.border = thin_border
@@ -1672,7 +1672,7 @@ def preview_quote_html(quote_id):
             <td>{fmt(subtotal)}</td>
             <td>0%</td>
             <td>{fmt(deal_price)}</td>
-            <td></td>
+            <td>{item.remark or ''}</td>
         </tr>'''
 
     html = f'''<!DOCTYPE html>
