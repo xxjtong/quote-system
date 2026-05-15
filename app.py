@@ -910,6 +910,117 @@ def parse_product_line(line):
 
     return result if result.get('name') else None
 
+
+# ─── 发票OCR → 成本价匹配 ───
+@app.route('/api/products/ocr-costs', methods=['POST'])
+@require_admin
+def ocr_costs():
+    """上传进货发票图片，OCR识别 + 自动匹配产品成本价"""
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'error': '请上传发票图片'}), 400
+
+    try:
+        tmp_path = UPLOAD_DIR / f'_ocr_cost_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
+        file.save(str(tmp_path))
+        if os.path.getsize(tmp_path) > 5 * 1024 * 1024:
+            os.remove(tmp_path)
+            return jsonify({'error': '图片不能超过5MB'}), 400
+
+        import requests as http_req
+        with open(tmp_path, 'rb') as fp:
+            r = http_req.post(
+                'https://api.ocr.space/parse/image',
+                files={'file': fp},
+                data={'language': 'chs', 'isOverlayRequired': False, 'detectOrientation': True, 'scale': True, 'apikey': 'helloworld'},
+                timeout=30,
+            )
+        os.remove(tmp_path)
+        if r.status_code != 200:
+            return jsonify({'error': 'OCR服务暂时不可用'}), 502
+
+        result = r.json()
+        if result.get('OCRExitCode') != 1:
+            err = result.get('ErrorMessage', ['识别失败'])[0]
+            return jsonify({'error': f'OCR失败: {err}'}), 400
+
+        raw_text = result.get('ParsedResults', [{}])[0].get('ParsedText', '').strip()
+        lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+
+        # 解析每行：最后数字=成本价，前面=产品名
+        products = Product.query.filter_by(is_active=True).all()
+        matches = []
+        import re
+        for line in lines:
+            # 找最后一个数字（可能带 ¥ 符号）
+            m = re.findall(r'[¥￥]?\s*(\d+\.?\d*)\s*[元]?\s*$', line)
+            if not m:
+                continue
+            try:
+                cost_price = float(m[-1])
+            except ValueError:
+                continue
+            # 去掉价格部分，剩余为产品描述
+            name_part = re.sub(r'[¥￥]?\s*\d+\.?\d*\s*[元]?\s*$', '', line).strip()
+            if not name_part or cost_price <= 0:
+                continue
+
+            # 模糊匹配产品
+            candidates = []
+            name_lower = name_part.lower()
+            for p in products:
+                score = 0
+                p_name = (p.name or '').lower()
+                p_spec = (p.spec or '').lower()
+                p_supplier = (p.supplier or '').lower()
+                if name_lower in p_name or p_name in name_lower:
+                    score += 50
+                if name_lower in p_spec or p_spec in name_lower:
+                    score += 30
+                if name_lower in p_supplier or p_supplier in name_lower:
+                    score += 10
+                # 检查空格分割的token匹配
+                for token in name_lower.split():
+                    if len(token) >= 2 and token in p_name:
+                        score += 5
+                    if len(token) >= 2 and token in p_spec:
+                        score += 3
+                if score > 0:
+                    candidates.append({'id': p.id, 'name': p.name, 'spec': p.spec or '', 'cost_price': p.cost_price or 0, 'price': p.price or 0, 'supplier': p.supplier or '', 'score': score})
+            candidates.sort(key=lambda x: -x['score'])
+            matches.append({
+                'line': line,
+                'name_part': name_part,
+                'cost_price': cost_price,
+                'candidates': candidates[:3],
+            })
+
+        return jsonify({'raw_text': raw_text, 'matches': matches})
+
+    except Exception as e:
+        return jsonify({'error': f'处理失败: {str(e)}'}), 500
+
+
+@app.route('/api/products/batch-costs', methods=['POST'])
+@require_admin
+def batch_update_costs():
+    """批量更新产品成本价 {updates: [{id, cost_price}, ...]}"""
+    data = request.get_json()
+    if not data or not data.get('updates'):
+        return jsonify({'error': '缺少更新数据'}), 400
+    updated = 0
+    for item in data['updates']:
+        pid = item.get('id')
+        cost = item.get('cost_price')
+        if pid and cost is not None:
+            product = db.session.get(Product, int(pid))
+            if product:
+                product.cost_price = float(cost)
+                updated += 1
+    db.session.commit()
+    return jsonify({'updated': updated, 'message': f'已更新{updated}个产品成本价'})
+
+
 @app.route('/api/products/<int:product_id>/toggle-active', methods=['PUT'])
 @require_admin
 def toggle_product_active(product_id):

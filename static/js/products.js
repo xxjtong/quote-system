@@ -1397,6 +1397,13 @@ async function renderAdmin(el) {
           </div>
           <button class="btn btn-sm btn-modern btn-primary mt-2" onclick="saveSmtpSettings()"><i class="bi bi-check me-1"></i>保存SMTP</button>
         </div>
+        <div class="card-modern mt-3"><div class="card-title-modern"><i class="bi bi-receipt me-2"></i>发票OCR → 更新成本价 <span class="badge bg-warning text-dark" style="font-size:.65rem">管理员</span></div>
+          <p class="text-muted small">上传进货发票/采购单图片，自动识别产品+成本价，匹配现有产品并更新</p>
+          <div class="mb-2">
+            <input type="file" id="receiptFile" accept="image/*" class="form-control form-control-sm" onchange="uploadReceiptOCR()">
+          </div>
+          <div id="receiptResult" style="display:none;max-height:60vh;overflow-y:auto;margin-top:.5rem"></div>
+        </div>
       </div>
     </div>
     <div class="row g-4 mt-2">
@@ -1528,6 +1535,82 @@ document.addEventListener('drop', function(e) {
   }
   dragSrcIdx = null;
 });
+
+// ─── 发票OCR成本更新 ──────────────────────────
+async function uploadReceiptOCR() {
+  const file = $('receiptFile')?.files?.[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  const res = $('receiptResult');
+  res.style.display = 'block';
+  res.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div><span class="ms-2 text-muted small">OCR 识别中...</span></div>';
+
+  try {
+    const r = await fetch(BASE_URL + '/api/products/ocr-costs', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + authToken},
+      body: form,
+    });
+    const d = await r.json();
+    if (d.error) { res.innerHTML = `<div class="alert alert-warning py-2 small">${escHtml(d.error)}</div>`; return; }
+
+    const matches = d.matches || [];
+    if (!matches.length) {
+      res.innerHTML = `<div class="text-muted small py-2">未识别到产品价格对。<br>OCR 原文：<pre style="font-size:.75rem;max-height:150px;overflow:auto">${escHtml(d.raw_text)}</pre></div>`;
+      return;
+    }
+
+    window._receiptMatches = matches;
+    let html = '<div class="small fw-medium mb-2">识别到 <strong>' + matches.length + '</strong> 条产品-价格对：</div>';
+    matches.forEach((m, i) => {
+      html += `<div class="border rounded p-2 mb-2" style="background:var(--gray-50)">
+        <div class="d-flex justify-content-between mb-1">
+          <span class="fw-medium small">📄 ${escHtml(m.name_part)}</span>
+          <span class="fw-bold" style="color:var(--primary)">¥${m.cost_price.toFixed(2)}</span>
+        </div>`;
+      if (m.candidates.length) {
+        html += '<div class="small" style="font-size:.75rem">匹配产品：';
+        m.candidates.forEach((c, j) => {
+          const checked = j === 0 ? 'checked' : '';
+          html += `<label class="d-block mb-1" style="cursor:pointer;font-weight:${j===0?'500':'normal'}">
+            <input type="radio" name="rec_match_${i}" value="${c.id}" data-cost="${m.cost_price}" ${checked}>
+            ${escHtml(c.name)} <span class="text-muted">${escHtml(c.spec||'')}</span>
+            ${c.cost_price > 0 ? `<span class="text-muted">(现成本 ¥${c.cost_price.toFixed(2)})</span>` : '<span class="text-warning">(无成本)</span>'}
+          </label>`;
+        });
+        html += '</div>';
+      } else {
+        html += '<span class="text-muted small">未找到匹配产品</span>';
+      }
+      html += '</div>';
+    });
+    html += `<button class="btn btn-sm btn-modern btn-success w-100 mt-2" onclick="applyReceiptCosts()"><i class="bi bi-check-lg me-1"></i>确认更新成本价</button>`;
+    res.innerHTML = html;
+  } catch(e) {
+    res.innerHTML = `<div class="text-danger small">上传失败: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function applyReceiptCosts() {
+  const matches = window._receiptMatches || [];
+  const updates = [];
+  matches.forEach((m, i) => {
+    const radio = document.querySelector(`input[name="rec_match_${i}"]:checked`);
+    if (radio) {
+      updates.push({id: parseInt(radio.value), cost_price: parseFloat(radio.dataset.cost)});
+    }
+  });
+  if (!updates.length) { toast('请至少选择一个产品', 'warning'); return; }
+  const r = await api('/api/products/batch-costs', 'POST', {updates});
+  if (r.updated) {
+    toast(r.message, 'success');
+    $('receiptResult').style.display = 'none';
+    clearCaches();
+  } else {
+    toast(r.error || '更新失败', 'warning');
+  }
+}
 
 // Inject drag-over CSS
 (function() {
