@@ -838,7 +838,7 @@ async function renderNewQuote(el) {
 
 async function renderQuoteForm(existingQuote, targetEl) {
   const el = targetEl || $('mainContent');
-  const q = existingQuote || {title:'', client:'', contact:'', phone:'', quote_date:new Date().toISOString().slice(0,10), valid_days:15, remark:'', id: null};
+  const q = existingQuote || {title:'', client:'', contact:'', phone:'', quote_date:new Date().toISOString().slice(0,10), valid_days:15, tax_rate:0, remark:'', id: null};
 
   // 先渲染表单，避免等待产品数据加载
   el.innerHTML = `
@@ -876,7 +876,11 @@ async function renderQuoteForm(existingQuote, targetEl) {
           <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">有效期(天)</label>
           <input class="form-control form-control-sm" id="qf_valid" type="number" value="${q.valid_days}">
         </div>
-        <div class="col-md-8">
+        <div class="col-md-2">
+          <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">税率(%)</label>
+          <input class="form-control form-control-sm" id="qf_tax_rate" type="number" step="0.1" min="0" max="100" value="${q.tax_rate || 0}" onchange="renderQuoteItems();updateQuoteTotal()" placeholder="例：5">
+        </div>
+        <div class="col-md-6">
           <label class="form-label" style="font-size:.75rem;font-weight:500;color:var(--gray-600)">报价备注</label>
           <input class="form-control form-control-sm" id="qf_remark" value="${escHtml(q.remark)}" placeholder="报价备注">
         </div>
@@ -897,7 +901,7 @@ async function renderQuoteForm(existingQuote, targetEl) {
         <table class="table table-modern table-sm" id="quoteItemsTable">
           <thead><tr><th style="width:28px"></th><th style="width:32px">#</th><th>产品名称</th><th>规格型号</th><th style="width:60px">数量</th><th style="width:85px">单价</th><th style="width:85px">金额</th><th style="width:65px">毛利</th><th style="width:50px">%</th><th style="width:100px">备注</th><th style="width:36px"></th></tr></thead>
           <tbody id="quoteItemsBody"></tbody>
-          <tfoot><tr><td colspan="6" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td id="quoteTotalRate" class="fw-medium" style="font-size:.82rem"></td><td></td><td></td></tr></tfoot>
+          <tfoot><tr><td colspan="6" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td id="quoteTotalRate" class="fw-medium" style="font-size:.82rem"></td><td id="quoteTax" class="fw-medium text-muted" style="font-size:.78rem"></td><td></td></tr></tfoot>
         </table>
       </div>
       ${quoteItems.length === 0 ? '<div class="text-center text-muted py-3 small"><i class="bi bi-inbox d-block fs-2 mb-2"></i>点击「从产品库选择」或搜索添加产品</div>' : ''}
@@ -915,20 +919,21 @@ function renderQuoteItems() {
   const tbody = $('quoteItemsBody');
   if (!tbody) return;
   if (!quoteItems.length) { tbody.innerHTML = ''; updateQuoteTotal(); return; }
-  // Profit calculation from backend data or local calc
+  // Profit calculation — apply tax deduction if tax_rate > 0
+  const taxRate = parseFloat($('qf_tax_rate')?.value) || 0;
   const profitData = quoteItems.map(item => {
-    // If backend already gave us profit (from saved quote), use it — but multiply by quantity for display
-    if (item.profit !== undefined && item.profit_rate !== undefined) {
-      return {...item, _profit: (item.profit || 0) * (item.quantity || 1), _rate: item.profit_rate};
-    }
-    // Otherwise estimate from productsCache
     let profit = 0, rate = 0;
+    // Determine pre-tax unit price
+    let pretaxPrice = item.unit_price || 0;
+    if (taxRate > 0) {
+      pretaxPrice = Math.round((item.unit_price || 0) / (1 + taxRate / 100) * 100) / 100;
+    }
     if (item.product_id && productsCache?.products) {
       const p = productsCache.products.find(p => p.id === item.product_id);
       if (p && p.cost_price) {
-        const perUnitProfit = Math.round(((item.unit_price || 0) - p.cost_price) * 100) / 100;
+        const perUnitProfit = Math.round((pretaxPrice - p.cost_price) * 100) / 100;
         profit = Math.round(perUnitProfit * (item.quantity || 1) * 100) / 100;
-        rate = (item.unit_price || 0) > 0 ? Math.round(perUnitProfit / item.unit_price * 1000) / 10 : 0;
+        rate = pretaxPrice > 0 ? Math.round(perUnitProfit / pretaxPrice * 1000) / 10 : 0;
       }
     }
     return {...item, _profit: profit, _rate: rate};
@@ -968,11 +973,14 @@ function updateQuoteTotal() {
   if (el) el.textContent = formatMoney(total);
   // Calculate total profit (shared by both display blocks)
   let tProfit = 0;
+  const taxRate = parseFloat($('qf_tax_rate')?.value) || 0;
   quoteItems.forEach(item => {
     if (item.product_id && productsCache?.products) {
       const p = productsCache.products.find(p => p.id === item.product_id);
       if (p && p.cost_price) {
-        tProfit += ((item.unit_price || 0) - p.cost_price) * (item.quantity || 1);
+        let pretaxPrice = item.unit_price || 0;
+        if (taxRate > 0) pretaxPrice = (item.unit_price || 0) / (1 + taxRate / 100);
+        tProfit += (pretaxPrice - p.cost_price) * (item.quantity || 1);
       }
     }
   });
@@ -986,6 +994,12 @@ function updateQuoteTotal() {
   if (tr) {
     const tRate = total > 0 ? Math.round(tProfit / total * 1000) / 10 : 0;
     tr.textContent = tRate !== 0 ? tRate + '%' : '';
+  }
+  // Update tax amount display
+  const tx = $('quoteTax');
+  if (tx) {
+    const tTax = taxRate > 0 && total > 0 ? Math.round((total - total / (1 + taxRate / 100)) * 100) / 100 : 0;
+    tx.textContent = tTax > 0 ? '税额 ' + formatMoney(tTax) : '';
   }
 }
 function removeQuoteItem(i) { quoteItems.splice(i, 1); renderQuoteItems(); }
@@ -1201,6 +1215,7 @@ async function saveQuote() {
   const phone = ($('qf_phone')?.value || '').trim();
   const quote_date = ($('qf_date')?.value || new Date().toISOString().slice(0,10)).trim();
   const valid_days = parseInt($('qf_valid')?.value) || 15;
+  const tax_rate = parseFloat($('qf_tax_rate')?.value) || 0;
   const remark = ($('qf_remark')?.value || '').trim();
   // 必填校验
   if (!title) { toast('请填写报价标题', 'warning'); return; }
@@ -1208,7 +1223,7 @@ async function saveQuote() {
   if (!contact) { toast('请填写联系人', 'warning'); return; }
   if (!phone) { toast('请填写电话', 'warning'); return; }
   if (!quoteItems.length) { toast('请至少添加一个产品', 'warning'); return; }
-  const payload = {title, client, contact, phone, quote_date, valid_days, remark, items: quoteItems.map((item, i) => ({product_id: item.product_id||null, product_name: item.product_name, product_sku: item.product_sku||'', product_spec: item.product_spec||'', product_unit: item.product_unit||'', quantity: item.quantity, unit_price: item.unit_price, sort_order: i, remark: item.remark||''}))};
+  const payload = {title, client, contact, phone, quote_date, valid_days, tax_rate, remark, items: quoteItems.map((item, i) => ({product_id: item.product_id||null, product_name: item.product_name, product_sku: item.product_sku||'', product_spec: item.product_spec||'', product_unit: item.product_unit||'', quantity: item.quantity, unit_price: item.unit_price, sort_order: i, remark: item.remark||''}))};
   try {
     if (editingQuoteId) { await api(`/api/quotes/${editingQuoteId}`, 'PUT', payload); toast('报价单已更新'); }
     else {

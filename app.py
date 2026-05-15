@@ -108,6 +108,7 @@ class Quote(db.Model):
     download_count = db.Column(db.Integer, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     remark = db.Column(db.Text, nullable=True)
+    tax_rate = db.Column(db.Float, default=0)  # 税率(%): 台湾5%, 大陆0%
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     items = db.relationship('QuoteItem', backref='quote', lazy='dynamic', cascade='all, delete-orphan', order_by='QuoteItem.sort_order')
@@ -134,6 +135,7 @@ class Quote(db.Model):
             'created_by': self.created_by,
             'created_by_name': creator_name,
             'remark': self.remark or '',
+            'tax_rate': self.tax_rate or 0,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
             'items': [item.to_dict(products_map) for item in self.items],
@@ -1165,6 +1167,7 @@ def create_quote():
         phone=data.get('phone', ''),
         quote_date=data.get('quote_date', datetime.now().strftime('%Y-%m-%d')),
         valid_days=int(data.get('valid_days', 15)),
+        tax_rate=float(data.get('tax_rate', 0)),
         remark=data.get('remark', ''),
         created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
     )
@@ -1217,6 +1220,7 @@ def update_quote(quote_id):
     if data.get('phone') is not None: quote.phone = data['phone']
     if data.get('quote_date') is not None: quote.quote_date = data['quote_date']
     if data.get('valid_days') is not None: quote.valid_days = int(data['valid_days'])
+    if data.get('tax_rate') is not None: quote.tax_rate = float(data['tax_rate'])
     if data.get('remark') is not None: quote.remark = data['remark']
     if data.get('status') is not None: quote.status = data['status']
 
