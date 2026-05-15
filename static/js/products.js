@@ -897,7 +897,7 @@ async function renderQuoteForm(existingQuote, targetEl) {
         <table class="table table-modern table-sm" id="quoteItemsTable">
           <thead><tr><th style="width:28px"></th><th style="width:32px">#</th><th>产品名称</th><th>规格型号</th><th style="width:60px">数量</th><th style="width:85px">单价</th><th style="width:85px">金额</th><th style="width:65px">毛利</th><th style="width:50px">%</th><th style="width:100px">备注</th><th style="width:36px"></th></tr></thead>
           <tbody id="quoteItemsBody"></tbody>
-          <tfoot><tr><td colspan="6" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td></td><td></td><td></td></tr></tfoot>
+          <tfoot><tr><td colspan="6" class="text-end fw-bold">合计</td><td class="fw-bold" style="color:var(--danger)" id="quoteTotal">¥0.00</td><td id="quoteTotalProfit" class="fw-medium" style="font-size:.82rem"></td><td id="quoteTotalRate" class="fw-medium" style="font-size:.82rem"></td><td></td><td></td></tr></tfoot>
         </table>
       </div>
       ${quoteItems.length === 0 ? '<div class="text-center text-muted py-3 small"><i class="bi bi-inbox d-block fs-2 mb-2"></i>点击「从产品库选择」或搜索添加产品</div>' : ''}
@@ -966,19 +966,26 @@ function updateQuoteTotal() {
   const total = quoteItems.reduce((s, item) => s + (item.amount || 0), 0);
   const el = $('quoteTotal');
   if (el) el.textContent = formatMoney(total);
+  // Calculate total profit (shared by both display blocks)
+  let tProfit = 0;
+  quoteItems.forEach(item => {
+    if (item.product_id && productsCache?.products) {
+      const p = productsCache.products.find(p => p.id === item.product_id);
+      if (p && p.cost_price) {
+        tProfit += ((item.unit_price || 0) - p.cost_price) * (item.quantity || 1);
+      }
+    }
+  });
   // Update total profit
   const tp = $('quoteTotalProfit');
   if (tp) {
-    let tProfit = 0;
-    quoteItems.forEach(item => {
-      if (item.product_id && productsCache?.products) {
-        const p = productsCache.products.find(p => p.id === item.product_id);
-        if (p && p.cost_price) {
-          tProfit += ((item.unit_price || 0) - p.cost_price) * (item.quantity || 1);
-        }
-      }
-    });
-    tp.textContent = tProfit !== 0 ? '毛利 ' + formatMoney(tProfit) : '';
+    tp.textContent = tProfit !== 0 ? formatMoney(tProfit) : '';
+  }
+  // Update total profit rate
+  const tr = $('quoteTotalRate');
+  if (tr) {
+    const tRate = total > 0 ? Math.round(tProfit / total * 1000) / 10 : 0;
+    tr.textContent = tRate !== 0 ? tRate + '%' : '';
   }
 }
 function removeQuoteItem(i) { quoteItems.splice(i, 1); renderQuoteItems(); }
