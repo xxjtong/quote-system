@@ -1,5 +1,50 @@
 # 更新日志
 
+## v1.6.0 (2026-05-16)
+### 🎨 Vue 3 前端重构
+- **全站 Vue 3 SPA** 替换旧版原生 JS SPA
+- Composition API + `<script setup>` + `reactive()` 状态管理
+- Vue Router 历史模式 (`createWebHistory('/quote/')`)
+- CDN 加载，零构建工具依赖（仅 Vite 打包生产环境）
+- 文件拆分：`ProductsView` / `QuotesView` / `NewQuoteView` / `LoginView` / `AdminView` / `ImportView` / `DashboardView`
+
+### 🧠 火山引擎豆包视觉识别
+- **主力模型**：`doubao-seed-1-6-lite-250815`（火山引擎豆包 Seed Lite）
+- 替换 OCR.space → 豆包直出结构化 JSON（名称/规格/厂商/价格/分类/功能描述/备注）
+- 支持降级兜底：豆包失败 → OCR.space → smart_parse_product
+- 模型可切换：支持 `doubao-seed-2-0-mini-260215` / `doubao-seed-2-0-lite-260215`
+- 图片智能识别无需压缩 — 原图直传豆包 Vision API
+
+### 🖼 产品图片全面增强
+- **图片压缩**：PIL 压缩到 ≤100KB，透明 PNG 自动贴白底转 JPG
+- **URL 下载**：新增 `POST /api/download-image`，从 URL 下载图片并保存
+- **Excel 嵌入**：报价单导出新增第 12 列「图片」，产品图片嵌入单元格内居中
+- **预览嵌入**：报价单预览新增图片列，`max-width:100px` 内嵌
+- **Excel 列布局**：11 列 → 12 列（+图片列），合并单元格范围修正
+
+### ✨ 智能识别增强
+- **prompt 拆分**：`remark` 拆为 `function_desc`（功能描述）+ `remark`（内部备注）
+- 识别结果自动填入对应字段（功能描述→功能描述框，备注→备注框）
+- 文字解析保留全部 5 字段定位置解析能力
+
+### 🐛 Bug 修复
+- **全选复选框**：`toggleAll()` 逻辑修复，根据当前状态切换而非依赖传参
+- **字段可见性 API**：兼容 dict `{key: bool}` 和数组 `[{field_name, user_visible}]` 两种格式
+- **Token URL 参数兜底**：`check_auth()` 支持 `?token=` URL 参数（用于 `<a>` 标签下载）
+- **下载记录 cascade**：`DownloadLog.quote` backref 增加 `cascade='all, delete-orphan'`
+- **金额精度**：全站 `price` / `cost_price` / `unit_price` / `tax_rate` 统一 `round(,2)`
+- **XSS 防护**：产品名 `<script>` / `onerror=` 等拦截返回 400（非 201）
+
+### 🎨 UI 优化
+- **Toast 位置**：右下角 → 右上角，不再遮挡产品列表操作按钮
+- **预览/导出表头**：公司名+客户信息行 → 黄色标题行 → 表头行的三行结构
+
+### 🏗️ 架构变更
+- **Vue SPA** 构建产物通过 Flask `send_file` / `send_from_directory` 托管
+- **SPA catch-all** 路由：所有非 API 路径返回 `index.html`（Vue Router 接管）
+- **Nginx 反向代理**：`/quote/` → Flask `/`，Vite `base: '/quote/'`
+- **开发/生产兼容**：前端 `BASE_URL` 动态判断（dev=`''`, prod=`/quote`）
+
 ## v1.5.6 (2026-05-15)
 ### 🐛 预览/导出 5 项修复
 - **预览**：`info_parts` 补全税率 `税率：5%`，备注行改为 `quote.remark`（有备注时显示备注，无备注时回退默认提示）

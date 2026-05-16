@@ -1,8 +1,8 @@
 # 报价管理系统 (Quote Management System)
 
-> Flask + SQLite + Bootstrap SPA — 产品管理、报价单生成、Excel 导入导出、OCR 智能识别、多用户认证、拼音搜索
+> Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.5.6-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.6.0-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -36,7 +36,7 @@
 | 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、**自定义公司名/页脚**、下载计数统计 |
 | 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权） |
 | 📧 **邮件** | SMTP 配置，一键发送报价单 Excel 附件 |
-| 🔍 **智能识别** | 粘贴文本自动解析产品信息、图片 OCR 识别、**发票 OCR → 批量更新成本价** |
+| 🔍 **智能识别** | 粘贴文本自动解析产品信息、火山引擎豆包 Vision 图片识别、**发票 OCR → 批量更新成本价** |
 | 🎨 **UI** | 统一页面风格、上下布局、`.page-header` / `.card-modern` / `.form-label-modern` 一致样式体系 |
 | ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹、前端本地拼音过滤 |
 
@@ -70,10 +70,11 @@
 | 后端框架 | Flask + SQLAlchemy | RESTful JSON API，字段可见性控制 |
 | 认证 | JWT (PyJWT) | 无状态 token，SHA256+盐密码，自动续签 |
 | 数据库 | SQLite | 单文件，零配置 |
-| 前端 | 原生 JavaScript SPA (3 模块) | Bootstrap 5 UI，无框架依赖 |
-| 拼音 | pypinyin | 后端拼音搜索 + 前端本地拼音过滤 |
-| Excel | openpyxl | 读写 `.xlsx`，含格式化 |
-| OCR | OCR.space API | 免费 tier 图片文字识别 |
+|| 前端 | Vue 3 SPA (CDN) | Composition API，Vite 构建，Vue Router 历史模式 |
+|| 拼音 | pypinyin | 后端拼音搜索 + 前端本地拼音过滤 |
+|| Excel | openpyxl | 读写 `.xlsx`，含格式化 |
+|| 视觉识别 | 火山引擎豆包 | Seed Lite 视觉模型，直出 JSON (v1.6.0) |
+|| 降级 OCR | OCR.space API | 免费 tier 兜底 |
 
 ---
 
@@ -259,9 +260,10 @@ Base URL: `http://127.0.0.1:5000`
 | `POST` | `/api/products/batch-delete` | 批量删除 `{ids: [1,2]}` |
 | `POST` | `/api/products/import` | 导入 Excel（multipart） |
 | `GET` | `/api/products/export-template` | 下载导入模板 |
-| `POST` | `/api/products/upload-image` | 上传图片 |
-| `POST` | `/api/products/ocr` | 图片 OCR 识别 |
-| `POST` | `/api/products/recognize` | 文本智能解析 |
+|| `POST` | `/api/products/upload-image` | 上传图片（自动压缩 ≤100KB） |
+|| `POST` | `/api/products/ocr` | 图片 OCR 识别（降级兜底） |
+|| `POST` | `/api/products/recognize` | 文本智能解析 + 图片豆包 Vision 识别（v1.6.0） |
+|| `POST` | `/api/download-image` | 从 URL 下载图片并压缩保存（v1.6.0） |
 
 **搜索匹配字段：** `name`、`spec`、`supplier`、`function_desc`（ILIKE）+ **拼音全拼+首字母**（无汉字输入时自动切换）
 
@@ -503,7 +505,15 @@ static/js/
 
 ---
 
-## 智能识别 (OCR)
+## 智能识别（豆包 Vision + OCR）
+
+### 火山引擎豆包视觉识别（v1.6.0 主力）
+
+`POST /api/products/recognize` — 上传图片 → 火山引擎豆包 Seed Lite 视觉模型直出结构化 JSON。
+
+- **模型**: `doubao-seed-1-6-lite-250815`（可切换至 `doubao-seed-2-0-lite-260215` / `doubao-seed-2-0-mini-260215`）
+- **输出**: `{name, spec, supplier, price, cost_price, category, unit, function_desc, remark}`
+- **降级**: 豆包失败 → OCR.space → smart_parse_product
 
 ### 文本解析
 
@@ -522,7 +532,7 @@ static/js/
 4. **产品名称** — 第 1 个字段
 5. **规格型号** — 剩余中间字段合并
 
-### 图片 OCR
+### 图片 OCR（降级兜底）
 
 `POST /api/products/ocr` — 上传图片 → OCR.space API → 返回文字。
 
@@ -534,27 +544,40 @@ static/js/
 
 ```
 /opt/quote-system/
-├── app.py                     # Flask 应用主文件
+├── app.py                     # Flask 应用主文件（~2572 行）
+├── frontend/                  # Vue 3 SPA 前端（v1.6.0）
+│   ├── src/                   # Vue 组件 / composables
+│   │   ├── App.vue            # 根组件 + 导航
+│   │   ├── router/            # Vue Router 配置
+│   │   ├── views/             # 页面组件
+│   │   │   ├── ProductsView   # 产品管理
+│   │   │   ├── QuotesView / NewQuoteView  # 报价单
+│   │   │   ├── DashboardView  # 概览仪表盘
+│   │   │   ├── LoginView      # 登录/注册
+│   │   │   ├── AdminView      # 管理面板
+│   │   │   └── ImportView     # Excel 导入
+│   │   └── components/        # 通用组件
+│   ├── dist/                  # Vite 构建产物（生产）
+│   └── vite.config.js         # Vite 配置
 ├── templates/
-│   └── index.html             # 前端 SPA 骨架（HTML + CSS，540行）
-├── static/
-│   └── js/
-│       ├── app.js             # 状态管理 / 工具 / 导航 / Dashboard（308行）
-│       ├── auth.js            # 认证相关（153行）
-│       └── products.js        # 产品 / 报价 / 导入 / 管理（1631行）
-├── tests/                     # pytest 测试套件（98 项）
+│   └── index.html             # 旧版 SPA 骨架（向下兼容）
+├── static/js/                 # 旧版 JS 模块（向下兼容）
+├── tests/                     # pytest 测试套件（127 项）
 │   ├── conftest.py            # fixtures（登录、session）
-│   ├── test_auth.py           # 认证（13 项）
-│   ├── test_products.py       # 产品（24 项）
-│   ├── test_quotes.py         # 报价单（18 项）
-│   ├── test_admin.py          # 管理（17 项）
-│   └── test_edge_cases.py     # 边界&安全（22 项）
+│   ├── test_auth.py           # 认证
+│   ├── test_products.py       # 产品
+│   ├── test_quotes.py         # 报价单
+│   ├── test_admin.py          # 管理
+│   ├── test_edge_cases.py     # 边界&安全
+│   ├── test_comprehensive.py  # 综合测试
+│   └── test_e2e_vue.py        # Vue E2E 测试
 ├── quote-system.service       # systemd 服务配置
 ├── version.txt                # 版本号（手动递增）
-├── CHANGELOG.md               # 更新日志（v1.5.5）
+├── CHANGELOG.md               # 更新日志
 ├── README.md                  # 本文件
 ├── REQUIREMENTS.md            # 需求规格书
-├── template.xlsx              # 导入模板
+├── CLAUDE.md                  # AI 编码规范
+├── TEST_REPORT.md             # 测试报告
 ├── uploads/
 │   └── images/                # 产品图片
 ├── exports/                   # 导出的报价单 Excel
@@ -571,12 +594,14 @@ static/js/
 | `sku` = `spec` | 写入时自动同步 |
 | 搜索匹配 | `name` + `spec` + `supplier` + `function_desc` + 拼音全拼 + 首字母 |
 | 搜索防抖 | 500ms，IME 组字中不触发 |
-| 修改模板必重启 | `sudo systemctl restart quote-system` |
+| 修改 Vue 组件 | `cd frontend && npm run build && sudo systemctl restart quote-system` |
+| 修改后端 Python | `sudo systemctl restart quote-system` |
 | 修改 JS 必强刷 | 提示用户 `Ctrl+Shift+R` |
 | 版本号手动递增 | `echo "x.x.x" > version.txt` + 重启 |
+| 图片上传压缩 | PIL 自动压缩 ≤100KB，透明PNG贴白底转JPG |
 | 图片预览白底 | 防透明 PNG 背景透字 |
-| 新增产品清空图片 | `window._pfImageUrl = ''` |
 | JWT Secret | 通过 systemd 环境变量固定，避免多 worker 不一致 |
+| 视觉识别模型 | 火山引擎豆包 Seed Lite（环境变量 `VOLCENGINE_API_KEY`） |
 
 ### 常用命令
 
@@ -597,7 +622,7 @@ conn.close()
 "
 
 # 更新版本号
-echo "1.3.8" > version.txt && sudo systemctl restart quote-system
+echo "1.6.0" > version.txt && sudo systemctl restart quote-system
 
 # 推送到 GitHub
 cd /opt/quote-system

@@ -122,7 +122,7 @@ function renderProductsHTML(d) {
         <table class="table table-modern">
           <thead>
             <tr>
-              <th style="width:36px"><input type="checkbox" class="form-check-input" onchange="toggleAll(this.checked)"></th>
+              <th style="width:36px"><input type="checkbox" class="form-check-input" onchange="toggleAll()" ${products.length > 0 && products.every(p => selectedIds.has(p.id)) ? 'checked' : ''}></th>
               <th>产品信息</th>
               <th>图片</th>
               <th>分类</th>
@@ -172,8 +172,9 @@ async function renderProducts(el) {
   }
 }
 
-function toggleAll(checked) {
-  products.forEach(p => { if (checked) selectedIds.add(p.id); else selectedIds.delete(p.id); });
+function toggleAll() {
+  const allSelected = products.length > 0 && products.every(p => selectedIds.has(p.id));
+  products.forEach(p => { allSelected ? selectedIds.delete(p.id) : selectedIds.add(p.id); });
   renderProducts($('mainContent'));
 }
 function toggleSelect(id) { selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id); renderProducts($('mainContent')); }

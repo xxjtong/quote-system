@@ -75,15 +75,14 @@ class TestSQLInjection:
 
 class TestXSS:
     def test_xss_in_product_name(self, admin_token):
-        """产品名称含 XSS 脚本"""
+        """产品名称含 XSS 脚本 — 后端拦截，返回 400"""
         resp = api("POST", "/api/products", json={
             "name": '<script>alert("XSS")</script>',
             "spec": '<img src=x onerror=alert(1)>',
         }, token=admin_token)
-        assert resp.status_code == 201
-        p = resp.json()["product"]
-        # 存储原始值（前端负责转义），后端不转义
-        assert "<script>" in p["name"]
+        # 后端有 XSS 防护，应返回 400
+        assert resp.status_code == 400
+        assert "非法" in resp.json().get("error", "")
 
     def test_xss_in_search(self, admin_token):
         """搜索参数含 XSS"""

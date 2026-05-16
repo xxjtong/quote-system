@@ -23,6 +23,7 @@ import jwt
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
 from openpyxl.utils import get_column_letter
 
 app = Flask(__name__)
@@ -190,7 +191,7 @@ class DownloadLog(db.Model):
     quote_id = db.Column(db.Integer, db.ForeignKey('quotes.id', ondelete='CASCADE'), nullable=False)
     user_name = db.Column(db.String(100), nullable=False)
     downloaded_at = db.Column(db.DateTime, default=datetime.now)
-    quote = db.relationship('Quote', backref='download_logs')
+    quote = db.relationship('Quote', backref=db.backref('download_logs', cascade='all, delete-orphan'))
 
     def to_dict(self):
         return {
@@ -446,10 +447,18 @@ def get_field_settings():
 def set_field_settings():
     data = request.get_json()
     if 'fields' in data:
-        for item in data['fields']:
-            f = FieldSetting.query.filter_by(field_name=item['field_name']).first()
-            if f:
-                f.user_visible = bool(item.get('user_visible', True))
+        fields_data = data['fields']
+        # 兼容两种格式：对象 {key: bool} 或数组 [{field_name, user_visible}]
+        if isinstance(fields_data, dict):
+            for field_name, user_visible in fields_data.items():
+                f = FieldSetting.query.filter_by(field_name=field_name).first()
+                if f:
+                    f.user_visible = bool(user_visible)
+        else:
+            for item in fields_data:
+                f = FieldSetting.query.filter_by(field_name=item['field_name']).first()
+                if f:
+                    f.user_visible = bool(item.get('user_visible', True))
         db.session.commit()
     return get_field_settings()
 
@@ -505,6 +514,8 @@ def check_auth():
         return None
     # 鉴权
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not token:
+        token = request.args.get('token', '')  # URL 参数兜底（用于 <a> 标签下载等场景）
     if not token:
         return jsonify({'error': '请先登录'}), 401
     try:
@@ -679,8 +690,8 @@ def create_product():
         category=data.get('category', ''),
         spec=spec,
         unit=data.get('unit', ''),
-        price=float(data.get('price', 0)),
-        cost_price=float(data.get('cost_price', 0)),
+        price=round(float(data.get('price', 0)), 2),
+        cost_price=round(float(data.get('cost_price', 0)), 2),
         supplier=data.get('supplier', ''),
         function_desc=data.get('function_desc', ''),
         remark=data.get('remark', ''),
@@ -724,9 +735,9 @@ def update_product(product_id):
     if not product.spec and product.sku:
         product.spec = product.sku
     if 'price' in data:
-        product.price = float(data['price'])
+        product.price = round(float(data['price']), 2)
     if 'cost_price' in data:
-        product.cost_price = float(data['cost_price'])
+        product.cost_price = round(float(data['cost_price']), 2)
     db.session.commit()
     return jsonify({'product': product.to_dict()})
 
@@ -750,6 +761,59 @@ def batch_delete_products():
     Product.query.filter(Product.id.in_(ids)).delete(synchronize_session=False)
     db.session.commit()
     return jsonify({'message': f'已删除 {len(ids)} 个产品'})
+
+
+def compress_image_if_needed(filepath, max_kb=95, max_dim=800):
+    """压缩图片到指定大小以内，返回最终路径和文件名。
+    透明PNG自动贴白底转JPG。"""
+    from PIL import Image
+    filepath = Path(filepath)
+    img = Image.open(str(filepath))
+    orig_w, orig_h = img.size
+    orig_kb = filepath.stat().st_size / 1024
+
+    # 尺寸过大的先缩小
+    if orig_w > max_dim or orig_h > max_dim:
+        ratio = min(max_dim / orig_w, max_dim / orig_h)
+        new_w = max(1, int(orig_w * ratio))
+        new_h = max(1, int(orig_h * ratio))
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # 透明 PNG → 贴白底转 JPG（无论是否需要压缩都做）
+    needs_white_bg = img.mode in ('RGBA', 'P')
+    if needs_white_bg:
+        if img.mode == 'P':
+            img = img.convert('RGBA')
+        alpha = img.split()[-1]
+        has_alpha = img.mode == 'RGBA' and alpha.getextrema()[0] < 255
+        if has_alpha:
+            bg = Image.new('RGB', img.size, (255, 255, 255))
+            bg.paste(img, mask=alpha)
+            img = bg
+        else:
+            img = img.convert('RGB')
+
+    # 若已有白底且小于阈值且不是透明格式，不处理
+    if orig_kb <= max_kb and not needs_white_bg and filepath.suffix in ('.jpg', '.jpeg'):
+        return str(filepath), filepath.name
+
+    # 保存为 JPG
+    out_path = filepath.with_suffix('.jpg')
+    if orig_kb <= max_kb and needs_white_bg:
+        # 小文件但已贴白底，高质量保存
+        img.save(str(out_path), 'JPEG', quality=85, optimize=True)
+    else:
+        # 渐进降质量
+        for quality in [75, 65, 55, 45, 35, 25]:
+            img.save(str(out_path), 'JPEG', quality=quality, optimize=True)
+            if out_path.stat().st_size / 1024 <= max_kb:
+                break
+
+    # 删除原始文件（如果扩展名变了）
+    if out_path.suffix != filepath.suffix:
+        filepath.unlink(missing_ok=True)
+
+    return str(out_path), out_path.name
 
 
 @app.route('/api/upload/image', methods=['POST'])
@@ -778,7 +842,64 @@ def upload_image():
         os.remove(filepath)
         return jsonify({'error': '图片不能超过10MB'}), 400
 
+    # 压缩到 100KB 以内
+    compressed_path, compressed_fname = compress_image_if_needed(str(filepath))
+    if compressed_fname != fname:
+        fname = compressed_fname
+
     # 返回相对URL（后面通过nginx /quote/uploads/images/ 访问）
+    image_url = f'/uploads/images/{fname}'
+    return jsonify({'url': image_url, 'filename': fname})
+
+
+@app.route('/api/download-image', methods=['POST'])
+def download_image():
+    """从URL下载图片并保存到本地"""
+    data = request.get_json()
+    url = (data.get('url') or '').strip()
+    if not url:
+        return jsonify({'error': '请提供图片URL'}), 400
+    # 只允许 http/https
+    if not url.startswith(('http://', 'https://')):
+        return jsonify({'error': '仅支持 http/https 链接'}), 400
+
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content = resp.read()
+            content_type = resp.headers.get('Content-Type', '')
+    except Exception as e:
+        return jsonify({'error': f'下载失败: {str(e)}'}), 400
+
+    # 校验类型
+    allowed_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'}
+    if content_type.split(';')[0].strip() not in allowed_types:
+        return jsonify({'error': '仅支持 JPG/PNG/GIF/WebP/BMP 格式'}), 400
+
+    # 推断扩展名
+    ext_map = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+               'image/webp': '.webp', 'image/bmp': '.bmp'}
+    ext = ext_map.get(content_type.split(';')[0].strip(), '.jpg')
+    # 也检查 URL 扩展名
+    url_path = url.split('?')[0]
+    if '.' in url_path.rsplit('/', 1)[-1]:
+        url_ext = os.path.splitext(url_path.rsplit('/', 1)[-1])[1].lower()
+        if url_ext in {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}:
+            ext = url_ext
+
+    fname = f'prod_{datetime.now().strftime("%Y%m%d_%H%M%S")}_{random.randint(1000,9999)}{ext}'
+    save_dir = UPLOAD_DIR / 'images'
+    save_dir.mkdir(parents=True, exist_ok=True)
+    filepath = save_dir / fname
+    with open(filepath, 'wb') as f:
+        f.write(content)
+
+    # 压缩到 100KB 以内
+    compressed_path, compressed_fname = compress_image_if_needed(str(filepath))
+    if compressed_fname != fname:
+        fname = compressed_fname
+
     image_url = f'/uploads/images/{fname}'
     return jsonify({'url': image_url, 'filename': fname})
 
@@ -842,30 +963,367 @@ def ocr_image():
         return jsonify({'error': f'OCR处理失败: {str(e)}'}), 500
 
 
+def _ocr_fallback(image_path):
+    """OCR.space 作为降级方案，返回识别文本或 None。"""
+    try:
+        import requests as http_req
+        with open(image_path, 'rb') as fp:
+            r = http_req.post(
+                'https://api.ocr.space/parse/image',
+                files={'file': fp},
+                data={'language': 'chs', 'isOverlayRequired': False,
+                      'detectOrientation': True, 'scale': True,
+                      'apikey': 'helloworld'},
+                timeout=30,
+            )
+        if r.status_code != 200:
+            return None
+        result = r.json()
+        if result.get('OCRExitCode') == 1:
+            return result.get('ParsedResults', [{}])[0].get('ParsedText', '').strip()
+    except Exception:
+        pass
+    return None
+
+
+def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
+    """使用火山引擎豆包 Seed Lite 从图片中提取产品信息，返回结构化 JSON dict。
+    豆包直出纯 JSON，不需要额外解析。
+    失败返回 None。
+    """
+    api_key = os.environ.get('VOLCENGINE_API_KEY', '')
+    if not api_key:
+        return None
+
+    prompt = (
+        '请仔细阅读图片中的产品信息，提取以下字段并以JSON格式返回（只返回JSON，不要其他文字）：\n'
+        '{\n'
+        '  "name": "产品名称（中文，不包括型号）",\n'
+        '  "spec": "规格型号（如 ZQWL-GW2800NU-P12）",\n'
+        '  "supplier": "厂商/品牌名",\n'
+        '  "price": 售价数字（纯数字，没有则填 0）,\n'
+        '  "cost_price": 成本价数字（纯数字，没有则填 0）,\n'
+        '  "category": "分类（如 IO网关、传感器、门禁等，没有则填空字符串）",\n'
+        '  "unit": "单位（台/个/套/件，默认台）",\n'
+        '  "function_desc": "功能描述（核心功能、特性、参数亮点等）",\n'
+        '  "remark": "其他备注（产地、认证、包装等次要信息，没有则填空字符串）"\n'
+        '}\n'
+        '注意：\n'
+        '- 型号通常是大写字母+数字+横杠组合\n'
+        '- 厂商从文字中直接提取，不要猜测\n'
+        '- 价格只提取数字部分\n'
+        '- function_desc 放主要功能特性，remark 放次要备注信息'
+    )
+
+    try:
+        import requests as http_req
+        r = http_req.post(
+            'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'model': 'doubao-seed-2-0-lite-260215',
+                'messages': [{
+                    'role': 'user',
+                    'content': [
+                        {'type': 'text', 'text': prompt},
+                        {'type': 'image_url', 'image_url': {'url': f'data:{mime_type};base64,{image_b64}'}}
+                    ]
+                }],
+                'max_tokens': 1000,
+            },
+            timeout=60,
+        )
+        if r.status_code != 200:
+            return None
+
+        result = r.json()
+        raw_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+        if not raw_text:
+            return None
+
+        # 豆包直出 JSON，直接解析
+        import re, json
+        parsed = None
+
+        # 策略1: 直接解析整个文本
+        try:
+            parsed = json.loads(raw_text.strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # 策略2: 提取 ```json ... ``` 代码块
+        if not parsed:
+            m = re.search(r'```(?:json)?\s*\n?(\{.+\})\s*```', raw_text, re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group(1))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        # 策略3: 提取包含 "name" 字段的 JSON 对象
+        if not parsed:
+            m = re.search(r'\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}', raw_text, re.DOTALL)
+            if not m:
+                m = re.search(r'\{.+\}', raw_text, re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        if parsed:
+            product = {
+                'name': str(parsed.get('name', '')).strip()[:200],
+                'spec': str(parsed.get('spec', '')).strip()[:100],
+                'supplier': str(parsed.get('supplier', '')).strip()[:50],
+                'price': _safe_number(parsed.get('price', 0)),
+                'cost_price': _safe_number(parsed.get('cost_price', 0)),
+                'unit': str(parsed.get('unit', '')).strip()[:10],
+                'category': str(parsed.get('category', '')).strip()[:50],
+                'function_desc': str(parsed.get('function_desc', '')).strip()[:500],
+                'remark': str(parsed.get('remark', '')).strip()[:500],
+            }
+            if product['name']:
+                return product
+        return None
+    except Exception:
+        return None
+
+
+def _safe_number(val):
+    """安全转换为 float，失败返回 0。"""
+    if val is None:
+        return 0
+    if isinstance(val, (int, float)):
+        return round(float(val), 2)
+    try:
+        return round(float(val), 2)
+    except (ValueError, TypeError):
+        return 0
+
+
 @app.route('/api/products/recognize', methods=['POST'])
 def recognize_product():
-    """识别粘贴的文本，提取产品信息（每次只识别1个，空格/Tab分割）"""
-    data = request.get_json()
-    if not data or not data.get('text', '').strip():
-        return jsonify({'error': '请粘贴要识别的内容'}), 400
+    """智能识别粘贴内容（文字或图片），提取产品信息。
+    每次只识别1个产品。
+    图片使用 Gemini Vision 识别；文字使用 smart_parse_product 解析。
+    请求体：{"text": "..."} 或上传 file 字段的图片
+    返回：{"products": [{name,spec,supplier,price,...}]}
+    """
+    data = request.get_json(silent=True) or {}
+    uploaded_file = request.files.get('file')
 
-    text = data['text'].strip()
-    # 整段文本作为1个产品，用空格/Tab分割字段
-    product = parse_product_line(text)
+    text = None
+
+    # 模式1: 图片文件上传 → 豆包 Vision
+    if uploaded_file:
+        try:
+            tmp_path = UPLOAD_DIR / f'_smart_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
+            uploaded_file.save(str(tmp_path))
+            size = os.path.getsize(tmp_path)
+            if size > 5 * 1024 * 1024:
+                os.remove(tmp_path)
+                return jsonify({'error': '图片不能超过5MB'}), 400
+
+            import base64
+            with open(tmp_path, 'rb') as fp:
+                image_b64 = base64.b64encode(fp.read()).decode('utf-8')
+
+            product = doubao_vision_recognize(image_b64)
+            if product:
+                os.remove(tmp_path)
+                return jsonify({'products': [product]})
+
+            # 降级：OCR.space → smart_parse_product
+            text = _ocr_fallback(str(tmp_path))
+            os.remove(tmp_path)
+            if text:
+                product = smart_parse_product(text)
+                if product:
+                    return jsonify({'products': [product]})
+            return jsonify({'products': [], 'error': '未能从图片中识别出产品信息，请检查图片清晰度'})
+        except Exception as e:
+            return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
+
+    # 模式2: base64图片 → 豆包 Vision
+    elif data.get('image'):
+        try:
+            import base64
+            img_data = data['image']
+            if ',' in img_data:
+                img_data = img_data.split(',', 1)[1]
+
+            product = doubao_vision_recognize(img_data, mime_type=data.get('mime_type', 'image/png'))
+            if product:
+                return jsonify({'products': [product]})
+            return jsonify({'products': [], 'error': '未能从图片中识别出产品信息，请检查图片清晰度'})
+        except Exception as e:
+            return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
+
+    # 模式3: 纯文本 → smart_parse_product
+    elif data.get('text', '').strip():
+        text = data['text'].strip()
+    else:
+        return jsonify({'error': '请粘贴文字或图片'}), 400
+
+    if not text:
+        return jsonify({'products': [], 'error': '未能识别出文字内容'})
+
+    product = smart_parse_product(text)
     if product:
         return jsonify({'products': [product]})
-    return jsonify({'products': [], 'error': '未能从内容中识别出产品信息，请检查粘贴格式'})
+    return jsonify({'products': [], 'error': '未能从内容中识别出产品信息，请检查粘贴内容'})
+
+
+def smart_parse_product(text):
+    """智能解析非结构化文本，按字段模式匹配提取产品信息。
+    不依赖固定顺序/分隔符，支持任意格式粘贴。
+    """
+    import re
+
+    result = {'name': '', 'sku': '', 'spec': '', 'unit': '',
+              'price': 0, 'cost_price': 0, 'supplier': '', 'remark': ''}
+
+    text = text.strip()
+    if not text:
+        return None
+
+    # ── 1. 提取价格（支持：¥123.45 / 123元 / 价格:123 / 售价 ¥123）──
+    price_patterns = [
+        r'[¥￥]\s*(\d+\.?\d{0,2})\b',
+        r'售价[：:\s]*[¥￥]?\s*(\d+\.?\d{0,2})\b',
+        r'价格[：:\s]*[¥￥]?\s*(\d+\.?\d{0,2})\b',
+        r'单价[：:\s]*[¥￥]?\s*(\d+\.?\d{0,2})\b',
+        r'(\d+\.?\d{0,2})\s*元\b',
+        r'\b(\d+\.?\d{0,2})\s*[元$]',
+    ]
+    prices_found = []
+    for pat in price_patterns:
+        for m in re.finditer(pat, text):
+            val = float(m.group(1))
+            if 0 < val < 100000000:
+                prices_found.append((val, m.start(), m.end()))
+    if prices_found:
+        # 取最大金额作为售价
+        prices_found.sort(key=lambda x: -x[0])
+        result['price'] = round(prices_found[0][0], 2)
+
+    # ── 2. 提取成本价 ──
+    cost_patterns = [
+        r'成本[：:\s]*[¥￥]?\s*(\d+\.?\d{0,2})\b',
+        r'进价[：:\s]*[¥￥]?\s*(\d+\.?\d{0,2})\b',
+        r'成本价[：:\s]*[¥￥]?\s*(\d+\.?\d{0,2})\b',
+    ]
+    for pat in cost_patterns:
+        m = re.search(pat, text)
+        if m:
+            result['cost_price'] = round(float(m.group(1)), 2)
+            break
+
+    # ── 3. 提取型号（大写字母+数字+横杠组合）──
+    sku_patterns = [
+        r'\b([A-Z]{2,}[\dA-Z\-/\.\+]{1,30})\b',
+        r'型号[：:\s]*([A-Z\d][\dA-Z\-/\.\+]{1,30})',
+        r'规格型号[：:\s]*([A-Z\d][\dA-Z\-/\.\+]{1,30})',
+        r'SKU[：:\s]*([A-Z\d][\dA-Z\-/\.\+]{1,30})',
+    ]
+    skus_found = []
+    for pat in sku_patterns:
+        for m in re.finditer(pat, text):
+            v = m.group(1).strip()
+            if len(v) >= 3 and re.search(r'[A-Z]', v) and re.search(r'\d', v):
+                skus_found.append((v, m.start(), m.end()))
+    if skus_found:
+        # 最长型号优先
+        skus_found.sort(key=lambda x: -len(x[0]))
+        result['spec'] = skus_found[0][0]
+
+    # ── 4. 熟悉厂商对照 ──
+    known_suppliers = [
+        '星纵', '绿米', '海康威视', '海康微影', '大华', '宇视', '汉朔',
+        '京东方', 'BOE', '得力', '德生', '研华', '中弘', '亿联', '飞利浦',
+        '树莓', '明纬', '杜亚', '欧孚', 'HID', 'QBIC', 'Temi', 'ELO',
+        '智嵌', '智绘源', '宸展', '联智触控', '优良专显', '大唐', '大洋',
+        '原点', '微光', '微耕', '西瑞智能', '苏州星途', '迪勤', '京仪北方',
+        '汇尚', '海林', '百度', '中电', '迭代', '易乐看',
+    ]
+    for s in known_suppliers:
+        if s in text:
+            result['supplier'] = s
+            break
+
+    # ── 5. 熟悉分类对照 ──
+    known_categories = [
+        'IoT', '会议', '信发', '厕位', '工位', '星纵', '绿米', '门禁',
+        '环境', '能耗照明环境', 'FM', 'IBMS', 'MTR', '访客',
+    ]
+    for c in known_categories:
+        if c in text:
+            result.setdefault('category', c)
+            break
+
+    # ── 6. 提取单位 ──
+    unit_match = re.search(r'单位[：:\s]*([台个套件只条根米卷])', text)
+    if unit_match:
+        result['unit'] = unit_match.group(1)
+
+    # ── 7. 剩余文字 → 产品名称 + 备注 ──
+    # 去掉已匹配的价格、型号、厂商等
+    clean = text
+    for pat in price_patterns:
+        clean = re.sub(pat, '', clean)
+    for pat in sku_patterns:
+        clean = re.sub(pat, '', clean, count=1)
+    for pat in cost_patterns:
+        clean = re.sub(pat, '', clean)
+    clean = re.sub(r'[¥￥]', '', clean)
+    clean = re.sub(r'售价|价格|单价|成本|进价|成本价|型号|规格型号|SKU|单位', '', clean)
+    clean = re.sub(r'产品[：:\s]*|厂商[：:\s]*|功能[：:\s]*|描述[：:\s]*|说明[：:\s]*', '', clean)
+    clean = re.sub(r'[：:\s]+', ' ', clean).strip()
+    # 清理孤立的 "元"（价格提取残留）
+    clean = re.sub(r'\b元\b', '', clean).strip()
+
+    # 去掉已匹配的厂商名
+    if result['supplier']:
+        clean = clean.replace(result['supplier'], '').strip()
+
+    # 清理多余空格和标点
+    clean = re.sub(r'\s+', ' ', clean).strip(' ，,。.')
+    clean = re.sub(r'^\d+[\\.\、\）\)]\s*', '', clean)  # 去掉序号前缀
+
+    if clean:
+        # 按常见中文标点/换行分段
+        segments = [s.strip() for s in re.split(r'[，,。\\n]', clean) if s.strip()]
+        if segments:
+            # 第一段 → 产品名称（中文优先）
+            chinese_name = ''
+            for seg in segments:
+                if re.search(r'[\u4e00-\u9fff]', seg):
+                    chinese_name = seg
+                    break
+            if not chinese_name:
+                chinese_name = segments[0]
+            result['name'] = chinese_name[:200]
+
+            # 剩余段 → 备注
+            other = [s for s in segments if s != chinese_name]
+            if other:
+                result['remark'] = ' '.join(other)[:500]
+
+    # ── 兜底：如果 name 为空，取正文第一行 ──
+    if not result.get('name') and clean:
+        first_line = clean.split('\n')[0].strip()[:200]
+        if first_line:
+            result['name'] = first_line
+
+    return result if result.get('name') else None
 
 
 def parse_product_line(line):
-    """解析一行文本为产品字段。
-    格式：产品名称 [tab/空格] 规格型号 [tab/空格] 厂商 [tab/空格] 功能描述 [tab/空格] 售价
-    - 第1个字段：产品名称
-    - 最后1个字段如果是数字：售价
-    - 倒数第2个字段：功能描述 → 填入备注
-    - 倒数第3个字段（如有）：厂商
-    - 其余中间字段：规格型号
-    """
+    """原始解析器，保留兼容（Tab/空格固定位置）"""
     import re
 
     # 先按tab分割（Excel粘贴）
@@ -895,7 +1353,7 @@ def parse_product_line(line):
     price_match = re.match(r'^[¥￥]?\s*([\d]+\.?\d*)\s*[元]?$', last)
     if price_match:
         try:
-            price_val = float(price_match.group(1))
+            price_val = round(float(price_match.group(1)), 2)
             parts = parts[:-1]
         except ValueError:
             pass
@@ -978,7 +1436,7 @@ def ocr_costs():
             if not m:
                 continue
             try:
-                cost_price = float(m[-1])
+                cost_price = round(float(m[-1]), 2)
             except ValueError:
                 continue
             # 去掉价格部分，剩余为产品描述
@@ -1036,7 +1494,7 @@ def batch_update_costs():
         if pid and cost is not None:
             product = db.session.get(Product, int(pid))
             if product:
-                product.cost_price = float(cost)
+                product.cost_price = round(float(cost), 2)
                 updated += 1
     db.session.commit()
     return jsonify({'updated': updated, 'message': f'已更新{updated}个产品成本价'})
@@ -1088,9 +1546,9 @@ def import_products():
             if val is None:
                 return 0
             if isinstance(val, (int, float)):
-                return float(val) if val else 0
+                return round(float(val) if val else 0, 2)
             try:
-                return float(val)
+                return round(float(val), 2)
             except (ValueError, TypeError):
                 return 0
 
@@ -1299,23 +1757,31 @@ def create_quote():
         phone=data.get('phone', ''),
         quote_date=data.get('quote_date', datetime.now().strftime('%Y-%m-%d')),
         valid_days=int(data.get('valid_days', 15)),
-        tax_rate=float(data.get('tax_rate', 0)),
+        tax_rate=round(float(data.get('tax_rate', 0)), 2),
         remark=data.get('remark', ''),
         created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
     )
 
     items_data = data.get('items', [])
     total = 0
+    # 预加载产品信息以填充 name/spec/unit/sku
+    pids = [it.get('product_id') for it in items_data if it.get('product_id')]
+    pmap = {}
+    if pids:
+        products = Product.query.filter(Product.id.in_(pids)).all()
+        pmap = {p.id: p for p in products}
     for i, item in enumerate(items_data):
         qty = int(item.get('quantity', 1))
-        up = float(item.get('unit_price', 0))
+        up = round(float(item.get('unit_price', 0)), 2)
         amt = round(qty * up, 2)
+        pid = item.get('product_id')
+        prod = pmap.get(pid) if pid else None
         qi = QuoteItem(
-            product_id=item.get('product_id'),
-            product_name=item.get('product_name', ''),
-            product_sku=item.get('product_sku', ''),
-            product_spec=item.get('product_spec', ''),
-            product_unit=item.get('product_unit', ''),
+            product_id=pid,
+            product_name=item.get('product_name') or (prod.name if prod else ''),
+            product_sku=item.get('product_sku') or (prod.sku if prod else ''),
+            product_spec=item.get('product_spec') or (prod.spec if prod else ''),
+            product_unit=item.get('product_unit') or (prod.unit if prod else ''),
             quantity=qty,
             unit_price=up,
             amount=amt,
@@ -1352,24 +1818,32 @@ def update_quote(quote_id):
     if data.get('phone') is not None: quote.phone = data['phone']
     if data.get('quote_date') is not None: quote.quote_date = data['quote_date']
     if data.get('valid_days') is not None: quote.valid_days = int(data['valid_days'])
-    if data.get('tax_rate') is not None: quote.tax_rate = float(data['tax_rate'])
+    if data.get('tax_rate') is not None: quote.tax_rate = round(float(data['tax_rate']), 2)
     if data.get('remark') is not None: quote.remark = data['remark']
     if data.get('status') is not None: quote.status = data['status']
 
     if 'items' in data:
         QuoteItem.query.filter_by(quote_id=quote_id).delete()
         total = 0
+        # 预加载产品信息以填充 name/spec/unit/sku
+        pids = [it.get('product_id') for it in data['items'] if it.get('product_id')]
+        pmap = {}
+        if pids:
+            products = Product.query.filter(Product.id.in_(pids)).all()
+            pmap = {p.id: p for p in products}
         for i, item in enumerate(data['items']):
             qty = int(item.get('quantity', 1))
-            up = float(item.get('unit_price', 0))
+            up = round(float(item.get('unit_price', 0)), 2)
             amt = round(qty * up, 2)
+            pid = item.get('product_id')
+            prod = pmap.get(pid) if pid else None
             qi = QuoteItem(
                 quote_id=quote_id,
-                product_id=item.get('product_id'),
-                product_name=item.get('product_name', ''),
-                product_sku=item.get('product_sku', ''),
-                product_spec=item.get('product_spec', ''),
-                product_unit=item.get('product_unit', ''),
+                product_id=pid,
+                product_name=item.get('product_name') or (prod.name if prod else ''),
+                product_sku=item.get('product_sku') or (prod.sku if prod else ''),
+                product_spec=item.get('product_spec') or (prod.spec if prod else ''),
+                product_unit=item.get('product_unit') or (prod.unit if prod else ''),
                 quantity=qty,
                 unit_price=up,
                 amount=amt,
@@ -1427,23 +1901,15 @@ def export_quote_excel(quote_id):
     pct_fmt = '0%'
 
     # ── 列宽（精确匹配模板） ──
-    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16]
-    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注']
+    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16, 16.0]
+    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注', '图片']
     COL_COUNT = len(headers)
 
     for ci, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
-    # ── 第1行：黄色标题 ──
+    # ── 第1行：公司名 + 客户信息 ──
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
-    t = ws.cell(row=1, column=1, value=quote.title or '报价单')
-    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=1, column=ci).border = thin_border
-    ws.row_dimensions[1].height = 18
-
-    # ── 第2行：公司名 + 客户信息 ──
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
     company = get_setting('company_name', '').strip()
     parts = [f'公司：{company}'] if company else []
     if quote.client: parts.append(f'客户：{quote.client}')
@@ -1452,12 +1918,20 @@ def export_quote_excel(quote_id):
     if quote.tax_rate and quote.tax_rate > 0: parts.append(f'税率：{quote.tax_rate}%')
     if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
     info = '  |  '.join(parts) if parts else ''
-    c1 = ws.cell(row=2, column=1, value=info)
+    c1 = ws.cell(row=1, column=1, value=info)
     c1.font = Font(name='微软雅黑', size=9, color='666666')
     c1.alignment = Alignment(horizontal='left', vertical='center')
     for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=1, column=ci).border = thin_border
+    ws.row_dimensions[1].height = 17
+
+    # ── 第2行：黄色标题 ──
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
+    t = ws.cell(row=2, column=1, value=quote.title or '报价单')
+    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
+    for ci in range(1, COL_COUNT + 1):
         ws.cell(row=2, column=ci).border = thin_border
-    ws.row_dimensions[2].height = 17
+    ws.row_dimensions[2].height = 18
 
     # ── 第3行：表头 ──
     HEAD = 3
@@ -1492,7 +1966,7 @@ def export_quote_excel(quote_id):
 
         vals = [i, item.product_name, item.product_spec or '',
                 item.product_spec or item.product_sku or '', desc,
-                up, qty, subtotal, 0, subtotal, item.remark or '']
+                up, qty, subtotal, 0, subtotal, item.remark or '', '']
 
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
@@ -1503,19 +1977,28 @@ def export_quote_excel(quote_id):
         ws.cell(row=row, column=1).border = thin_border
         ws.cell(row=row, column=COL_COUNT).border = thin_border
 
-        # 嵌入产品图片到功能描述列
+        # 嵌入产品图片到图片列（L列）
         if image_url:
             try:
                 img_path = BASE_DIR / image_url.lstrip('/')
                 if img_path.exists():
                     img = XLImage(str(img_path))
-                    # 限制尺寸不超过单元格：宽≈400px, 高≤48px（行高54-边距6）
+                    # 限制尺寸适配图片列：宽≈80px, 高≤48px
                     w, h = img.width, img.height
-                    max_w, max_h = 400, 48
+                    max_w, max_h = 80, 48
                     ratio = min(max_w / w, max_h / h, 1)
                     img.width = int(w * ratio)
                     img.height = int(h * ratio)
-                    img.anchor = get_column_letter(5) + str(row)
+                    # 图片单元格内居中
+                    col_l = get_column_letter(12)
+                    col_w_px = (ws.column_dimensions[col_l].width or 10) * 7
+                    row_h_pt = ws.row_dimensions[row].height or 60
+                    x_emu = int(max(0, (col_w_px - img.width) / 2) * 9525)
+                    y_emu = int(max(0, (row_h_pt - img.height) / 2) * 9525)
+                    img.anchor = TwoCellAnchor(
+                        _from=AnchorMarker(col=11, colOff=x_emu, row=row-1, rowOff=y_emu),
+                        to=AnchorMarker(col=11, colOff=x_emu + img.width * 9525, row=row-1, rowOff=y_emu + img.height * 9525)
+                    )
                     ws.add_image(img)
             except Exception:
                 pass
@@ -1523,7 +2006,7 @@ def export_quote_excel(quote_id):
     # ── 合计行 ──
     row += 1
     ws.row_dimensions[row].height = 22
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
 
     total_amt = quote.total_amount or 0
     tlabel = ws.cell(row=row, column=1, value=f'合计（大写）：{number_to_cn(total_amt)}')
@@ -1531,18 +2014,16 @@ def export_quote_excel(quote_id):
     tlabel.alignment = Alignment(horizontal='right', vertical='center')
     tlabel.border = thin_border
 
-    for ci in range(2, 9):
+    for ci in range(2, 11):
         c = ws.cell(row=row, column=ci)
         c.font = total_font; c.border = thin_border
 
-    tc = ws.cell(row=row, column=10, value=total_amt)
+    tc = ws.cell(row=row, column=11, value=total_amt)
     tc.font = total_font; tc.number_format = money_fmt; tc.alignment = ca
     tc.border = thin_border
 
-    ws.cell(row=row, column=9).font = total_font
-    ws.cell(row=row, column=9).border = thin_border
-    ws.cell(row=row, column=11).border = thin_border
-    ws.cell(row=row, column=11).font = total_font
+    ws.cell(row=row, column=12).border = thin_border
+    ws.cell(row=row, column=12).font = total_font
 
     # ── 备注行 ──
     row += 1
@@ -1597,7 +2078,7 @@ def send_quote_email(quote_id):
     quote, err, status = check_quote_owner(quote_id)
     if not quote:
         return err, status
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     to_email = data.get('to_email', '').strip()
     if not to_email:
         return jsonify({'error': '请填写收件人邮箱'}), 400
@@ -1661,18 +2142,13 @@ def _build_excel(quote, pmap, filepath):
     thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
     ca = Alignment(horizontal='center', vertical='center', wrap_text=True)
     money_fmt = '#,##0.00'
-    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16]
-    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注']
+    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16, 16.0]
+    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注', '图片']
     COL_COUNT = len(headers)
     for ci, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
+    # ── 第1行：公司名 + 客户信息 ──
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
-    t = ws.cell(row=1, column=1, value=quote.title or '')
-    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=1, column=ci).border = thin_border
-    ws.row_dimensions[1].height = 18
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
     company = get_setting('company_name', '').strip()
     parts = [f'公司：{company}'] if company else []
     if quote.client: parts.append(f'客户：{quote.client}')
@@ -1681,11 +2157,18 @@ def _build_excel(quote, pmap, filepath):
     if quote.tax_rate and quote.tax_rate > 0: parts.append(f'税率：{quote.tax_rate}%')
     if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
     info = '  |  '.join(parts) if parts else ''
-    c1 = ws.cell(row=2, column=1, value=info)
+    c1 = ws.cell(row=1, column=1, value=info)
     c1.font = Font(name='微软雅黑', size=9, color='666666'); c1.alignment = Alignment(horizontal='left', vertical='center')
     for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=1, column=ci).border = thin_border
+    ws.row_dimensions[1].height = 17
+    # ── 第2行：黄色标题 ──
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
+    t = ws.cell(row=2, column=1, value=quote.title or '')
+    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
+    for ci in range(1, COL_COUNT + 1):
         ws.cell(row=2, column=ci).border = thin_border
-    ws.row_dimensions[2].height = 17
+    ws.row_dimensions[2].height = 18
     HEAD = 3
     ws.row_dimensions[HEAD].height = 17
     for ci, h in enumerate(headers, 1):
@@ -1698,26 +2181,51 @@ def _build_excel(quote, pmap, filepath):
         qty = item.quantity if item.quantity else 1
         up = item.unit_price if item.unit_price else 0
         subtotal = round(qty * up, 2)
-        product_function_desc = ''
+        product_function_desc = ''; image_url = ''
         if item.product_id:
             product = pmap.get(item.product_id)
-            if product: product_function_desc = product.function_desc or ''
-        vals = [i, item.product_name, item.product_spec or '', item.product_spec or item.product_sku or '', product_function_desc, up, qty, subtotal, 0, subtotal, item.remark or '']
+            if product:
+                product_function_desc = product.function_desc or ''
+                image_url = product.image_url
+        vals = [i, item.product_name, item.product_spec or '', item.product_spec or item.product_sku or '', product_function_desc, up, qty, subtotal, 0, subtotal, item.remark or '', '']
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
             cell.font = data_font; cell.alignment = ca; cell.border = thin_border
+        # 嵌入产品图片到图片列（L列）
+        if image_url:
+            try:
+                img_path = BASE_DIR / image_url.lstrip('/')
+                if img_path.exists():
+                    img = XLImage(str(img_path))
+                    w, h = img.width, img.height
+                    max_w, max_h = 80, 48
+                    ratio = min(max_w / w, max_h / h, 1)
+                    img.width = int(w * ratio)
+                    img.height = int(h * ratio)
+                    # 图片单元格内居中
+                    col_l = get_column_letter(12)
+                    col_w_px = (ws.column_dimensions[col_l].width or 10) * 7
+                    row_h_pt = ws.row_dimensions[row].height or 60
+                    x_emu = int(max(0, (col_w_px - img.width) / 2) * 9525)
+                    y_emu = int(max(0, (row_h_pt - img.height) / 2) * 9525)
+                    img.anchor = TwoCellAnchor(
+                        _from=AnchorMarker(col=11, colOff=x_emu, row=row-1, rowOff=y_emu),
+                        to=AnchorMarker(col=11, colOff=x_emu + img.width * 9525, row=row-1, rowOff=y_emu + img.height * 9525)
+                    )
+                    ws.add_image(img)
+            except Exception:
+                pass
     row += 1
     ws.row_dimensions[row].height = 22
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
     total_amt = quote.total_amount or 0
     tlabel = ws.cell(row=row, column=1, value=f'合计（大写）：{number_to_cn(total_amt)}')
     tlabel.font = total_font; tlabel.alignment = Alignment(horizontal='right', vertical='center'); tlabel.border = thin_border
-    for ci in range(2, 9):
+    for ci in range(2, 11):
         c = ws.cell(row=row, column=ci); c.font = total_font; c.border = thin_border
-    tc = ws.cell(row=row, column=10, value=total_amt)
+    tc = ws.cell(row=row, column=11, value=total_amt)
     tc.font = total_font; tc.number_format = money_fmt; tc.alignment = ca; tc.border = thin_border
-    ws.cell(row=row, column=9).font = total_font; ws.cell(row=row, column=9).border = thin_border
-    ws.cell(row=row, column=11).border = thin_border; ws.cell(row=row, column=11).font = total_font
+    ws.cell(row=row, column=12).border = thin_border; ws.cell(row=row, column=12).font = total_font
     row += 1
     ws.row_dimensions[row].height = 18
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
@@ -1774,16 +2282,19 @@ def preview_quote_html(quote_id):
         except: return str(n)
 
     info_parts = []
+    company = get_setting('company_name', '').strip()
+    if company: info_parts.append(f'公司：{company}')
     if quote.client: info_parts.append(f'客户：{quote.client}')
     if quote.contact: info_parts.append(f'联系人：{quote.contact}')
     if quote.phone: info_parts.append(f'电话：{quote.phone}')
     if quote.quote_date: info_parts.append(f'日期：{quote.quote_date}')
     if quote.valid_days: info_parts.append(f'有效期：{quote.valid_days}天')
     if quote.tax_rate and quote.tax_rate > 0: info_parts.append(f'税率：{quote.tax_rate}%')
+    info_line = '  |  '.join(info_parts) if info_parts else ''
 
     items_html = ''
     for i, item in enumerate(quote.items, 1):
-        supplier = ''; supplier_sku = ''; cost = 0; prod_function_desc = ''
+        supplier = ''; supplier_sku = ''; cost = 0; prod_function_desc = ''; image_url = ''
         if item.product_id:
             prod = pmap.get(item.product_id)
             if prod:
@@ -1791,6 +2302,7 @@ def preview_quote_html(quote_id):
                 supplier_sku = prod.spec or prod.sku or ''
                 cost = prod.cost_price or 0
                 prod_function_desc = prod.function_desc or ''
+                image_url = prod.image_url or ''
 
         qty = item.quantity if item.quantity else 1
         up = item.unit_price if item.unit_price else 0
@@ -1798,6 +2310,14 @@ def preview_quote_html(quote_id):
         deal_price = subtotal
         guide_price = round(cost * 1.5, 2) if cost else 0
         min_retail = round(cost * 1.15, 2) if cost else 0
+
+        # 图片列：本地路径加前缀
+        img_cell = ''
+        if image_url:
+            src = ('/quote' + image_url) if image_url.startswith('/') else image_url
+            img_cell = f'<img src="{src}" style="max-width:100px;max-height:48px;object-fit:contain;display:block;margin:0 auto">'
+        else:
+            img_cell = '—'
 
         items_html += f'''
         <tr>
@@ -1812,6 +2332,7 @@ def preview_quote_html(quote_id):
             <td>0%</td>
             <td>{fmt(deal_price)}</td>
             <td>{item.remark or ''}</td>
+            <td style="text-align:center;vertical-align:middle">{img_cell}</td>
         </tr>'''
 
     html = f'''<!DOCTYPE html>
@@ -1854,11 +2375,15 @@ tr:hover td{{background:#fffbe6}}
     <button class="btn btn-primary" onclick="window.print()">🖨 打印</button>
     <button class="btn" onclick="parent.document.querySelector('#formModal .btn-close')?.click()">关闭</button>
   </div>
-  <div class="info">{'  |  '.join(info_parts) if info_parts else ''}</div>
-  <div class="title">{quote.title or '报价单'}</div>
   <div style="overflow-x:auto">
   <table>
     <thead>
+      <tr>
+        <td colspan="12" style="font-size:9pt;color:#666;padding:4px 8px;text-align:left;font-weight:normal">{info_line}</td>
+      </tr>
+      <tr>
+        <th colspan="12" style="background:#FFFF00;font-size:10pt;font-weight:bold;text-align:center;padding:4px">{quote.title or '报价单'}</th>
+      </tr>
       <tr>
         <th style="width:50px">序号</th>
         <th style="width:170px">名称</th>
@@ -1871,6 +2396,7 @@ tr:hover td{{background:#fffbe6}}
         <th style="width:42px">折扣率</th>
         <th style="width:75px">成交价</th>
         <th style="width:90px">备注</th>
+        <th style="width:80px">图片</th>
       </tr>
     </thead>
     <tbody>
@@ -1878,9 +2404,8 @@ tr:hover td{{background:#fffbe6}}
     </tbody>
     <tfoot>
       <tr class="total-row">
-        <td colspan="9" style="text-align:right">合计（大写）：<strong>{number_to_cn(quote.total_amount or 0)}</strong></td>
+        <td colspan="11" style="text-align:right">合计（大写）：<strong>{number_to_cn(quote.total_amount or 0)}</strong></td>
         <td class="total-amount">¥{fmt(quote.total_amount or 0)}</td>
-        <td></td>
       </tr>
     </tfoot>
   </table>
@@ -1950,9 +2475,22 @@ def number_to_cn(num):
 
 # ─── Frontend ────────────────────────────────────────────────
 
+# Vue production build static files
+_dist_dir = os.path.join(os.path.dirname(__file__), 'frontend', 'dist')
+_has_vue_build = os.path.isdir(_dist_dir)
+
 @app.route('/')
 def index():
+    if _has_vue_build:
+        return send_file(os.path.join(_dist_dir, 'index.html'))
     return render_template('index.html')
+
+# Serve Vue build assets (JS/CSS) from /assets/
+@app.route('/assets/<path:filename>')
+def vue_assets(filename):
+    if _has_vue_build:
+        return send_from_directory(os.path.join(_dist_dir, 'assets'), filename)
+    return 'Not Found', 404
 
 
 @app.route('/api/version', methods=['GET'])
@@ -1992,6 +2530,15 @@ def session_info():
 def serve_upload(filename):
     """提供上传的图片等静态文件"""
     return send_from_directory(UPLOAD_DIR, filename)
+
+
+# ─── SPA catch-all (must be LAST route) ──────
+@app.route('/<path:path>')
+def spa_catch_all(path):
+    """所有非 API/静态文件路径 → 返回 Vue SPA"""
+    if _has_vue_build:
+        return send_file(os.path.join(_dist_dir, 'index.html'))
+    return render_template('index.html')
 
 
 # ─── Init DB ────────────────────────────────────────────────
