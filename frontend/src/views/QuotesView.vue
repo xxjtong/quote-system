@@ -65,6 +65,7 @@ const validStatuses = [
   { value: 'sent', label: '已发送', cls: 'bg-primary' },
   { value: 'confirmed', label: '已接受', cls: 'bg-success' },
   { value: 'rejected', label: '已拒绝', cls: 'bg-danger' },
+  { value: 'expired', label: '已过期', cls: 'bg-secondary' },
 ]
 
 async function updateStatus(quote, newStatus) {
@@ -145,12 +146,12 @@ async function deleteQuote(id) {
 }
 
 function statusBadge(s) {
-  const map = { draft: '草稿', sent: '已发送', accepted: '已接受', rejected: '已拒绝', confirmed: '已接受' }
+  const map = { draft: '草稿', sent: '已发送', accepted: '已接受', rejected: '已拒绝', confirmed: '已接受', expired: '已过期' }
   return map[s] || s || '草稿'
 }
 
 function statusClass(s) {
-  const map = { draft: 'bg-light text-dark', sent: 'bg-primary', accepted: 'bg-success', rejected: 'bg-danger', confirmed: 'bg-success' }
+  const map = { draft: 'bg-light text-dark', sent: 'bg-primary', accepted: 'bg-success', rejected: 'bg-danger', confirmed: 'bg-success', expired: 'bg-secondary' }
   return map[s] || 'bg-light text-dark'
 }
 
@@ -159,8 +160,8 @@ onMounted(fetchQuotes)
 
 <template>
   <div>
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-      <h5 class="fw-bold mb-0">报价单管理</h5>
+    <div class="page-header justify-content-between">
+      <h5><i class="bi bi-file-text"></i>报价单管理</h5>
       <button class="btn btn-primary btn-modern" @click="router.push({name:'newquote'})">
         <i class="bi bi-plus-lg"></i> 新建报价单
       </button>
@@ -174,6 +175,7 @@ onMounted(fetchQuotes)
           <option value="sent">已发送</option>
           <option value="accepted">已接受</option>
           <option value="rejected">已拒绝</option>
+          <option value="expired">已过期</option>
         </select>
         <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 bg-warning bg-opacity-10 rounded">
           <span class="small fw-medium">已选 {{ selectedIds.size }} 条</span>

@@ -430,8 +430,8 @@ onMounted(fetchProducts)
 <template>
   <div>
     <!-- Header -->
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-      <h5 class="fw-bold mb-0">产品管理</h5>
+    <div class="page-header justify-content-between">
+      <h5><i class="bi bi-box"></i>产品管理</h5>
       <div class="d-flex gap-2">
         <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="exportTemplate">
           <i class="bi bi-download"></i> 下载模板

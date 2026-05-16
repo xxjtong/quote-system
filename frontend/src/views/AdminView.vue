@@ -10,7 +10,7 @@ const registrationOpen = ref(true)
 
 async function toggleRegistration() {
   const r = await api('/api/admin/registration', 'PUT', {
-    open: registrationOpen.value
+    registration_open: registrationOpen.value
   })
   if (r.error) {
     toast(r.error, 'danger')
@@ -112,7 +112,7 @@ async function fetchSettings() {
     const data = await api('/api/admin/settings')
     if (!data.error) {
       settings.value = data.settings || {}
-      registrationOpen.value = data.registration_open !== false
+      registrationOpen.value = data.settings?.registration_open === 'true'
     }
   } catch (e) { /* ignore */ }
 }

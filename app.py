@@ -309,7 +309,7 @@ def check_quote_owner(quote_id):
 
 @app.route('/api/auth/register', methods=['POST'])
 def auth_register():
-    if not app.config['REGISTRATION_OPEN']:
+    if not _is_registration_open():
         return jsonify({'error': '暂不开放自主注册'}), 403
     data = request.get_json()
     if not data or not data.get('username', '').strip() or not data.get('password', '').strip():
@@ -383,15 +383,22 @@ def update_profile():
 @app.route('/api/admin/registration', methods=['GET'])
 @require_admin
 def get_registration():
-    return jsonify({'registration_open': app.config['REGISTRATION_OPEN']})
+    return jsonify({'registration_open': _is_registration_open()})
 
 @app.route('/api/admin/registration', methods=['PUT'])
 @require_admin
 def set_registration():
     data = request.get_json()
     if 'registration_open' in data:
-        app.config['REGISTRATION_OPEN'] = bool(data['registration_open'])
-    return jsonify({'registration_open': app.config['REGISTRATION_OPEN']})
+        open_val = bool(data['registration_open'])
+        s = SystemSetting.query.filter_by(key='registration_open').first()
+        if s:
+            s.value = str(open_val).lower()
+        else:
+            db.session.add(SystemSetting(key='registration_open', value=str(open_val).lower()))
+        db.session.commit()
+        app.config['REGISTRATION_OPEN'] = open_val
+    return jsonify({'registration_open': _is_registration_open()})
 
 # ─── 系统设置 API ─────────────────────────────────
 def get_setting(key, default=''):
@@ -402,6 +409,13 @@ def get_setting(key, default=''):
 def get_all_settings():
     """读取所有系统设置 (返回dict)"""
     return {s.key: s.value for s in SystemSetting.query.all()}
+
+def _is_registration_open():
+    """检查注册是否开放（DB 优先，解决多 worker 不一致问题）"""
+    db_val = get_setting('registration_open', '').strip().lower()
+    if db_val in ('true', 'false'):
+        return db_val == 'true'
+    return app.config.get('REGISTRATION_OPEN', True)
 
 @app.route('/api/admin/settings', methods=['GET'])
 @require_admin
@@ -2520,7 +2534,7 @@ def session_info():
     resp = jsonify({
         'user': g.current_user.to_dict(),
         'field_visibility': get_field_visibility() if not is_admin else {},
-        'registration_open': app.config['REGISTRATION_OPEN'],
+        'registration_open': _is_registration_open(),
     })
     if new_token:
         resp.headers['X-New-Token'] = new_token
