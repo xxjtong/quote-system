@@ -307,6 +307,10 @@ def check_quote_owner(quote_id):
 
 # ─── Auth API ────────────────────────────────────────────────
 
+@app.route('/api/auth/registration-status', methods=['GET'])
+def auth_registration_status():
+    return jsonify({'registration_open': _is_registration_open()})
+
 @app.route('/api/auth/register', methods=['POST'])
 def auth_register():
     if not _is_registration_open():
@@ -516,7 +520,7 @@ def reset_user_password(user_id):
 # ─── API Routes ──────────────────────────────────────────────
 
 # 公开路由（无需登录）
-PUBLIC_ROUTES = {'auth_login', 'auth_register', 'get_version', 'index', 'serve_upload'}
+PUBLIC_ROUTES = {'auth_login', 'auth_register', 'auth_registration_status', 'get_version', 'index', 'serve_upload'}
 
 @app.before_request
 def check_auth():

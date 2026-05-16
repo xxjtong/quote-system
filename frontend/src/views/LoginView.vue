@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject } from 'vue'
+import { ref, inject, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 
@@ -80,6 +80,15 @@ async function doRegister() {
     regError.value = '网络错误'
   }
 }
+
+// 每次进入登录页时查询注册开放状态
+onMounted(async () => {
+  try {
+    const r = await fetch(BASE_URL + '/api/auth/registration-status')
+    const d = await r.json()
+    registrationOpen.value = d.registration_open !== false
+  } catch (e) { /* 网络错误时默认显示注册链接 */ }
+})
 </script>
 
 <template>
