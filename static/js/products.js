@@ -31,7 +31,7 @@ function renderProductsHTML(d) {
     return `
     <tr class="${selectedIds.has(p.id) ? 'table-primary' : ''}${isOff ? ' opacity-50' : ''}">
       <td><input type="checkbox" class="form-check-input product-check" value="${p.id}" ${selectedIds.has(p.id) ? 'checked' : ''} onchange="toggleSelect(${p.id})"></td>
-      <td class="tip-cell">
+      <td class="tip-cell td-name">
         <strong style="font-size:.85rem;cursor:pointer" onclick="viewProductDetail(${p.id})">${escHtml(p.name)}</strong>${isOff ? ' <span class="badge" style="background:#fee2e2;color:#dc2626;font-size:.65rem">已下线</span>' : ''}
         <div class="tip-pop">${escHtml(p.name)}${p.spec ? '\n规格: ' + p.spec : ''}${p.supplier ? '\n厂商: ' + p.supplier : ''}${p.category ? '\n分类: ' + p.category : ''}${p.price ? '\n单价: ¥' + p.price : ''}${p.function_desc ? '\n功能: ' + p.function_desc : ''}</div>
         ${p.spec ? `<br><span class="text-muted" style="font-size:.75rem">${escHtml(p.spec)}</span>` : ''}
@@ -249,7 +249,7 @@ function formBodyHtml(p, catOpts) {
     <div class="row g-3">
       <div class="col-md-6">
         <label class="form-label small fw-medium">产品名称 <span class="text-danger">*</span></label>
-        <input class="form-control" id="pf_name" value="${escHtml(p.name)}" placeholder="请输入产品名称">
+        <input class="form-control" id="pf_name" value="${escHtml(p.name)}" placeholder="请输入产品名称" maxlength="200">
       </div>
       <div class="col-md-6">
         <label class="form-label small fw-medium">规格型号</label>

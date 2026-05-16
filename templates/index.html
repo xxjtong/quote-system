@@ -319,6 +319,14 @@ input:checked+.slider:before { transform:translateX(20px) }
 .amount-total { font-size: 1rem; font-weight: 600; color: var(--danger); }
 .picker-item:hover { background: var(--primary-light); }
 
+/* Table cell overflow — prevent long names from breaking layout */
+.td-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ═══════════════════════════════════════════
    Animations
    ═══════════════════════════════════════════ */

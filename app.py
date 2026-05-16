@@ -660,10 +660,21 @@ def create_product():
     if not data or not data.get('name'):
         return jsonify({'error': '产品名称不能为空'}), 400
 
+    name = str(data['name']).strip()
+    if not name:
+        return jsonify({'error': '产品名称不能为空'}), 400
+    # Reject XSS vectors in product name
+    xss_patterns = ['<script', '<img', 'onerror=', 'onclick=', 'onload=', 'javascript:']
+    if any(p in name.lower() for p in xss_patterns):
+        return jsonify({'error': '产品名称包含非法字符'}), 400
+    # Truncate long names
+    if len(name) > 200:
+        name = name[:200]
+
     # 规格型号统一：spec 为主，同时填充 sku
     spec = data.get('spec', '')
     product = Product(
-        name=data['name'],
+        name=name,
         sku=spec,
         category=data.get('category', ''),
         spec=spec,
@@ -696,7 +707,17 @@ def update_product(product_id):
     data = request.get_json()
     for field in ['name', 'sku', 'category', 'spec', 'unit', 'supplier', 'function_desc', 'remark', 'image_url']:
         if field in data:
-            setattr(product, field, data[field])
+            val = data[field]
+            if field == 'name':
+                val = str(val).strip()
+                if not val:
+                    return jsonify({'error': '产品名称不能为空'}), 400
+                xss_patterns = ['<script', '<img', 'onerror=', 'onclick=', 'onload=', 'javascript:']
+                if any(p in val.lower() for p in xss_patterns):
+                    return jsonify({'error': '产品名称包含非法字符'}), 400
+                if len(val) > 200:
+                    val = val[:200]
+            setattr(product, field, val)
     # 规格型号统一
     if product.spec and product.sku != product.spec:
         product.sku = product.spec
