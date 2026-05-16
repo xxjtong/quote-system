@@ -53,8 +53,7 @@ jobs:
 
       - name: Run tests
         run: |
-          cd tests
-          python -m pytest -v --tb=short --junitxml=../test-results.xml
+          python -m pytest tests/ -v --tb=short --junitxml=test-results.xml
 
       - name: Upload test results
         if: always()
