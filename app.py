@@ -1391,7 +1391,7 @@ def export_quote_excel(quote_id):
     ws.title = quote.title or '报价单'
 
     # ── 样式（精确匹配模板） ──
-    YELLOW_FILL = PatternFill(start_color='FFFFFF00', end_color='FFFFFF00', fill_type='solid')
+    YELLOW_FILL = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
     title_font = Font(name='微软雅黑', size=10, bold=True)
     header_font = Font(name='微软雅黑', size=10, bold=True)
     data_font = Font(name='微软雅黑', size=11, bold=True)
@@ -1413,29 +1413,30 @@ def export_quote_excel(quote_id):
     for ci, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(ci)].width = w
 
-    # ── 第1行：公司名 + 客户信息（最上面） ──
+    # ── 第1行：黄色标题 ──
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
+    t = ws.cell(row=1, column=1, value=quote.title or '报价单')
+    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
+    for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=1, column=ci).border = thin_border
+    ws.row_dimensions[1].height = 18
+
+    # ── 第2行：公司名 + 客户信息 ──
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
     company = get_setting('company_name', '').strip()
     parts = [f'公司：{company}'] if company else []
     if quote.client: parts.append(f'客户：{quote.client}')
     if quote.contact: parts.append(f'联系人：{quote.contact}')
     if quote.phone: parts.append(f'电话：{quote.phone}')
+    if quote.tax_rate and quote.tax_rate > 0: parts.append(f'税率：{quote.tax_rate}%')
     if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
     info = '  |  '.join(parts) if parts else ''
-    c1 = ws.cell(row=1, column=1, value=info)
+    c1 = ws.cell(row=2, column=1, value=info)
     c1.font = Font(name='微软雅黑', size=9, color='666666')
     c1.alignment = Alignment(horizontal='left', vertical='center')
     for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=1, column=ci).border = thin_border
-    ws.row_dimensions[1].height = 17
-
-    # ── 第2行：黄色标题 ──
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
-    t = ws.cell(row=2, column=1, value=quote.title or '报价单')
-    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
-    for ci in range(1, COL_COUNT + 1):
         ws.cell(row=2, column=ci).border = thin_border
-    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[2].height = 17
 
     # ── 第3行：表头 ──
     HEAD = 3
@@ -1629,7 +1630,7 @@ def _build_excel(quote, pmap, filepath):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = quote.title or ''
-    YELLOW_FILL = PatternFill(start_color='FFFFFF00', end_color='FFFFFF00', fill_type='solid')
+    YELLOW_FILL = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
     title_font = Font(name='微软雅黑', size=10, bold=True)
     header_font = Font(name='微软雅黑', size=10, bold=True)
     data_font = Font(name='微软雅黑', size=11, bold=True)
@@ -1656,6 +1657,7 @@ def _build_excel(quote, pmap, filepath):
     if quote.client: parts.append(f'客户：{quote.client}')
     if quote.contact: parts.append(f'联系人：{quote.contact}')
     if quote.phone: parts.append(f'电话：{quote.phone}')
+    if quote.tax_rate and quote.tax_rate > 0: parts.append(f'税率：{quote.tax_rate}%')
     if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
     info = '  |  '.join(parts) if parts else ''
     c1 = ws.cell(row=2, column=1, value=info)
@@ -1756,6 +1758,7 @@ def preview_quote_html(quote_id):
     if quote.phone: info_parts.append(f'电话：{quote.phone}')
     if quote.quote_date: info_parts.append(f'日期：{quote.quote_date}')
     if quote.valid_days: info_parts.append(f'有效期：{quote.valid_days}天')
+    if quote.tax_rate and quote.tax_rate > 0: info_parts.append(f'税率：{quote.tax_rate}%')
 
     items_html = ''
     for i, item in enumerate(quote.items, 1):
@@ -1861,7 +1864,7 @@ tr:hover td{{background:#fffbe6}}
     </tfoot>
   </table>
   </div>
-  <div class="note-row" style="margin-top:0;font-size:10pt;padding:3px 8px;border:1px solid #ccc;border-top:none">注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。</div>
+  <div class="note-row" style="margin-top:0;font-size:10pt;padding:3px 8px;border:1px solid #ccc;border-top:none">{quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。'}</div>
 </div>
 </body>
 </html>'''
