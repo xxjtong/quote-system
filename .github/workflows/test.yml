@@ -11,19 +11,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    services:
-      app:
-        image: python:3.11-slim
-        ports:
-          - 5000:5000
-        # 注意：CI 环境需要完整的部署步骤，
-        # 以下为示例框架，实际部署需根据项目调整
-        options: >-
-          --health-cmd "curl -f http://localhost:5000/api/version || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl pypinyin pyjwt
+          pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl pypinyin pyjwt Pillow
           pip install pytest requests
 
       - name: Start application
