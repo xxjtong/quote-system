@@ -58,9 +58,9 @@ class TestExportTemplate:
         assert "spreadsheet" in ct.lower() or "excel" in ct.lower() or "xlsx" in ct.lower()
 
     def test_export_template_without_auth(self):
-        """未登录下载模板"""
+        """未登录下载模板（公开端点）"""
         resp = api("GET", "/api/products/export-template")
-        assert resp.status_code == 401
+        assert resp.status_code == 200
 
 
 # ═══════════════════════════════════════════════════
