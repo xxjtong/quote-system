@@ -5,7 +5,7 @@ import { useApi } from '../composables/useApi'
 const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
 const toast = inject('toast')
-const { api } = useApi()
+const { api, authToken } = useApi()
 
 const uploading = ref(false)
 const result = ref(null)
@@ -32,7 +32,13 @@ async function handleFile(e) {
 }
 
 function exportTemplate() {
-  window.open(BASE_URL + '/api/products/export-template')
+  const token = authToken.value
+  const url = BASE_URL + '/api/products/export-template' + (token ? '?token=' + encodeURIComponent(token) : '')
+  const a = document.createElement('a')
+  a.href = url
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 </script>
 
