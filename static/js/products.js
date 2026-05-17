@@ -250,7 +250,7 @@ function formBodyHtml(p, catOpts) {
     <div class="row g-3">
       <div class="col-md-6">
         <label class="form-label small fw-medium">产品名称 <span class="text-danger">*</span></label>
-        <input class="form-control" id="pf_name" value="${escHtml(p.name)}" placeholder="请输入产品名称" maxlength="200">
+        <input class="form-control" id="pf_name" value="${escHtml(p.name)}" placeholder="请输入产品名称" maxlength="20">
       </div>
       <div class="col-md-6">
         <label class="form-label small fw-medium">规格型号</label>

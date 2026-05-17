@@ -149,31 +149,30 @@ onMounted(async () => {
           <i class="bi bi-info-circle"></i> <span>{{ version || 'v—' }}</span>
         </a>
       </div>
+      <!-- User dropdown at sidebar bottom -->
+      <div v-if="currentUser" class="sidebar-user dropdown" style="border-top:1px solid rgba(255,255,255,.08);padding:.5rem">
+        <button class="btn btn-sm btn-outline-light dropdown-toggle w-100" type="button"
+          data-bs-toggle="dropdown" style="font-size:.75rem;text-align:left">
+          <i class="bi bi-person-circle me-1"></i>
+          <span class="sidebar-user-name">{{ currentUser.username }}</span>
+        </button>
+        <ul class="dropdown-menu" style="font-size:.82rem;min-width:140px">
+          <li><a class="dropdown-item" href="#" @click.prevent="openProfile"><i class="bi bi-person-gear me-2"></i>个人信息</a></li>
+          <li><hr class="dropdown-divider" style="margin:.25rem 0"></li>
+          <li><a class="dropdown-item text-danger" href="#" @click.prevent="logout"><i class="bi bi-box-arrow-right me-2"></i>退出</a></li>
+        </ul>
+      </div>
     </div>
 
     <!-- Main Wrapper -->
     <div class="main-wrapper" :class="{ expanded: sidebarCollapsed }" :style="!showSidebar ? {marginLeft:'0'} : {}">
-      <div class="topbar">
-        <button class="btn btn-link sidebar-toggle text-dark me-2 p-0" @click="toggleSidebar"
-          style="font-size:1.2rem;text-decoration:none">
-          <i class="bi bi-list"></i>
-        </button>
-        <span class="topbar-title">{{ titles[route.name] || route.name }}</span>
-        <div style="margin-left:auto;display:flex;align-items:center;gap:.5rem">
-          <div v-if="currentUser" class="dropdown">
-            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-              data-bs-toggle="dropdown" style="font-size:.75rem">
-              {{ currentUser.username }}{{ isAdmin() ? ' [管理员]' : '' }}
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end" style="font-size:.82rem;min-width:140px">
-              <li><a class="dropdown-item" href="#" @click.prevent="openProfile"><i class="bi bi-person-gear me-2"></i>个人信息</a></li>
-              <li><hr class="dropdown-divider" style="margin:.25rem 0"></li>
-              <li><a class="dropdown-item text-danger" href="#" @click.prevent="logout"><i class="bi bi-box-arrow-right me-2"></i>退出</a></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      <div class="main-content">
+      <!-- Floating hamburger (mobile sidebar toggle) -->
+      <button v-if="!sidebarOpen" class="btn btn-link sidebar-toggle text-dark position-fixed p-0"
+        @click="toggleSidebar"
+        style="top:.8rem;left:.8rem;font-size:1.2rem;text-decoration:none;z-index:1040">
+        <i class="bi bi-list"></i>
+      </button>
+      <div class="main-content" :style="!sidebarOpen ? {paddingTop:'2.8rem'} : {}">
         <router-view v-slot="{ Component }">
           <template v-if="Component">
             <component :is="Component" />

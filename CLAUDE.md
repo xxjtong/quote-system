@@ -42,7 +42,7 @@
 
 ### 后端（Flask）
 - 产品名 XSS 拦截: `<script>/<img>/onerror=/onclick=/onload=/javascript:`
-- 产品名截断: 200字符
+- 产品名截断: 20字
 - pytest 测试: venv 在 `/opt/quote-system/venv/`
 
 ### 通用

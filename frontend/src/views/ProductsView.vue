@@ -1,10 +1,13 @@
 <script setup>
-import { ref, reactive, computed, onMounted, inject } from 'vue'
+import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
 
 const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
+const router = useRouter()
+const route = useRoute()
 const toast = inject('toast')
 const { api, isAdmin } = useApi()
 
@@ -73,6 +76,7 @@ async function fetchProducts() {
       categories.value = data.categories || []
       suppliers.value = data.suppliers || []
       cacheVersion = data.version
+      await nextTick()
     }
   } catch (e) {
     toast('加载产品失败', 'danger')
@@ -159,6 +163,24 @@ const detailProduct = ref(null)
 function showDetail(p) {
   detailProduct.value = p
 }
+
+function closeDetail() {
+  detailProduct.value = null
+  if (route.params.id) router.push({ name: 'products', params: {} })
+}
+
+// Watch route param → open detail modal
+watch(() => route.params.id, async (id) => {
+  if (!id) { detailProduct.value = null; return }
+  // Try from already-loaded list first
+  const p = products.value.find(p => p.id == id)
+  if (p) { showDetail(p); return }
+  // Fetch from API if not in current page
+  try {
+    const data = await api(`/api/products/${id}`)
+    if (data && data.product) showDetail(data.product)
+  } catch (e) { /* 404 — do nothing */ }
+}, { immediate: true })
 
 function detailImageSrc(p) {
   if (!p || !p.image_url) return ''
@@ -424,7 +446,11 @@ const pageNumbers = computed(() => {
 })
 
 // ─── Init ───
-onMounted(fetchProducts)
+onMounted(() => {
+  // Defer fetch to next tick — ensures App.vue session check completes first,
+  // preventing race where token isn't ready when fetchProducts fires
+  setTimeout(() => fetchProducts(), 0)
+})
 </script>
 
 <template>
@@ -474,7 +500,7 @@ onMounted(fetchProducts)
           </select>
         </div>
         <div class="col-md-3 d-flex justify-content-md-end align-items-center gap-2" style="flex-wrap:wrap">
-          <span class="text-muted" style="font-size:.82rem">共 {{ totalProducts }} 个产品</span>
+          <span v-if="!loading" class="text-muted" style="font-size:.82rem">共 {{ totalProducts }} 个产品</span>
           <select class="per-page-select" v-model.number="perPage" @change="currentPage = 1; fetchProducts()">
             <option :value="10">10条/页</option>
             <option :value="20">20条/页</option>
@@ -529,16 +555,19 @@ onMounted(fetchProducts)
                   :checked="selectedIds.has(p.id)"
                   @change="toggleSelect(p.id)">
               </td>
-              <td style="cursor:pointer" @click="showDetail(p)">
-                <div class="td-name" style="font-weight:500;color:var(--gray-800)">{{ p.name }}</div>
-                <div v-if="p.function_desc" class="small text-muted td-name">{{ p.function_desc }}</div>
+              <td style="cursor:pointer" @click="router.push({name:'products',params:{id:p.id}})">
+                <div class="text-truncate fw-medium" style="max-width:200px;color:var(--gray-800)">{{ p.name }}</div>
+                <div v-if="p.function_desc" class="text-truncate small text-muted" style="max-width:200px">{{ p.function_desc }}</div>
               </td>
-              <td class="td-name" style="max-width:120px">{{ p.spec || '—' }}</td>
+              <td>
+                <span class="text-truncate d-inline-block" style="max-width:120px">{{ p.spec || '—' }}</span>
+              </td>
               <td>
                 <div class="img-cell" style="position:relative;display:inline-block">
                   <img v-if="p.image_url" :src="imageSrc(p)" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer"
                     class="img-thumb"
                     @click="previewImage = imageSrc(p)">
+                  <img v-if="p.image_url" :src="imageSrc(p)" class="img-thumb-large">
                   <span v-else class="text-muted" style="font-size:.7rem">—</span>
                 </div>
               </td>
@@ -604,7 +633,7 @@ onMounted(fetchProducts)
               <div class="row g-2">
                 <div class="col-md-6">
                   <label class="form-label-modern">产品名称 <span class="text-danger">*</span></label>
-                  <input class="form-control" v-model="formData.name" maxlength="200" placeholder="产品名称">
+                  <input class="form-control" v-model="formData.name" maxlength="20" placeholder="产品名称">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label-modern">分类</label>
@@ -732,13 +761,13 @@ onMounted(fetchProducts)
 
     <!-- Product Detail Modal -->
     <Teleport to="body">
-      <div v-if="detailProduct" class="modal-backdrop show" @click="detailProduct = null"></div>
+      <div v-if="detailProduct" class="modal-backdrop show" @click="closeDetail()"></div>
       <div v-if="detailProduct" class="modal d-block modern-modal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title fw-semibold">{{ detailProduct.name }}</h5>
-              <button type="button" class="btn-close" @click="detailProduct = null"></button>
+              <h5 class="modal-title fw-semibold" style="word-break:break-all;white-space:normal">{{ detailProduct.name }}</h5>
+              <button type="button" class="btn-close" @click="closeDetail()"></button>
             </div>
             <div class="modal-body">
               <div class="text-center mb-3">
@@ -760,10 +789,10 @@ onMounted(fetchProducts)
               </table>
             </div>
             <div class="modal-footer">
-              <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern btn-sm" @click="showEditProduct(detailProduct); detailProduct = null">
+              <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern btn-sm" @click="showEditProduct(detailProduct); closeDetail()">
                 <i class="bi bi-pencil"></i> 编辑
               </button>
-              <button class="btn btn-secondary btn-modern btn-sm" @click="detailProduct = null">关闭</button>
+              <button class="btn btn-secondary btn-modern btn-sm" @click="closeDetail()">关闭</button>
             </div>
           </div>
         </div>

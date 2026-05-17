@@ -711,9 +711,9 @@ def create_product():
     xss_patterns = ['<script', '<img', 'onerror=', 'onclick=', 'onload=', 'javascript:']
     if any(p in name.lower() for p in xss_patterns):
         return jsonify({'error': '产品名称包含非法字符'}), 400
-    # Truncate long names
-    if len(name) > 200:
-        name = name[:200]
+    # Enforce 20-char limit on product name
+    if len(name) > 20:
+        return jsonify({'error': '产品名称不能超过20个字'}), 400
 
     # 规格型号统一：spec 为主，同时填充 sku
     spec = data.get('spec', '')
@@ -759,8 +759,8 @@ def update_product(product_id):
                 xss_patterns = ['<script', '<img', 'onerror=', 'onclick=', 'onload=', 'javascript:']
                 if any(p in val.lower() for p in xss_patterns):
                     return jsonify({'error': '产品名称包含非法字符'}), 400
-                if len(val) > 200:
-                    val = val[:200]
+                if len(val) > 20:
+                    return jsonify({'error': '产品名称不能超过20个字'}), 400
             setattr(product, field, val)
     # 规格型号统一
     if product.spec and product.sku != product.spec:
@@ -1109,7 +1109,7 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
 
         if parsed:
             product = {
-                'name': str(parsed.get('name', '')).strip()[:200],
+                'name': str(parsed.get('name', '')).strip()[:20],
                 'spec': str(parsed.get('spec', '')).strip()[:100],
                 'supplier': str(parsed.get('supplier', '')).strip()[:50],
                 'price': _safe_number(parsed.get('price', 0)),
@@ -1339,7 +1339,7 @@ def smart_parse_product(text):
                     break
             if not chinese_name:
                 chinese_name = segments[0]
-            result['name'] = chinese_name[:200]
+            result['name'] = chinese_name[:20]
 
             # 剩余段 → 备注
             other = [s for s in segments if s != chinese_name]
@@ -1348,7 +1348,7 @@ def smart_parse_product(text):
 
     # ── 兜底：如果 name 为空，取正文第一行 ──
     if not result.get('name') and clean:
-        first_line = clean.split('\n')[0].strip()[:200]
+        first_line = clean.split('\n')[0].strip()[:20]
         if first_line:
             result['name'] = first_line
 

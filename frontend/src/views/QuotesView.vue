@@ -1,12 +1,13 @@
 <script setup>
-import { ref, computed, onMounted, inject } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, inject, watch, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
 
 const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
 const router = useRouter()
+const route = useRoute()
 const toast = inject('toast')
 const { api, isAdmin } = useApi()
 
@@ -77,6 +78,7 @@ async function fetchQuotes() {
     if (!data.error) {
       quotes.value = data.quotes || []
       totalQuotes.value = data.total || 0
+      await nextTick()
     }
   } catch (e) {
     toast('加载报价单失败', 'danger')
@@ -213,7 +215,22 @@ function statusClass(s) {
   return map[s] || 'bg-light text-dark'
 }
 
-onMounted(fetchQuotes)
+onMounted(() => {
+  setTimeout(() => fetchQuotes(), 0)
+})
+
+// Watch route param → open preview modal
+watch(() => route.params.id, async (id) => {
+  if (!id) return
+  const q = quotes.value.find(q => q.id == id)
+  const title = q?.title || '报价单详情'
+  viewQuote(id, title)
+}, { immediate: true })
+
+function closePreview() {
+  showPreview.value = false
+  if (route.params.id) router.push({ name: 'quotes', params: {} })
+}
 </script>
 
 <template>
@@ -287,7 +304,7 @@ onMounted(fetchQuotes)
                 <input type="checkbox" class="form-check-input" :checked="selectedIds.has(q.id)" @change="toggleSelect(q.id)">
               </td>
               <td>
-                <span class="fw-medium" style="cursor:pointer;color:var(--primary)" @click="viewQuote(q.id, q.title)">{{ q.title || '未命名' }}</span>
+                <span class="fw-medium" style="cursor:pointer;color:var(--primary)" @click="router.push({name:'quotes',params:{id:q.id}})">{{ q.title || '未命名' }}</span>
               </td>
               <td>{{ q.client || '—' }}</td>
               <td>
@@ -363,13 +380,13 @@ onMounted(fetchQuotes)
 
     <!-- Preview Modal -->
     <Teleport to="body">
-      <div v-if="showPreview" class="modal-backdrop show" @click="showPreview = false"></div>
+      <div v-if="showPreview" class="modal-backdrop show" @click="closePreview()"></div>
       <div v-if="showPreview" class="modal d-block modern-modal" tabindex="-1">
         <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
           <div class="modal-content">
             <div class="modal-header">
               <h5 class="modal-title fw-semibold">📄 {{ previewTitle }}</h5>
-              <button type="button" class="btn-close" @click="showPreview = false"></button>
+              <button type="button" class="btn-close" @click="closePreview()"></button>
             </div>
             <div class="modal-body" style="background:#f8f9fa">
               <div v-if="previewLoading" class="text-center py-5">
@@ -379,7 +396,7 @@ onMounted(fetchQuotes)
               <div v-else class="preview-wrapper" v-html="previewHtml"></div>
             </div>
             <div class="modal-footer">
-              <button class="btn btn-secondary btn-modern" @click="showPreview = false">关闭</button>
+              <button class="btn btn-secondary btn-modern" @click="closePreview()">关闭</button>
             </div>
           </div>
         </div>

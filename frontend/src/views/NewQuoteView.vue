@@ -84,7 +84,14 @@ async function fetchCategories() {
     const data = await api('/api/products?per_page=200')
     if (!data.error) {
       const cats = new Set()
-      ;(data.products || []).forEach(p => { if (p.category) cats.add(p.category) })
+      ;(data.products || []).forEach(p => {
+        if (p.category) {
+          p.category.split(',').forEach(c => {
+            const t = c.trim()
+            if (t) cats.add(t)
+          })
+        }
+      })
       pickerCategories.value = [...cats].sort()
     }
   } catch (e) { /* ignore */ }

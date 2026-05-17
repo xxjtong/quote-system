@@ -92,6 +92,19 @@ body {
 .sidebar.collapsed .sidebar-nav .nav-link i { font-size: 1.1rem; margin: 0; }
 .sidebar.collapsed .sidebar-nav .nav-link .badge { display: none; }
 .sidebar.collapsed hr { display: none; }
+.sidebar.collapsed .sidebar-collapse-btn {
+  position: static; display: block; margin: 0 auto;
+  font-size: 1.1rem; padding: 6px 8px;
+}
+.sidebar.collapsed .sidebar-logo h5 i { display: none; }
+
+/* Sidebar User Area */
+.sidebar-user { flex-shrink: 0; }
+.sidebar-user .sidebar-user-name { font-size: .75rem; }
+.sidebar.collapsed .sidebar-user { padding: .4rem !important; }
+.sidebar.collapsed .sidebar-user .sidebar-user-name { display: none; }
+.sidebar.collapsed .sidebar-user .btn { text-align: center !important; padding: .3rem .4rem; }
+.sidebar.collapsed .sidebar-user .btn i { margin: 0 !important; }
 
 .sidebar-overlay {
   display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -322,6 +335,22 @@ input:checked+.slider:before { transform:translateX(20px) }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Image hover preview */
+.img-thumb-large {
+  display: none;
+  position: absolute;
+  left: 50px; top: 0;
+  width: 200px; height: auto;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  z-index: 100;
+  background: #fff;
+  padding: 4px;
+}
+.img-cell:hover .img-thumb-large { display: block; }
 
 /* ═══════════════════════════════════════════
    Animations
