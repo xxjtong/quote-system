@@ -56,7 +56,7 @@ class TestSQLInjection:
     def test_json_injection(self, admin_token):
         """JSON body SQL 注入"""
         resp = api("POST", "/api/products", json={
-            "name": "test'; DROP TABLE products; --",
+            "name": "test'; DROP --",
             "spec": "1' OR '1'='1",
         }, token=admin_token)
         # 应正常创建（字段值被转义或参数化）
@@ -97,21 +97,21 @@ class TestXSS:
 
 class TestInputBoundaries:
     def test_very_long_product_name(self, admin_token):
-        """超长产品名（接近 200 字符限制）"""
-        long_name = "A" * 200
+        """超长产品名（20 字限制，超限拒绝）"""
+        long_name = "A" * 21
         resp = api("POST", "/api/products", json={
             "name": long_name
         }, token=admin_token)
-        assert resp.status_code == 201
+        assert resp.status_code == 400
+        assert "20" in resp.json().get("error", "")
 
     def test_overlong_product_name(self, admin_token):
-        """超过 200 字符 — 数据库可能截断或抛错"""
-        long_name = "A" * 300
+        """远超 20 字 — 拒绝"""
+        long_name = "A" * 100
         resp = api("POST", "/api/products", json={
             "name": long_name
         }, token=admin_token)
-        # SQLite 默认不截断，但 String(200) 在 SQLAlchemy 也不强制
-        assert resp.status_code in [201, 400, 500]
+        assert resp.status_code == 400
 
     def test_special_unicode(self, admin_token):
         """特殊 Unicode 字符"""
