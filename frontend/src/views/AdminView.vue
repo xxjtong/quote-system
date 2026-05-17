@@ -51,6 +51,14 @@ async function resetPassword(user) {
   toast('密码已重置')
 }
 
+async function deleteUser(user) {
+  if (!confirm(`确定删除用户「${user.username}」吗？此操作不可撤销。`)) return
+  const r = await api(`/api/admin/users/${user.id}`, 'DELETE')
+  if (r.error) { toast(r.error, 'danger'); return }
+  toast(r.message || '已删除')
+  users.value = users.value.filter(u => u.id !== user.id)
+}
+
 // ─── Field visibility ───
 // fieldNames: { 前端key: 后端field_name }
 const fieldNames = {
@@ -177,6 +185,9 @@ onMounted(() => {
                   </button>
                   <button class="btn btn-sm btn-outline-secondary btn-sm-icon" @click="resetPassword(u)" title="重置密码">
                     <i class="bi bi-key"></i>
+                  </button>
+                  <button v-if="u.role !== 'admin'" class="btn btn-sm btn-outline-danger btn-sm-icon" @click="deleteUser(u)" title="删除用户">
+                    <i class="bi bi-trash"></i>
                   </button>
                 </div>
               </td>

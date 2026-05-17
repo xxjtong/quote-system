@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
@@ -14,12 +14,70 @@ const quotes = ref([])
 const statusFilter = ref('')
 const loading = ref(true)
 
+// ─── Search & Pagination ───
+const searchTerm = ref('')
+const currentPage = ref(1)
+const perPage = ref(20)
+const totalQuotes = ref(0)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalQuotes.value / perPage.value)))
+
+// ─── IME composition ───
+const isComposing = ref(false)
+function onCompositionStart() { isComposing.value = true }
+function onCompositionEnd(e) {
+  isComposing.value = false
+  debouncedSearch(e.target.value)
+}
+
+// ─── Debounced search ───
+let searchTimer = null
+function debouncedSearch(val) {
+  if (isComposing.value) return
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTerm.value = val
+    currentPage.value = 1
+    fetchQuotes()
+  }, 500)
+}
+function clearSearch() {
+  searchTerm.value = ''
+  currentPage.value = 1
+  fetchQuotes()
+}
+
+// ─── Pagination pages ───
+const pageNumbers = computed(() => {
+  if (totalPages.value <= 1) return []
+  let start = Math.max(1, Math.min(currentPage.value - 3, totalPages.value - 6))
+  let end = Math.min(totalPages.value, start + 6)
+  if (end - start < 6) start = Math.max(1, end - 6)
+  const pages = []
+  for (let p = start; p <= end; p++) pages.push(p)
+  return pages
+})
+
+function goPage(p) {
+  if (p < 1 || p > totalPages.value) return
+  currentPage.value = p
+  fetchQuotes()
+}
+
 async function fetchQuotes() {
   loading.value = true
   try {
-    const params = statusFilter.value ? `?status=${statusFilter.value}` : ''
-    const data = await api(`/api/quotes${params}`)
-    if (!data.error) quotes.value = data.quotes || []
+    const params = new URLSearchParams({
+      page: currentPage.value,
+      per_page: perPage.value,
+    })
+    if (statusFilter.value) params.set('status', statusFilter.value)
+    if (searchTerm.value) params.set('search', searchTerm.value)
+
+    const data = await api(`/api/quotes?${params}`)
+    if (!data.error) {
+      quotes.value = data.quotes || []
+      totalQuotes.value = data.total || 0
+    }
   } catch (e) {
     toast('加载报价单失败', 'danger')
   } finally {
@@ -169,14 +227,27 @@ onMounted(fetchQuotes)
 
     <div class="card-modern">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="fetchQuotes">
-          <option value="">全部状态</option>
-          <option value="draft">草稿</option>
-          <option value="sent">已发送</option>
-          <option value="accepted">已接受</option>
-          <option value="rejected">已拒绝</option>
-          <option value="expired">已过期</option>
-        </select>
+        <div class="d-flex align-items-center gap-2">
+          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="currentPage=1;fetchQuotes()">
+            <option value="">全部状态</option>
+            <option value="draft">草稿</option>
+            <option value="sent">已发送</option>
+            <option value="confirmed">已接受</option>
+            <option value="rejected">已拒绝</option>
+            <option value="expired">已过期</option>
+          </select>
+          <div class="input-group input-group-sm" style="width:220px">
+            <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+            <input type="text" class="form-control border-start-0" placeholder="搜索标题/客户..."
+              :value="searchTerm"
+              @input="debouncedSearch($event.target.value)"
+              @compositionstart="onCompositionStart"
+              @compositionend="onCompositionEnd">
+            <button v-if="searchTerm" class="btn btn-outline-secondary" type="button" @click="clearSearch">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+        </div>
         <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 bg-warning bg-opacity-10 rounded">
           <span class="small fw-medium">已选 {{ selectedIds.size }} 条</span>
           <button class="btn btn-danger btn-sm" @click="batchDelete">
@@ -238,7 +309,7 @@ onMounted(fetchQuotes)
                 </div>
               </td>
               <td class="fw-medium">{{ formatMoney(q.total_amount) }}</td>
-              <td>{{ q.created_by_username || '—' }}</td>
+              <td>{{ q.created_by_name || '—' }}</td>
               <td class="text-muted small">{{ q.quote_date || '—' }}</td>
               <td>{{ q.download_count || 0 }}</td>
               <td>
@@ -264,6 +335,30 @@ onMounted(fetchQuotes)
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Pagination -->
+    <div v-if="totalPages > 1" class="d-flex justify-content-between align-items-center mt-3">
+      <small class="text-muted">共 {{ totalQuotes }} 条，第 {{ currentPage }}/{{ totalPages }} 页</small>
+      <nav>
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <a class="page-link" href="#" @click.prevent="goPage(1)"><i class="bi bi-chevron-double-left"></i></a>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === 1 }">
+            <a class="page-link" href="#" @click.prevent="goPage(currentPage - 1)"><i class="bi bi-chevron-left"></i></a>
+          </li>
+          <li v-for="p in pageNumbers" :key="p" class="page-item" :class="{ active: p === currentPage }">
+            <a class="page-link" href="#" @click.prevent="goPage(p)">{{ p }}</a>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <a class="page-link" href="#" @click.prevent="goPage(currentPage + 1)"><i class="bi bi-chevron-right"></i></a>
+          </li>
+          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
+            <a class="page-link" href="#" @click.prevent="goPage(totalPages)"><i class="bi bi-chevron-double-right"></i></a>
+          </li>
+        </ul>
+      </nav>
     </div>
 
     <!-- Preview Modal -->

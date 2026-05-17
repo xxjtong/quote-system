@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.6.0-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.7.0-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -31,7 +31,7 @@
 | 🔐 **认证系统** | JWT 登录/注册、管理员面板、字段可见性控制、注册开关、个人信息修改、全站鉴权门 |
 | 📦 **产品管理** | CRUD、拼音/缩写智能搜索、分类/厂商筛选、批量删除、图片上传预览、**产品上线/下线** |
 | 📊 **概览仪表盘** | 产品总数/报价单/下载/总金额统计卡片、最近报价单、快速操作 |
-| 📝 **报价单** | 创建/编辑/删除、状态流转、**拖拽排序**、**每行备注**、利润概览、客户聚合、**台湾税率支持** |
+| 📝 **报价单** | 创建/编辑/删除、搜索过滤、分页、批量删除、状态流转、**每行备注**、利润概览、客户聚合、**台湾税率支持** |
 | 📥 **Excel 导入** | 多 Sheet 导入、列名智能映射、自动同步 SKU/规格 |
 | 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、**自定义公司名/页脚**、下载计数统计 |
 | 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权） |
@@ -328,6 +328,7 @@ Base URL: `http://127.0.0.1:5000`
 |------|------|------|
 | `GET` | `/api/admin/users` | 用户列表（管理员） |
 | `PUT` | `/api/admin/users/<id>` | 修改用户（启用/禁用/角色切换） |
+| `DELETE` | `/api/admin/users/<id>` | 删除用户（不可删自己/管理员） (v1.7.0) |
 | `PUT` | `/api/admin/users/<id>/password` | 修改用户密码（管理员） |
 | `GET` | `/api/admin/fields` | 字段可见性配置 |
 | `PUT` | `/api/admin/fields` | 更新字段可见性 |

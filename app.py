@@ -517,6 +517,21 @@ def reset_user_password(user_id):
     return jsonify({'success': True, 'username': user.username})
 
 
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@require_admin
+def delete_user(user_id):
+    if user_id == g.current_user.id:
+        return jsonify({'error': '不能删除自己'}), 400
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+    if user.role == 'admin':
+        return jsonify({'error': '不能删除管理员'}), 403
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({'message': f'用户 {user.username} 已删除'})
+
+
 # ─── API Routes ──────────────────────────────────────────────
 
 # 公开路由（无需登录）
@@ -1531,7 +1546,7 @@ def toggle_product_active(product_id):
 
 @app.route('/api/products/import', methods=['POST'])
 def import_products():
-    """从Excel导入产品 — 支持多Sheet、自动识别分类"""
+    """从Excel导入产品 — 支持多Sheet、自动识别分类、提取嵌入图片"""
     file = request.files.get('file')
     if not file:
         return jsonify({'error': '请上传Excel文件'}), 400
@@ -1549,6 +1564,7 @@ def import_products():
             'supplier': ['供应商', '厂商', 'supplier'],
             'function_desc': ['功能描述'],
             'remark': ['备注', '说明', 'remark'],
+            'image_url': ['图片', 'image', 'image_url', '产品图片'],
         }
 
         def find_col(header, names):
@@ -1592,6 +1608,30 @@ def import_products():
             col_idx = {}
             for key, names in field_map.items():
                 col_idx[key] = find_col(header, names)
+
+            # ── 智能解析：备注 vs 内部备注 vs 图片 ──
+            inner_remark_col = find_col(header, ['内部备注'])
+            if inner_remark_col >= 0 and col_idx.get('remark', -1) >= 0:
+                # 模板同时有「备注」和「内部备注」→ 备注=图片, 内部备注=remark
+                if col_idx.get('image_url', -1) < 0:
+                    col_idx['image_url'] = col_idx['remark']
+                col_idx['remark'] = inner_remark_col
+            elif col_idx.get('image_url', -1) >= 0 and col_idx.get('remark', -1) < 0:
+                pass  # 专用图片列，remark 另行处理
+            elif col_idx.get('image_url', -1) < 0 and col_idx.get('remark', -1) >= 0:
+                # 仅有一个备注列 → 优先检查是否含嵌入图片，无则保持为 remark
+                pass
+
+            # ── 构建嵌入图片索引 ──
+            image_map = {}
+            if hasattr(ws, '_images'):
+                for img in ws._images:
+                    try:
+                        anc = img.anchor
+                        if hasattr(anc, '_from'):
+                            image_map[(anc._from.col, anc._from.row)] = img
+                    except Exception:
+                        pass
 
             # 没有找到名称列则跳过此sheet
             if col_idx.get('name', -1) < 0:
@@ -1659,6 +1699,33 @@ def import_products():
                         function_desc=str(row[col_idx['function_desc']]).strip() if col_idx.get('function_desc', -1) >= 0 and col_idx['function_desc'] < len(row) and row[col_idx['function_desc']] else '',
                         remark=str(row[col_idx['remark']]).strip() if col_idx.get('remark', -1) >= 0 and col_idx['remark'] < len(row) and row[col_idx['remark']] else '',
                     )
+
+                    # ── 提取图片：嵌入图片优先，URL 文本次之 ──
+                    if col_idx.get('image_url', -1) >= 0:
+                        img_col_0 = col_idx['image_url']
+                        # 1) 检查嵌入图片
+                        emb_img = image_map.get((img_col_0, row_idx - 1))
+                        if emb_img is not None:
+                            try:
+                                img_bytes = emb_img._data()
+                                ext = (emb_img.format or 'png').lower()
+                                if ext == 'jpeg':
+                                    ext = 'jpg'
+                                fname = f'prod_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}.{ext}'
+                                img_dir = UPLOAD_DIR / 'images'
+                                img_dir.mkdir(parents=True, exist_ok=True)
+                                save_path = img_dir / fname
+                                save_path.write_bytes(img_bytes)
+                                _, compressed_fname = compress_image_if_needed(str(save_path))
+                                product.image_url = f'/uploads/images/{compressed_fname}'
+                            except Exception:
+                                pass
+                        # 2) 没有嵌入图片时，检查 URL 文本
+                        if not product.image_url and img_col_0 < len(row) and row[img_col_0]:
+                            txt = str(row[img_col_0]).strip()
+                            if txt and (txt.startswith('http') or txt.startswith('/uploads/')):
+                                product.image_url = txt[:500]
+
                     db.session.add(product)
                     imported += 1
                     sheet_count += 1
@@ -1703,21 +1770,70 @@ def export_product_template():
 
 @app.route('/api/quotes', methods=['GET'])
 def list_quotes():
+    """报价单列表，支持分页、状态筛选、关键词搜索（含拼音）"""
+    import re
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    search = request.args.get('search', '').strip()
     status_filter = request.args.get('status', '').strip()
-    query = Quote.query.order_by(Quote.id.desc())
+
+    query = Quote.query
     # 非管理员只看自己的报价单
     if hasattr(g, 'current_user') and g.current_user and g.current_user.role != 'admin':
         query = query.filter(Quote.created_by == g.current_user.id)
     if status_filter:
         query = query.filter(Quote.status == status_filter)
-    quotes = query.all()
+
+    # 拼音搜索：纯ASCII（无汉字）时启用
+    is_pinyin = search and not re.search(r'[\u4e00-\u9fff]', search)
+    if is_pinyin:
+        from pypinyin import pinyin, Style
+        q_lower = search.lower().strip()
+        all_quotes = query.order_by(Quote.id.desc()).all()
+
+        def pinyin_match(q):
+            texts = [q.title or '', q.client or '']
+            for text in texts:
+                if not text:
+                    continue
+                py_list = pinyin(text, style=Style.NORMAL, heteronym=False)
+                full_py = ''.join(p[0] for p in py_list).lower()
+                if q_lower in full_py:
+                    return True
+                initials = ''.join(p[0][0] for p in py_list).lower()
+                if q_lower in initials:
+                    return True
+                if len(q_lower) >= 2 and len(initials) >= 2:
+                    if q_lower in initials:
+                        return True
+            return False
+
+        filtered = [q for q in all_quotes if pinyin_match(q)]
+        total = len(filtered)
+        quotes = filtered[(page - 1) * per_page: page * per_page]
+    else:
+        query = query.order_by(Quote.id.desc())
+        if search:
+            like = f'%{search}%'
+            query = query.filter(
+                db.or_(Quote.title.ilike(like), Quote.client.ilike(like))
+            )
+        total = query.count()
+        quotes = query.offset((page - 1) * per_page).limit(per_page).all()
+
     # 预加载所有创建者用户名，避免 N+1 查询
     creator_ids = list(set(q.created_by for q in quotes if q.created_by))
     users_map = {}
     if creator_ids:
         users = User.query.filter(User.id.in_(creator_ids)).all()
         users_map = {u.id: u.username for u in users}
-    return jsonify({'quotes': [q.to_dict(users_map=users_map) for q in quotes]})
+
+    return jsonify({
+        'quotes': [q.to_dict(users_map=users_map) for q in quotes],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
 
 
 @app.route('/api/quotes/stats', methods=['GET'])

@@ -62,15 +62,37 @@ async function loadQuote() {
 // ─── Product picker ───
 const showPicker = ref(false)
 const pickerSearch = ref('')
+const pickerCategory = ref('')
+const pickerCategories = ref([])
 const pickerProducts = ref([])
 const pickerLoading = ref(false)
-const pickedIds = reactive(new Set())
+const pickedProducts = reactive(new Map())  // id → {id, name, spec, unit, price}
 let pickerTimer = null
 
 function openPicker() {
   showPicker.value = true
   pickerSearch.value = ''
-  pickedIds.clear()
+  pickerCategory.value = ''
+  pickedProducts.clear()
+  searchProducts()
+  // 首次打开时加载分类列表
+  if (pickerCategories.value.length === 0) fetchCategories()
+}
+
+async function fetchCategories() {
+  try {
+    const data = await api('/api/products?per_page=200')
+    if (!data.error) {
+      const cats = new Set()
+      ;(data.products || []).forEach(p => { if (p.category) cats.add(p.category) })
+      pickerCategories.value = [...cats].sort()
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function selectCategory(cat) {
+  pickerCategory.value = pickerCategory.value === cat ? '' : cat
+  pickerSearch.value = ''
   searchProducts()
 }
 
@@ -81,6 +103,7 @@ function searchProducts() {
     try {
       const params = new URLSearchParams({ per_page: 50 })
       if (pickerSearch.value) params.set('search', pickerSearch.value)
+      if (pickerCategory.value) params.set('category', pickerCategory.value)
       const data = await api(`/api/products?${params}`)
       if (!data.error) pickerProducts.value = (data.products || []).filter(p => p.is_active !== false)
     } finally {
@@ -89,32 +112,33 @@ function searchProducts() {
   }, 300)
 }
 
-function togglePick(id) {
-  if (pickedIds.has(id)) pickedIds.delete(id)
-  else pickedIds.add(id)
+function togglePick(p) {
+  if (pickedProducts.has(p.id)) {
+    pickedProducts.delete(p.id)
+  } else {
+    pickedProducts.set(p.id, { id: p.id, name: p.name, spec: p.spec || '', unit: p.unit || '', price: p.price || 0 })
+  }
 }
 
 function addSelectedProducts() {
-  for (const p of pickerProducts.value) {
-    if (pickedIds.has(p.id)) {
-      const existing = items.find(i => i.product_id === p.id)
-      if (existing) {
-        existing.quantity += 1
-      } else {
-        items.push({
-          product_id: p.id,
-          name: p.name,
-          spec: p.spec || '',
-          unit: p.unit || '',
-          price: p.price || 0,
-          quantity: 1,
-          discount: 100,
-          remark: '',
-        })
-      }
+  for (const p of pickedProducts.values()) {
+    const existing = items.find(i => i.product_id === p.id)
+    if (existing) {
+      existing.quantity += 1
+    } else {
+      items.push({
+        product_id: p.id,
+        name: p.name,
+        spec: p.spec,
+        unit: p.unit,
+        price: p.price,
+        quantity: 1,
+        discount: 100,
+        remark: '',
+      })
     }
   }
-  pickedIds.clear()
+  pickedProducts.clear()
   showPicker.value = false
 }
 
@@ -128,6 +152,8 @@ function removeItem(idx) { items.splice(idx, 1) }
 async function saveQuote() {
   if (!form.title.trim()) { toast('请输入报价单标题', 'warning'); return }
   if (!form.client.trim()) { toast('请输入客户名称', 'warning'); return }
+  const email = form.client_email.trim()
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('邮箱格式不正确', 'warning'); return }
   if (items.length === 0) { toast('请添加产品', 'warning'); return }
   saving.value = true
   try {
@@ -195,7 +221,8 @@ onMounted(loadQuote)
         </div>
         <div class="col-md-4">
           <label class="form-label-modern">电话</label>
-          <input class="form-control" v-model="form.client_phone">
+          <input class="form-control" v-model="form.client_phone" type="tel"
+            @input="form.client_phone = form.client_phone.replace(/[^\d\-+ ]/g, '')">
         </div>
         <div class="col-md-4">
           <label class="form-label-modern">邮箱</label>
@@ -281,6 +308,13 @@ onMounted(loadQuote)
               <button type="button" class="btn-close" @click="showPicker = false"></button>
             </div>
             <div class="modal-body">
+              <!-- 分类标签 -->
+              <div v-if="pickerCategories.length" class="d-flex flex-wrap gap-1 mb-2">
+                <span v-for="cat in pickerCategories" :key="cat"
+                  class="badge" :class="pickerCategory === cat ? 'bg-primary' : 'bg-light text-dark'"
+                  style="cursor:pointer;user-select:none"
+                  @click="selectCategory(cat)">{{ cat }}</span>
+              </div>
               <input class="form-control search-box mb-3" placeholder="搜索产品名称/拼音..."
                 v-model="pickerSearch" @input="searchProducts()">
               <div v-if="pickerLoading" class="text-center py-3">
@@ -290,8 +324,8 @@ onMounted(loadQuote)
                 <div v-for="p in pickerProducts" :key="p.id"
                   class="d-flex align-items-center gap-3 p-2 picker-item"
                   style="cursor:pointer;border-bottom:1px solid var(--gray-100)"
-                  @click="togglePick(p.id)">
-                  <input type="checkbox" :checked="pickedIds.has(p.id)" style="pointer-events:none">
+                  @click="togglePick(p)">
+                  <input type="checkbox" :checked="pickedProducts.has(p.id)" style="pointer-events:none">
                   <div class="flex-grow-1">
                     <div class="fw-medium">{{ p.name }}</div>
                     <div class="small text-muted">{{ p.spec || '' }} {{ p.supplier ? '· ' + p.supplier : '' }}</div>
@@ -302,7 +336,7 @@ onMounted(loadQuote)
               </div>
             </div>
             <div class="modal-footer">
-              <span class="text-muted small me-auto" v-if="pickedIds.size > 0">已选 {{ pickedIds.size }} 个</span>
+              <span class="text-muted small me-auto" v-if="pickedProducts.size > 0">已选 {{ pickedProducts.size }} 个</span>
               <button class="btn btn-primary btn-modern" @click="addSelectedProducts">确认添加</button>
               <button class="btn btn-secondary btn-modern" @click="showPicker = false">取消</button>
             </div>

@@ -57,7 +57,8 @@ function exportTemplate() {
         <h5>从 Excel 导入产品</h5>
         <p class="text-muted small mb-4">
           支持 .xlsx 格式，每个 Sheet 作为一个分类<br>
-          表头需包含：名称、规格型号、单价、厂商等字段
+          表头需包含：名称、规格型号、功能描述、单价等字段<br>
+          支持备注列嵌入图片（自动提取并压缩）
         </p>
 
         <div class="mb-3">
