@@ -140,7 +140,8 @@ async function updateStatus(quote, newStatus) {
 // ─── Download Excel ───
 function downloadQuote(q) {
   const token = localStorage.getItem('quote_token')
-  const url = BASE_URL + `/api/quotes/${q.id}/export-excel?token=${encodeURIComponent(token)}`
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const url = BASE_URL + `/api/quotes/${q.id}/export-excel?token=${encodeURIComponent(token)}&download_date=${dateStr}`
   const a = document.createElement('a')
   a.href = url
   document.body.appendChild(a)
