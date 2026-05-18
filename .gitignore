@@ -32,5 +32,6 @@ venv/
 .DS_Store
 frontend/node_modules/
 db.local.bak
+*.local.bak
 sudoers-quote-system
 模板参考.xlsx
