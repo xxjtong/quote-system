@@ -97,7 +97,8 @@ function productTooltip(p) {
 }
 
 function imageSrc(p) {
-  if (!p.image_url) return ''
+  if (!p.has_image && !p.image_url) return ''
+  if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image'
   return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
 }
 
@@ -183,7 +184,8 @@ watch(() => route.params.id, async (id) => {
 }, { immediate: true })
 
 function detailImageSrc(p) {
-  if (!p || !p.image_url) return ''
+  if (!p || (!p.has_image && !p.image_url)) return ''
+  if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image'
   return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
 }
 
@@ -196,6 +198,8 @@ const formData = reactive({
   cost_price: '', supplier: '', function_desc: '', remark: '', image_url: ''
 })
 const existingImageUrl = ref('')  // 编辑时保留已有图片URL（不填入输入框）
+const imageData = ref('')          // 上传/下载后暂存的 base64 图片数据
+const imageDataMime = ref('')      // 图片 MIME 类型
 const formSaving = ref(false)
 const imageDownloading = ref(false)
 
@@ -244,6 +248,7 @@ async function onImageUrlBlur() {
     const r = await api('/api/download-image', 'POST', { url })
     if (r.url) {
       formData.image_url = r.url
+      if (r.image_data) { imageData.value = r.image_data; imageDataMime.value = r.image_mime || 'image/jpeg' }
       toast('图片已保存到本地')
     } else {
       toast(r.error || '下载失败', 'warning')
@@ -361,6 +366,7 @@ async function onImagePaste(e) {
         const r = await api('/api/upload/image', 'POST', form)
         if (r.url) {
           formData.image_url = r.url
+          if (r.image_data) { imageData.value = r.image_data; imageDataMime.value = r.image_mime || 'image/jpeg' }
           toast('图片已上传')
         } else {
           toast(r.error || '上传失败', 'warning')
@@ -393,6 +399,8 @@ function closeForm() {
   smartError.value = ''
   smartRecognizing.value = false
   imageDownloading.value = false
+  imageData.value = ''
+  imageDataMime.value = ''
 }
 
 async function saveProduct() {
@@ -413,6 +421,7 @@ async function saveProduct() {
       function_desc: formData.function_desc.trim(),
       remark: formData.remark.trim(),
       image_url: formData.image_url.trim() || existingImageUrl.value,
+      ...(imageData.value ? { image_data: imageData.value, image_mime: imageDataMime.value } : {}),
     }
     const url = editingId.value ? `/api/products/${editingId.value}` : '/api/products'
     const method = editingId.value ? 'PUT' : 'POST'
@@ -564,10 +573,10 @@ onMounted(() => {
               </td>
               <td>
                 <div class="img-cell" style="position:relative;display:inline-block">
-                  <img v-if="p.image_url" :src="imageSrc(p)" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer"
+                  <img v-if="p.has_image || p.image_url" :src="imageSrc(p)" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer"
                     class="img-thumb"
                     @click="previewImage = imageSrc(p)">
-                  <img v-if="p.image_url" :src="imageSrc(p)" class="img-thumb-large">
+                  <img v-if="p.has_image || p.image_url" :src="imageSrc(p)" class="img-thumb-large">
                   <span v-else class="text-muted" style="font-size:.7rem">—</span>
                 </div>
               </td>
@@ -622,7 +631,7 @@ onMounted(() => {
     <!-- Product Form Modal -->
     <Teleport to="body">
       <div v-if="showForm" class="modal-backdrop show" @click="closeForm"></div>
-      <div v-if="showForm" class="modal d-block modern-modal" tabindex="-1">
+      <div v-if="showForm" class="modal d-block modern-modal" tabindex="-1" @click.self="closeForm">
         <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
           <div class="modal-content">
             <div class="modal-header">
@@ -762,7 +771,7 @@ onMounted(() => {
     <!-- Product Detail Modal -->
     <Teleport to="body">
       <div v-if="detailProduct" class="modal-backdrop show" @click="closeDetail()"></div>
-      <div v-if="detailProduct" class="modal d-block modern-modal" tabindex="-1">
+      <div v-if="detailProduct" class="modal d-block modern-modal" tabindex="-1" @click.self="closeDetail()">
         <div class="modal-dialog modal-dialog-centered">
           <div class="modal-content">
             <div class="modal-header">
@@ -771,7 +780,7 @@ onMounted(() => {
             </div>
             <div class="modal-body">
               <div class="text-center mb-3">
-                <img v-if="detailProduct.image_url" :src="detailImageSrc(detailProduct)"
+                <img v-if="detailProduct.has_image || detailProduct.image_url" :src="detailImageSrc(detailProduct)"
                   style="max-width:400px;max-height:300px;object-fit:contain;border-radius:8px;border:1px solid var(--gray-200)">
                 <div v-else class="text-muted py-3"><i class="bi bi-image" style="font-size:2rem"></i><p class="small mt-1">暂无图片</p></div>
               </div>

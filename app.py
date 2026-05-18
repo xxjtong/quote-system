@@ -47,6 +47,35 @@ db = SQLAlchemy(app)
 
 # ─── Helpers ─────────────────────────────────────────────────────
 
+def _store_image_blob(product, data):
+    """从请求数据中提取图片并存入 BLOB。支持 image_data (base64) 和 image_url (本地路径)"""
+    import base64
+    # 优先: base64 图片数据
+    img_b64 = data.get('image_data', '')
+    if img_b64:
+        try:
+            if ',' in img_b64:
+                img_b64 = img_b64.split(',', 1)[1]
+            product.image_data = base64.b64decode(img_b64)
+            product.image_mime = data.get('image_mime', 'image/jpeg')
+            return
+        except Exception:
+            pass
+    # 次选: 从本地文件读取（image_url 为 /uploads/images/... 时）
+    image_url = (product.image_url or '').strip()
+    if image_url.startswith('/uploads/'):
+        filepath = BASE_DIR / image_url.lstrip('/')
+        if filepath.exists():
+            try:
+                product.image_data = filepath.read_bytes()
+                ext = filepath.suffix.lower()
+                mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                            '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
+                product.image_mime = mime_map.get(ext, 'image/jpeg')
+            except Exception:
+                pass
+
+
 def preload_products_for_quote(quote):
     """批量加载报价单所有明细关联的产品，返回 {product_id: Product}"""
     pids = [item.product_id for item in quote.items if item.product_id]
@@ -71,6 +100,8 @@ class Product(db.Model):
     function_desc = db.Column(db.Text, nullable=True)
     remark = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(500), nullable=True)
+    image_data = db.Column(db.LargeBinary, nullable=True)  # BLOB 存储图片二进制
+    image_mime = db.Column(db.String(30), nullable=True)     # 如 image/jpeg
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
@@ -89,6 +120,7 @@ class Product(db.Model):
             'function_desc': self.function_desc or '',
             'remark': self.remark or '',
             'image_url': self.image_url or '',
+            'has_image': bool(self.image_data),
             'is_active': self.is_active if self.is_active is not None else True,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
@@ -535,7 +567,7 @@ def delete_user(user_id):
 # ─── API Routes ──────────────────────────────────────────────
 
 # 公开路由（无需登录）
-PUBLIC_ROUTES = {'auth_login', 'auth_register', 'auth_registration_status', 'get_version', 'index', 'serve_upload', 'export_product_template'}
+PUBLIC_ROUTES = {'auth_login', 'auth_register', 'auth_registration_status', 'get_version', 'index', 'serve_upload', 'export_product_template', 'get_product_image'}
 
 @app.before_request
 def check_auth():
@@ -730,6 +762,7 @@ def create_product():
         remark=data.get('remark', ''),
         image_url=data.get('image_url', ''),
     )
+    _store_image_blob(product, data)
     db.session.add(product)
     db.session.commit()
     return jsonify({'product': product.to_dict()}), 201
@@ -741,6 +774,16 @@ def get_product(product_id):
     if not product:
         return jsonify({'error': '产品不存在'}), 404
     return jsonify({'product': product.to_dict()})
+
+
+@app.route('/api/products/<int:product_id>/image', methods=['GET'])
+def get_product_image(product_id):
+    """返回产品图片二进制数据（公开路由，无需认证）"""
+    product = db.session.get(Product, product_id)
+    if not product or not product.image_data:
+        return '', 404
+    from flask import Response
+    return Response(product.image_data, mimetype=product.image_mime or 'image/jpeg')
 
 
 @app.route('/api/products/<int:product_id>', methods=['PUT'])
@@ -771,6 +814,7 @@ def update_product(product_id):
         product.price = round(float(data['price']), 2)
     if 'cost_price' in data:
         product.cost_price = round(float(data['cost_price']), 2)
+    _store_image_blob(product, data)
     db.session.commit()
     return jsonify({'product': product.to_dict()})
 
@@ -882,7 +926,11 @@ def upload_image():
 
     # 返回相对URL（后面通过nginx /quote/uploads/images/ 访问）
     image_url = f'/uploads/images/{fname}'
-    return jsonify({'url': image_url, 'filename': fname})
+    # 读取压缩后的图片返回 base64，方便前端直接存入 BLOB
+    import base64
+    with open(save_dir / fname, 'rb') as f:
+        img_b64 = base64.b64encode(f.read()).decode('utf-8')
+    return jsonify({'url': image_url, 'filename': fname, 'image_data': img_b64, 'image_mime': 'image/jpeg'})
 
 
 @app.route('/api/download-image', methods=['POST'])
@@ -934,7 +982,11 @@ def download_image():
         fname = compressed_fname
 
     image_url = f'/uploads/images/{fname}'
-    return jsonify({'url': image_url, 'filename': fname})
+    # 读取压缩后的图片返回 base64，方便前端直接存入 BLOB
+    import base64
+    with open(save_dir / fname, 'rb') as f:
+        img_b64 = base64.b64encode(f.read()).decode('utf-8')
+    return jsonify({'url': image_url, 'filename': fname, 'image_data': img_b64, 'image_mime': 'image/jpeg'})
 
 
 # 产品库版本信息（用于前端缓存判断）
@@ -1726,6 +1778,8 @@ def import_products():
                             if txt and (txt.startswith('http') or txt.startswith('/uploads/')):
                                 product.image_url = txt[:500]
 
+                    _store_image_blob(product, {'image_url': product.image_url or ''})
+
                     db.session.add(product)
                     imported += 1
                     sheet_count += 1
@@ -2111,12 +2165,18 @@ def export_quote_excel(quote_id):
         ws.cell(row=row, column=1).border = thin_border
         ws.cell(row=row, column=COL_COUNT).border = thin_border
 
-        # 嵌入产品图片到图片列（L列）
+        # 嵌入产品图片到图片列（L列）— 从 BLOB 读取
         if image_url:
             try:
-                img_path = BASE_DIR / image_url.lstrip('/')
-                if img_path.exists():
-                    img = XLImage(str(img_path))
+                img_bytes = None
+                if product and hasattr(product, 'image_data') and product.image_data:
+                    img_bytes = product.image_data
+                if not img_bytes:
+                    img_path = BASE_DIR / image_url.lstrip('/')
+                    if img_path.exists():
+                        img_bytes = img_path.read_bytes()
+                if img_bytes:
+                    img = XLImage(io.BytesIO(img_bytes))
                     # 限制尺寸适配图片列：宽≈80px, 高≤48px
                     w, h = img.width, img.height
                     max_w, max_h = 80, 48
@@ -2325,12 +2385,18 @@ def _build_excel(quote, pmap, filepath):
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
             cell.font = data_font; cell.alignment = ca; cell.border = thin_border
-        # 嵌入产品图片到图片列（L列）
+        # 嵌入产品图片到图片列（L列）— 从 BLOB 读取
         if image_url:
             try:
-                img_path = BASE_DIR / image_url.lstrip('/')
-                if img_path.exists():
-                    img = XLImage(str(img_path))
+                img_bytes = None
+                if product and hasattr(product, 'image_data') and product.image_data:
+                    img_bytes = product.image_data
+                if not img_bytes:
+                    img_path = BASE_DIR / image_url.lstrip('/')
+                    if img_path.exists():
+                        img_bytes = img_path.read_bytes()
+                if img_bytes:
+                    img = XLImage(io.BytesIO(img_bytes))
                     w, h = img.width, img.height
                     max_w, max_h = 80, 48
                     ratio = min(max_w / w, max_h / h, 1)
@@ -2445,10 +2511,10 @@ def preview_quote_html(quote_id):
         guide_price = round(cost * 1.5, 2) if cost else 0
         min_retail = round(cost * 1.15, 2) if cost else 0
 
-        # 图片列：本地路径加前缀
+        # 图片列：使用 /api/products/<id>/image 端点
         img_cell = ''
         if image_url:
-            src = ('/quote' + image_url) if image_url.startswith('/') else image_url
+            src = f'/quote/api/products/{item.product_id}/image'
             img_cell = f'<img src="{src}" style="max-width:100px;max-height:48px;object-fit:contain;display:block;margin:0 auto">'
         else:
             img_cell = '—'
@@ -2469,85 +2535,55 @@ def preview_quote_html(quote_id):
             <td style="text-align:center;vertical-align:middle">{img_cell}</td>
         </tr>'''
 
-    html = f'''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>报价单预览 — {quote.title or '报价单'}</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:"Microsoft YaHei","微软雅黑",sans-serif;background:#f0f2f5;padding:20px}}
-.container{{max-width:1300px;margin:0 auto;background:#fff;padding:20px;box-shadow:0 0 20px rgba(0,0,0,.05)}}
-.title{{font-size:10pt;font-weight:bold;text-align:center;padding:4px;border:1px solid #ccc;border-bottom:none;background:#FFFF00}}
-.info{{font-size:9pt;color:#666;padding:4px 8px 6px;border:1px solid #ccc;border-bottom:none}}
-table{{width:100%;border-collapse:collapse;font-size:11pt;font-weight:bold}}
-th{{font-size:10pt;font-weight:bold;padding:3px 2px;border:1px solid #ccc;text-align:center;background:#fff}}
-td{{padding:3px 2px;border:1px solid #ccc;vertical-align:middle;text-align:center}}
-td:first-child{{border-left:1px solid #ccc}}
-td:last-child{{border-right:1px solid #ccc}}
-tr:hover td{{background:#fffbe6}}
-.total-row td{{font-size:10pt;font-weight:bold;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:4px 2px;background:#fafafa}}
-.total-row td:first-child{{border-left:1px solid #ccc}}
-.total-row td:last-child{{border-right:1px solid #ccc}}
-.total-amount{{font-size:10pt}}
-.note-row td{{font-size:10pt;font-weight:normal;text-align:left;padding:3px 8px;border:1px solid #ccc}}
-.btn-bar{{display:flex;gap:8px;margin-bottom:12px}}
-.btn{{padding:6px 16px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;text-decoration:none;color:#333}}
-.btn-primary{{background:#4361ee;color:#fff;border-color:#4361ee}}
-.btn:hover{{opacity:.85}}
-@media print{{
-  body{{background:#fff;padding:0}}
-  .container{{box-shadow:none;padding:10px}}
-  .btn-bar{{display:none}}
-}}
+    html = f'''<style>
+.pv-table{{width:100%;border-collapse:collapse;font-size:11pt;font-weight:bold}}
+.pv-table th{{font-size:10pt;font-weight:bold;padding:3px 2px;border:1px solid #ccc;text-align:center;background:#fff}}
+.pv-table td{{padding:3px 2px;border:1px solid #ccc;vertical-align:middle;text-align:center}}
+.pv-table td:first-child{{border-left:1px solid #ccc}}
+.pv-table td:last-child{{border-right:1px solid #ccc}}
+.pv-table tr:hover td{{background:#fffbe6}}
+.pv-table .total-row td{{font-size:10pt;font-weight:bold;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:4px 2px;background:#fafafa}}
+.pv-table .total-row td:first-child{{border-left:1px solid #ccc}}
+.pv-table .total-row td:last-child{{border-right:1px solid #ccc}}
+.pv-table .total-amount{{font-size:10pt}}
+.pv-note{{font-size:10pt;padding:3px 8px;border:1px solid #ccc;border-top:none}}
 </style>
-</head>
-<body>
-<div class="container">
-  <div class="btn-bar">
-    <button class="btn btn-primary" onclick="window.print()">🖨 打印</button>
-    <button class="btn" onclick="parent.document.querySelector('#formModal .btn-close')?.click()">关闭</button>
-  </div>
-  <div style="overflow-x:auto">
-  <table>
-    <thead>
-      <tr>
-        <td colspan="12" style="font-size:9pt;color:#666;padding:4px 8px;text-align:left;font-weight:normal">{info_line}</td>
-      </tr>
-      <tr>
-        <th colspan="12" style="background:#FFFF00;font-size:10pt;font-weight:bold;text-align:center;padding:4px">{quote.title or '报价单'}</th>
-      </tr>
-      <tr>
-        <th style="width:50px">序号</th>
-        <th style="width:170px">名称</th>
-        <th style="width:100px">规格型号</th>
-        <th style="width:110px">型号</th>
-        <th style="width:300px">功能描述</th>
-        <th style="width:75px">单价</th>
-        <th style="width:45px">数量</th>
-        <th style="width:70px">合计</th>
-        <th style="width:42px">折扣率</th>
-        <th style="width:75px">成交价</th>
-        <th style="width:90px">备注</th>
-        <th style="width:80px">图片</th>
-      </tr>
-    </thead>
-    <tbody>
-      {items_html}
-    </tbody>
-    <tfoot>
-      <tr class="total-row">
-        <td colspan="11" style="text-align:right">合计（大写）：<strong>{number_to_cn(quote.total_amount or 0)}</strong></td>
-        <td class="total-amount">¥{fmt(quote.total_amount or 0)}</td>
-      </tr>
-    </tfoot>
-  </table>
-  </div>
-  <div class="note-row" style="margin-top:0;font-size:10pt;padding:3px 8px;border:1px solid #ccc;border-top:none">{quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。'}</div>
+<div style="overflow-x:auto">
+<table class="pv-table">
+  <thead>
+    <tr>
+      <td colspan="12" style="font-size:9pt;color:#666;padding:4px 8px;text-align:left;font-weight:normal">{info_line}</td>
+    </tr>
+    <tr>
+      <th colspan="12" style="background:#FFFF00;font-size:10pt;font-weight:bold;text-align:center;padding:4px">{quote.title or '报价单'}</th>
+    </tr>
+    <tr>
+      <th style="width:50px">序号</th>
+      <th style="width:170px">名称</th>
+      <th style="width:100px">规格型号</th>
+      <th style="width:110px">型号</th>
+      <th style="width:300px">功能描述</th>
+      <th style="width:75px">单价</th>
+      <th style="width:45px">数量</th>
+      <th style="width:70px">合计</th>
+      <th style="width:42px">折扣率</th>
+      <th style="width:75px">成交价</th>
+      <th style="width:90px">备注</th>
+      <th style="width:80px">图片</th>
+    </tr>
+  </thead>
+  <tbody>
+    {items_html}
+  </tbody>
+  <tfoot>
+    <tr class="total-row">
+      <td colspan="11" style="text-align:right">合计（大写）：<strong>{number_to_cn(quote.total_amount or 0)}</strong></td>
+      <td class="total-amount">¥{fmt(quote.total_amount or 0)}</td>
+    </tr>
+  </tfoot>
+</table>
 </div>
-</body>
-</html>'''
+<div class="pv-note">{quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。'}</div>'''
     return html
 
 

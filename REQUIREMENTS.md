@@ -488,7 +488,7 @@ echo "1.2.22" > /opt/quote-system/version.txt
 sudo systemctl restart quote-system
 ```
 
-### 5.5 浏览器兼容
+### 5.6 浏览器兼容
 - 用户使用 Chrome
 - JS 修改后必须 `Ctrl+Shift+R` 强制刷新（否则缓存旧 JS）
 - 这是部署后最常见的 bug 来源

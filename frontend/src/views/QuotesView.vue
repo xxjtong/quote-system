@@ -92,8 +92,10 @@ const showPreview = ref(false)
 const previewHtml = ref('')
 const previewTitle = ref('')
 const previewLoading = ref(false)
+const previewQuoteId = ref(null)
 
 async function viewQuote(id, title) {
+  previewQuoteId.value = id
   previewTitle.value = title || '报价单预览'
   showPreview.value = true
   previewHtml.value = ''
@@ -334,15 +336,6 @@ function closePreview() {
                   <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="viewQuote(q.id, q.title)" title="预览">
                     <i class="bi bi-eye"></i>
                   </button>
-                  <button class="btn btn-sm btn-outline-secondary btn-sm-icon" @click="editQuote(q.id)" title="编辑">
-                    <i class="bi bi-pencil"></i>
-                  </button>
-                  <button class="btn btn-sm btn-outline-success btn-sm-icon" @click="downloadQuote(q)" title="下载Excel">
-                    <i class="bi bi-download"></i>
-                  </button>
-                  <button class="btn btn-sm btn-outline-info btn-sm-icon" @click="sendEmail(q.id)" title="发送邮件">
-                    <i class="bi bi-envelope"></i>
-                  </button>
                   <button class="btn btn-sm btn-outline-danger btn-sm-icon" @click="deleteQuote(q.id)" title="删除">
                     <i class="bi bi-trash"></i>
                   </button>
@@ -386,7 +379,6 @@ function closePreview() {
           <div class="modal-content">
             <div class="modal-header">
               <h5 class="modal-title fw-semibold">📄 {{ previewTitle }}</h5>
-              <button type="button" class="btn-close" @click="closePreview()"></button>
             </div>
             <div class="modal-body" style="background:#f8f9fa">
               <div v-if="previewLoading" class="text-center py-5">
@@ -395,7 +387,10 @@ function closePreview() {
               </div>
               <div v-else class="preview-wrapper" v-html="previewHtml"></div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer" style="gap:8px">
+              <button class="btn btn-primary btn-modern" @click="showPreview = false; router.push({ name: 'newquote', query: { edit: previewQuoteId } })">编辑</button>
+              <button class="btn btn-outline-success btn-modern" @click="downloadQuote({ id: previewQuoteId }); showPreview = false">下载</button>
+              <button class="btn btn-outline-info btn-modern" @click="sendEmail(previewQuoteId); showPreview = false">邮件</button>
               <button class="btn btn-secondary btn-modern" @click="closePreview()">关闭</button>
             </div>
           </div>

@@ -283,7 +283,7 @@ input:checked+.slider:before { transform:translateX(20px) }
   border: none; border-radius: 14px;
   box-shadow: 0 20px 60px rgba(0,0,0,.15); overflow: hidden;
 }
-.modern-modal .modal-dialog { max-width: 80vw; min-width: 360px; }
+.modern-modal .modal-dialog { min-width: 360px; }
 .modern-modal .modal-header { border-bottom: 1px solid var(--gray-100); padding: 1rem 1.25rem; }
 .modern-modal .modal-body { padding: 1.25rem; }
 .modern-modal .modal-footer { border-top: 1px solid var(--gray-100); padding: .75rem 1.25rem; }

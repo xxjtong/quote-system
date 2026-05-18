@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { useApi } from '../composables/useApi'
 
 const toast = inject('toast')
@@ -22,6 +22,15 @@ async function toggleRegistration() {
 
 // ─── Users ───
 const users = ref([])
+const userSearch = ref('')
+const filteredUsers = computed(() => {
+  if (!userSearch.value) return users.value
+  const q = userSearch.value.toLowerCase()
+  return users.value.filter(u =>
+    u.username.toLowerCase().includes(q) ||
+    (u.email || '').toLowerCase().includes(q)
+  )
+})
 const loadingUsers = ref(true)
 
 async function fetchUsers() {
@@ -157,6 +166,7 @@ onMounted(() => {
         <div class="spinner-border spinner-border-sm text-primary"></div>
       </div>
       <div v-else class="table-responsive">
+        <div class="mb-2"><input v-model="userSearch" class="form-control form-control-sm" placeholder="搜索用户名或邮箱..." style="max-width:260px"></div>
         <table class="table table-modern">
           <thead>
             <tr>
@@ -168,7 +178,7 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in users" :key="u.id">
+            <tr v-for="u in filteredUsers" :key="u.id">
               <td class="fw-medium">{{ u.username }}</td>
               <td class="text-muted small">{{ u.email || '—' }}</td>
               <td>

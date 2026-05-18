@@ -31,3 +31,4 @@ venv/
 # 系统文件
 .DS_Store
 frontend/node_modules/
+db.local.bak

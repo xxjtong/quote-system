@@ -67,8 +67,7 @@ function exportTemplate() {
         </div>
 
         <div v-if="uploading" class="text-primary small">
-          <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-          正在导入...
+          <div class="spinner-border spinner-border-sm me-2" role="status"></div>正在导入，请稍候...
         </div>
 
         <div v-if="result" class="mt-3">

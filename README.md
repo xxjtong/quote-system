@@ -70,7 +70,7 @@
 | 后端框架 | Flask + SQLAlchemy | RESTful JSON API，字段可见性控制 |
 | 认证 | JWT (PyJWT) | 无状态 token，SHA256+盐密码，自动续签 |
 | 数据库 | SQLite | 单文件，零配置 |
-|| 前端 | Vue 3 SPA (CDN) | Composition API，Vite 构建，Vue Router 历史模式 |
+|| 前端 | Vue 3 SPA | Composition API + Vite 构建 + Vue Router 历史模式 (v1.6.0) + Bootstrap 5 CSS |
 || 拼音 | pypinyin | 后端拼音搜索 + 前端本地拼音过滤 |
 || Excel | openpyxl | 读写 `.xlsx`，含格式化 |
 || 视觉识别 | 火山引擎豆包 | Seed Lite 视觉模型，直出 JSON (v1.6.0) |
@@ -193,7 +193,7 @@ cd /opt/quote-system
 # 2. 创建虚拟环境并安装依赖
 python3 -m venv venv
 source venv/bin/activate
-pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl pypinyin pyjwt
+pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl pypinyin pyjwt Pillow
 
 # 3. 生成 JWT Secret
 python3 -c "import secrets; print(secrets.token_hex(32))"
@@ -352,16 +352,30 @@ Base URL: `http://127.0.0.1:5000`
 
 ## 前端功能详解
 
-### 前端架构（v1.3.7+）
+### 前端架构（v1.6.0+ Vue 3）
 
 ```
-static/js/
-├── app.js       # 状态管理 / 工具函数 / 导航 / Dashboard / Modal
-├── auth.js      # 登录 / 注册 / 登出 / Session / 个人信息
-└── products.js  # 产品 / 报价 / 导入 / 管理面板 / 初始化
+frontend/src/
+├── App.vue              # 根组件 + 导航 + 全局状态（BASE_URL, 认证, 登出）
+├── router/index.js      # Vue Router 历史模式，路由守卫
+├── style.css            # 全局样式（Bootstrap 5 主题）
+├── composables/
+│   └── useApi.js        # 统一 API 调用（自动附加 token, 401 拦截）
+├── components/
+│   └── ToastMessage.vue # Toast 通知组件
+└── views/
+    ├── LoginView.vue      # 登录/注册页
+    ├── DashboardView.vue  # 概览仪表盘
+    ├── ProductsView.vue   # 产品管理（列表/搜索/新增/编辑/导入/智能识别）
+    ├── QuotesView.vue     # 报价单管理（列表/搜索/预览/导出/邮件）
+    ├── NewQuoteView.vue   # 新建/编辑报价单（产品选择器/拖拽排序/毛利）
+    ├── AdminView.vue      # 管理员面板（用户/字段/设置/SMTP/发票OCR）
+    └── ImportView.vue     # Excel 导入
 ```
 
-三个模块通过全局变量共享状态，`index.html` 仅保留 HTML 结构和 CSS。
+- `<script setup>` + Composition API，状态用 `reactive()`/composables，不用 Pinia
+- Vite 开发服务器（HMR），`base: '/quote/'`
+- API 调用使用动态 `BASE_URL`（dev=`/quote`, prod=`/quote`），参见下一节
 
 ### 认证系统
 
@@ -545,7 +559,7 @@ static/js/
 
 ```
 /opt/quote-system/
-├── app.py                     # Flask 应用主文件（~2572 行）
+├── app.py                     # Flask 应用主文件（~2709 行）
 ├── frontend/                  # Vue 3 SPA 前端（v1.6.0）
 │   ├── src/                   # Vue 组件 / composables
 │   │   ├── App.vue            # 根组件 + 导航
@@ -561,8 +575,8 @@ static/js/
 │   ├── dist/                  # Vite 构建产物（生产）
 │   └── vite.config.js         # Vite 配置
 ├── templates/
-│   └── index.html             # 旧版 SPA 骨架（向下兼容）
-├── static/js/                 # 旧版 JS 模块（向下兼容）
+│   └── index.html             # Vue SPA 入口（Vite 构建注入）
+├── static/js/                 # 遗留 JS 模块（已弃用，保留作参考）
 ├── tests/                     # pytest 测试套件（127 项）
 │   ├── conftest.py            # fixtures（登录、session）
 │   ├── test_auth.py           # 认证
@@ -623,7 +637,7 @@ conn.close()
 "
 
 # 更新版本号
-echo "1.6.0" > version.txt && sudo systemctl restart quote-system
+echo "1.7.0" > version.txt && sudo systemctl restart quote-system
 
 # 推送到 GitHub
 cd /opt/quote-system

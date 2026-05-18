@@ -44,6 +44,13 @@
 - 产品名 XSS 拦截: `<script>/<img>/onerror=/onclick=/onload=/javascript:`
 - 产品名截断: 20字
 - pytest 测试: venv 在 `/opt/quote-system/venv/`
+- ⚠️ 依赖: `flask flask-sqlalchemy flask-cors pyjwt openpyxl pypinyin Pillow`（`pypinyin` 是 lazy import，`import app` 检测不到遗漏；`Pillow` 是 openpyxl 处理图片所需）
+
+### 本地开发环境
+- 仓库: `/tmp/quote-system`，venv: `/tmp/quote-system/venv`
+- macOS AirPlay Receiver 占 5000 端口 → 改用 5001
+- Vite 代理需 rewrite `/quote/` 前缀（见 skill doc）
+- 启动: 终端1 `python app.py` + 终端2 `cd frontend && npx vite --host`
 
 ### 通用
 - 中文回复，表格式数据用 bullet 不用 pipe table
@@ -53,16 +60,20 @@
 ## 测试规范
 
 ```bash
-# API 测试
+# API 测试（生产环境）
 cd /opt/quote-system && python3 -m pytest tests/test_auth.py tests/test_products.py tests/test_quotes.py tests/test_admin.py tests/test_edge_cases.py tests/test_comprehensive.py -v
 
 # E2E 测试
 cd /opt/quote-system && /opt/quote-system/venv/bin/python -m pytest tests/test_e2e_vue.py -v
+
+# 本地开发（/tmp/quote-system）
+cd /tmp/quote-system && source venv/bin/activate && python -m pytest tests/ -v
 ```
 
 ## 部署
 
 ```bash
+cd /opt/quote-system && git pull                    # ← 必须先拉最新代码
 cd /opt/quote-system/frontend && npm run build
 sudo systemctl restart quote-system
 # 回退: rm -rf /opt/quote-system/frontend/dist && sudo systemctl restart quote-system
