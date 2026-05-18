@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, request, jsonify, send_file, send_from_directory, render_template, g
+from flask import Flask, request, jsonify, send_file, send_from_directory, render_template, g, Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import func
@@ -782,7 +782,6 @@ def get_product_image(product_id):
     product = db.session.get(Product, product_id)
     if not product or not product.image_data:
         return '', 404
-    from flask import Response
     return Response(product.image_data, mimetype=product.image_mime or 'image/jpeg')
 
 
