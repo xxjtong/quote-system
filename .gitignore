@@ -32,3 +32,4 @@ venv/
 .DS_Store
 frontend/node_modules/
 db.local.bak
+sudoers-quote-system
