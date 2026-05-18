@@ -33,3 +33,4 @@ venv/
 frontend/node_modules/
 db.local.bak
 sudoers-quote-system
+模板参考.xlsx
