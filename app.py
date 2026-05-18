@@ -2654,8 +2654,9 @@ def index():
         return send_file(os.path.join(_dist_dir, 'index.html'))
     return render_template('index.html')
 
-# Serve Vue build assets (JS/CSS) from /assets/
+# Serve Vue build assets (JS/CSS) from /assets/ and /quote/assets/
 @app.route('/assets/<path:filename>')
+@app.route('/quote/assets/<path:filename>')
 def vue_assets(filename):
     if _has_vue_build:
         return send_from_directory(os.path.join(_dist_dir, 'assets'), filename)

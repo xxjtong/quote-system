@@ -5,7 +5,7 @@ Tests actual browser interactions: login, product CRUD, quote creation, admin pa
 import pytest
 from playwright.sync_api import sync_playwright, Page, Browser
 
-BASE = "http://127.0.0.1:5000"
+BASE = "http://127.0.0.1:5001"
 ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
 
