@@ -10,6 +10,7 @@ const toast = inject('toast')
 const { api } = useApi()
 
 const editId = ref(route.query.edit || null)
+const autoProduct = ref(route.query.product ? decodeURIComponent(route.query.product) : '')
 const isEditing = computed(() => !!editId.value)
 
 // ─── Form state ───
@@ -197,7 +198,40 @@ async function saveQuote() {
   }
 }
 
-onMounted(loadQuote)
+onMounted(() => {
+  loadQuote()
+  if (autoProduct.value) autoAddProduct()
+})
+
+async function autoAddProduct() {
+  // Search for products matching the name from AI chat
+  try {
+    const data = await api(`/api/products?search=${encodeURIComponent(autoProduct.value)}&per_page=5`)
+    const products = (data.products || []).filter(p => p.is_active !== false)
+    if (products.length === 0) {
+      toast(`未找到产品「${autoProduct.value}」`, 'warning')
+      return
+    }
+    for (const p of products) {
+      items.push({
+        product_id: p.id,
+        name: p.name,
+        spec: p.spec || '',
+        unit: p.unit || '',
+        price: p.price || 0,
+        quantity: 1,
+        discount: 100,
+        remark: '',
+      })
+    }
+    if (products.length === 1) {
+      form.title = form.title || `${products[0].name} 报价`
+    }
+    toast(`已添加 ${products.length} 个产品`)
+  } catch (e) {
+    toast('产品搜索失败', 'danger')
+  }
+}
 </script>
 
 <template>
