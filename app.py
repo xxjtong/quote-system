@@ -2656,7 +2656,7 @@ def ai_token():
 
 # ─── AI Chat (通过 Hermes Gateway Responses API) ─────────────
 
-_gateway_url = 'http://127.0.0.1:8642'
+_gateway_url = 'http://127.0.0.1:8643'
 
 _initialized_convos = set()
 
