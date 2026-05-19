@@ -144,12 +144,11 @@ async function sendMessage(textOverride) {
   await nextTick(); scrollChat()
 
   try {
-    // Use SSE streaming
-    const token = localStorage.getItem('token')
-    const base = import.meta.env.BASE_URL || ''
+    // Use SSE streaming — need raw fetch for ReadableStream
+    const token = localStorage.getItem('quote_token')
+    const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
-    // Replace router-based token with direct localStorage read
-    const resp = await fetch(base + '/api/chat', {
+    const resp = await fetch(BASE_URL + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ input: text, stream: true }),
