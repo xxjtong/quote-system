@@ -248,7 +248,7 @@ def delete_user(user_id):
 # ─── API Routes ──────────────────────────────────────────────
 
 # 公开路由（无需登录）
-PUBLIC_ROUTES = {'auth_login', 'auth_register', 'auth_registration_status', 'get_version', 'index', 'serve_upload', 'export_product_template', 'get_product_image'}
+PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'index', 'serve_upload', 'export_product_template', 'get_product_image'}
 
 @app.before_request
 def check_auth():
