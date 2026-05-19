@@ -2417,15 +2417,26 @@ def _parse_reply_actions(reply_text):
             result['quick_replies'] = replies
             break
 
-    # 检测推荐了产品 → 提取产品名+价格
-    prod_pattern = re.findall(
-        r'(?:推荐|建议|选择)\s*([\u4e00-\u9fff\w\-\+]+)\s*[：:，,]*\s*(?:¥|￥|rmb)?\s*([\d,]+\.?\d*)',
+    # 检测推荐了产品 → 提取产品名+价格（支持多种格式）
+    # 格式1: "1. 产品名 - ¥429" or "2. 产品名 ¥1,326"
+    # 格式2: "产品名：¥429"
+    prod_pattern1 = re.findall(
+        r'(?:\\d+[.、．]\\s*)?([\\u4e00-\\u9fff\\w\\-\\+][\\u4e00-\\u9fff\\w\\-\\+\\s]{2,40}?)\\s*[-–—：:]\\s*(?:¥|￥|rmb)?\\s*([\\d,]+\\.?\\d*)',
         reply_text, re.IGNORECASE
     )
-    for name, price in prod_pattern[:5]:
+    prod_pattern2 = re.findall(
+        r'([\\u4e00-\\u9fff\\w\\-\\+][\\u4e00-\\u9fff\\w\\-\\+\\s]{2,40}?)\\s*[：:]\\s*(?:¥|￥|rmb)?\\s*([\\d,]+\\.?\\d*)',
+        reply_text, re.IGNORECASE
+    )
+    seen = set()
+    for name, price in (prod_pattern1 + prod_pattern2)[:6]:
+        name = name.strip()
+        if name in seen or len(name) < 3:
+            continue
+        seen.add(name)
         try:
             result['products'].append({
-                'name': name.strip(),
+                'name': name,
                 'price': float(price.replace(',', '')),
             })
         except ValueError:
