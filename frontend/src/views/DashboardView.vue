@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, inject, nextTick } from 'vue'
+import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
@@ -51,36 +51,87 @@ const chatInput = ref('')
 const chatLoading = ref(false)
 const chatBox = ref(null)
 const elapsedSeconds = ref(0)
+const estimatedTotal = ref(0)
+const currentPhase = ref(-1)
+const estLabel = ref('')
 let timerInterval = null
+
+const phaseList = ['分析问题', '查询数据', '整理信息', '生成回复']
+
+// 根据消息内容预估耗时
+function estimateTime(text) {
+  const hasQuote = /报价|创建|生成报价|导出|excel/i.test(text)
+  const hasSearch = /搜索|查询|查找|有哪些|推荐|哪个|什么|怎么|比较|最低|最高/i.test(text)
+  if (hasQuote) return { phases: 4, total: 75, label: '创建报价约 60-90s' }
+  if (hasSearch && text.length > 6) return { phases: 3, total: 40, label: '数据查询约 20-60s' }
+  return { phases: 2, total: 10, label: '快速问答约 5-15s' }
+}
+
+// 当前阶段名（实时）
+const currentPhaseName = computed(() => {
+  if (currentPhase.value < 0) return ''
+  return phaseList[currentPhase.value] || phaseList[phaseList.length - 1]
+})
+
+// 进度百分比
+const progressPercent = computed(() => {
+  if (estimatedTotal.value <= 0) return 0
+  return Math.min(100, Math.round((elapsedSeconds.value / estimatedTotal.value) * 100))
+})
 
 async function sendMessage() {
   const text = chatInput.value.trim()
   if (!text || chatLoading.value) return
 
+  const est = estimateTime(text)
+  estimatedTotal.value = est.total
+  estLabel.value = est.label
+
   chatMessages.value.push({ role: 'user', content: text })
   chatInput.value = ''
   chatLoading.value = true
 
-  // Start timer
+  // Start timer + phase tracker
   elapsedSeconds.value = 0
-  timerInterval = setInterval(() => { elapsedSeconds.value++ }, 1000)
+  currentPhase.value = 0
+  timerInterval = setInterval(() => {
+    elapsedSeconds.value++
+    const ratio = elapsedSeconds.value / estimatedTotal.value
+    currentPhase.value = Math.min(Math.floor(ratio * est.phases), est.phases - 1)
+  }, 1000)
 
   await nextTick()
   scrollChat()
 
   try {
-    const messages = chatMessages.value.map(m => ({ role: m.role, content: m.content }))
-    const data = await api('/api/chat', 'POST', { messages }, 120000)
+    const data = await api('/api/chat', 'POST', { input: text }, 130000)
+    const elapsed = elapsedSeconds.value
     if (data.error) {
-      chatMessages.value.push({ role: 'assistant', content: `❌ ${data.error}\n\n⏱ 用时 ${elapsedSeconds.value} 秒` })
+      chatMessages.value.push({
+        role: 'assistant',
+        content: `❌ ${data.error}`,
+        elapsed,
+        timings: data.timings || null,
+      })
     } else {
-      chatMessages.value.push({ role: 'assistant', content: `⏱ 用时 ${elapsedSeconds.value} 秒\n\n${data.reply}` })
+      chatMessages.value.push({
+        role: 'assistant',
+        content: data.reply,
+        elapsed,
+        timings: data.timings || null,
+      })
     }
   } catch (e) {
-    chatMessages.value.push({ role: 'assistant', content: `❌ 网络错误，请重试\n\n⏱ 用时 ${elapsedSeconds.value} 秒` })
+    chatMessages.value.push({
+      role: 'assistant',
+      content: `❌ 网络错误，请重试`,
+      elapsed: elapsedSeconds.value,
+      timings: null,
+    })
   } finally {
     clearInterval(timerInterval)
     chatLoading.value = false
+    currentPhase.value = -1
     await nextTick()
     scrollChat()
   }
@@ -97,6 +148,15 @@ function onChatKeydown(e) {
     e.preventDefault()
     sendMessage()
   }
+}
+
+// 格式化 timings 为紧凑行
+function formatTimings(t) {
+  if (!t) return ''
+  const lines = []
+  if (t['获取Agent']) lines.push(`会话 ${t['获取Agent']}`)
+  if (t['LLM+工具调用']) lines.push(`推理 ${t['LLM+工具调用']}`)
+  return lines.join(' · ')
 }
 
 onMounted(fetchDashboard)
@@ -219,11 +279,41 @@ onMounted(fetchDashboard)
           <div class="chat-bubble" :class="msg.role === 'user' ? 'bg-primary text-white' : 'bg-light'"
             style="max-width:85%;padding:.5rem .75rem;border-radius:12px;font-size:.85rem;line-height:1.5;white-space:pre-wrap">
             {{ msg.content }}
+            <!-- 耗时标记 -->
+            <div v-if="msg.role === 'assistant' && msg.elapsed" class="mt-2 pt-1" style="font-size:.7rem;color:var(--gray-500);border-top:1px solid var(--gray-200)">
+              ⏱ {{ msg.elapsed }}s
+              <span v-if="msg.timings"> · {{ formatTimings(msg.timings) }}</span>
+            </div>
           </div>
         </div>
+
+        <!-- Loading: 分阶段进度 -->
         <div v-if="chatLoading" class="chat-msg-ai">
-          <div class="chat-bubble bg-light" style="padding:.5rem .75rem;border-radius:12px">
-            <span class="spinner-border spinner-border-sm text-primary me-2"></span>思考中<small class="text-muted ms-2">⏱ {{ elapsedSeconds }}s</small>
+          <div class="chat-bubble bg-light" style="padding:.6rem .8rem;border-radius:12px;min-width:260px">
+            <!-- 进度条 -->
+            <div class="progress mb-2" style="height:4px">
+              <div class="progress-bar progress-bar-striped progress-bar-animated"
+                :style="{width: progressPercent + '%'}"
+                :class="progressPercent < 30 ? 'bg-info' : progressPercent < 70 ? 'bg-primary' : 'bg-success'"></div>
+            </div>
+
+            <!-- 阶段列表 -->
+            <div style="font-size:.78rem">
+              <div v-for="(p, idx) in phaseList.slice(0, estimatedTotal > 30 ? 4 : estimatedTotal > 10 ? 3 : 2)" :key="idx"
+                class="d-flex align-items-center gap-2 mb-1"
+                :style="{opacity: idx <= currentPhase ? 1 : 0.4}">
+                <span v-if="idx < currentPhase" class="text-success"><i class="bi bi-check-circle-fill"></i></span>
+                <span v-else-if="idx === currentPhase" class="spinner-grow spinner-grow-sm text-primary" style="width:10px;height:10px"></span>
+                <span v-else style="width:10px;height:10px;display:inline-block;border-radius:50%;border:1.5px solid var(--gray-400)"></span>
+                {{ p }}
+              </div>
+            </div>
+
+            <!-- 预估 + 已用 -->
+            <div class="mt-1 d-flex justify-content-between" style="font-size:.68rem;color:var(--gray-500)">
+              <span>预估 {{ estLabel }}</span>
+              <span>已用 {{ elapsedSeconds }}s</span>
+            </div>
           </div>
         </div>
       </div>

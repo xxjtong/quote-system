@@ -2644,121 +2644,106 @@ def number_to_cn(num):
     return result + '圆整'
 
 
-# ─── AI Chat (直调 DeepSeek + 数据库产品搜索) ──────────────
+# ─── AI Token ────────────────
 
-# ─── AI Chat (Hermes Agent 会话池) ──────────────────────────
+@app.route('/api/ai/token', methods=['GET'])
+@require_auth
+def ai_token():
+    """AI 助手获取当前用户的 JWT token（用于 API 操作）。"""
+    token = create_token(g.current_user)
+    return jsonify({'token': token, 'username': g.current_user.username, 'user_id': g.current_user.id})
 
-import yaml
 
-_hermes_config = None
-_hermes_api_key = ''
-_agent_pool = {}        # user_id → AIAgent
-_agent_lock = threading.Lock()
+# ─── AI Chat (通过 Hermes Gateway Responses API) ─────────────
 
-def _load_hermes_config():
-    """加载 Hermes 配置（model / provider / api_key）。"""
-    global _hermes_config, _hermes_api_key
-    if _hermes_config is not None:
-        return
-    config_path = os.path.expanduser('~/.hermes/config.yaml')
-    env_path = os.path.expanduser('~/.hermes/.env')
-    try:
-        with open(config_path) as f:
-            _hermes_config = yaml.safe_load(f) or {}
-    except Exception:
-        _hermes_config = {}
-    try:
-        with open(env_path) as f:
-            for line in f:
-                if line.startswith('DEEPSEEK_API_KEY='):
-                    _hermes_api_key = line.strip().split('=', 1)[1]
-    except Exception:
-        pass
+_gateway_url = 'http://127.0.0.1:8642'
 
-def _create_agent(user_id):
-    """创建 Hermes Agent 实例（注入报价系统上下文）。"""
-    _load_hermes_config()
-    model_cfg = _hermes_config.get('model', {})
-    model = model_cfg.get('default', 'deepseek-v4-pro')
-    provider = model_cfg.get('provider', 'deepseek')
-    base_url = model_cfg.get('base_url', 'https://api.deepseek.com/v1')
+_initialized_convos = set()
 
-    # 添加 Hermes 到 Python path
-    hermes_path = os.path.expanduser('~/.hermes/hermes-agent')
-    if hermes_path not in sys.path:
-        sys.path.insert(0, hermes_path)
-    from run_agent import AIAgent
+_GW_SYSTEM_PROMPT = (
+    '你是报价管理系统（/opt/quote-system）的 AI 助手。'
+    '你可以用工具直接操作系统：\n'
+    '- 数据库：/opt/quote-system/quote.db (SQLite)\n'
+    '  产品表 products(id, name, sku, category, spec, unit, price, cost_price, supplier, function_desc, is_active)\n'
+    '  报价单 quotes(id, title, client, contact, phone, quote_date, valid_days, status, total_amount)\n'
+    '  报价明细 quote_items(id, quote_id, product_id, product_name, product_sku, quantity, unit_price, amount)\n'
+    '- API：127.0.0.1:5001，JWT token 从 DB 获取\n'
+    '  创建报价：POST /api/quotes  导出Excel：GET /api/quotes/<id>/export-excel\n'
+    '- 产品搜索：sqlite3 /opt/quote-system/quote.db \n'
+    '    "SELECT name,price FROM products WHERE name LIKE \'%关键词%\' ORDER BY price"\n\n'
+    '规则：推荐产品必须来自数据库，价格准确。可以帮用户创建报价单、导出 Excel。\n'
+    '重要：每个用户的对话完全独立，不要使用或查询任何全局记忆/历史中的用户信息。'
+    '如果不知道用户信息，就说不知道，不要从记忆里猜测。'
+)
 
-    system_prompt = (
-        '你是报价管理系统（/opt/quote-system）的 AI 助手。'
-        '你可以用工具直接操作系统：\n'
-        '- 数据库：/opt/quote-system/quote.db (SQLite)\n'
-        '  产品表 products(id, name, sku, category, spec, unit, price, cost_price, supplier, function_desc, is_active)\n'
-        '  报价单 quotes(id, title, client, contact, phone, quote_date, valid_days, status, total_amount)\n'
-        '  报价明细 quote_items(id, quote_id, product_id, product_name, product_sku, quantity, unit_price, amount)\n'
-        '- API：127.0.0.1:5001，JWT token 从 DB 获取\n'
-        '  创建报价：POST /api/quotes  导出Excel：GET /api/quotes/<id>/export-excel\n'
-        '- 产品搜索：sqlite3 /opt/quote-system/quote.db "SELECT name,price FROM products WHERE name LIKE \'%关键词%\' ORDER BY price"\n\n'
-        '规则：推荐产品必须来自数据库，价格准确。可以帮用户创建报价单、导出 Excel。'
-    )
-
-    agent = AIAgent(
-        base_url=base_url,
-        api_key=_hermes_api_key,
-        provider=provider,
-        model=model,
-        api_mode='chat_completions',
-        max_iterations=30,
-        enabled_toolsets=['terminal', 'file', 'web'],
-        disabled_toolsets=['browser', 'image_gen', 'video_gen', 'tts', 'vision', 'x_search', 'spotify', 'homeassistant'],
-        quiet_mode=True,
-        save_trajectories=False,
-        platform='api',
-        session_id=f'quote-chat-{user_id}',
-        skip_context_files=True,
-        skip_memory=False,
-    )
-    # 首条消息用 run_conversation 注入 system prompt
-    agent._system_prompt = system_prompt
-    return agent
-
-def _get_agent(user_id):
-    """获取或创建用户的持久 Agent 会话。"""
-    with _agent_lock:
-        agent = _agent_pool.get(user_id)
-        if agent is None:
-            agent = _create_agent(user_id)
-            _agent_pool[user_id] = agent
-        return agent
 
 @app.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
-    """AI 对话 — 对接 Hermes Agent（持久会话池）。"""
+    """AI 对话 — 通过 Hermes Gateway Responses API（服务端会话存储）。"""
+    import time, urllib.request, json as _json
+    t0 = time.time()
+
     data = request.get_json(silent=True) or {}
-    messages = data.get('messages', [])
-    if not messages:
+    user_input = (data.get('input', '') or '').strip()
+    if not user_input:
         return jsonify({'error': '请输入问题'}), 400
 
-    # 提取最后一条用户消息
-    user_msg = ''
-    for m in reversed(messages):
-        if m.get('role') == 'user':
-            user_msg = m.get('content', '')
-            break
-    if not user_msg:
-        return jsonify({'error': '请输入问题'}), 400
+    user = g.current_user
+    conversation = f'quote-user-{user.id}'
 
-    agent = _get_agent(g.current_user.id)
+    # 构建请求体
+    body = {
+        'input': user_input,
+        'conversation': conversation,
+        'max_output_tokens': 2000,
+    }
+
+    # 首次 — 注入系统提示和用户身份
+    if conversation not in _initialized_convos:
+        body['instructions'] = (
+            _GW_SYSTEM_PROMPT + '\n'
+            f'当前用户：{user.username}（ID={user.id}）。'
+            f'创建/查询报价单时，先调用 GET /api/ai/token 获取当前用户的 JWT token，'
+            f'然后用这个 token 操作 API（POST /api/quotes 创建、GET /export-excel 导出等）。'
+            f'报价单会自动归属到当前用户 "{user.username}" 名下。'
+        )
+        _initialized_convos.add(conversation)
+
+    t1 = time.time()
 
     try:
-        result = agent.run_conversation(user_msg)
-        reply = result.get('final_response', '')
+        req = urllib.request.Request(
+            f'{_gateway_url}/v1/responses',
+            data=_json.dumps(body).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        resp = urllib.request.urlopen(req, timeout=180)
+        t2 = time.time()
+
+        result = _json.loads(resp.read())
+        # 只取最终文本回复，过滤工具调用
+        reply = ''
+        for o in result.get('output', []):
+            if o.get('type') == 'message':
+                content = o.get('content', [])
+                if content:
+                    reply = content[0].get('text', '')
+                break
         if not reply:
             reply = '抱歉，AI 暂时无法回答，请稍后再试。'
-        return jsonify({'reply': reply, 'model': 'hermes-agent'})
+
+        return jsonify({
+            'reply': reply,
+            'model': 'hermes-gateway',
+            'timings': {'Gateway': f'{t2 - t1:.1f}s', '总耗时': f'{t2 - t0:.1f}s'}
+        })
     except Exception as e:
-        return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503
+        return jsonify({
+            'error': f'AI 服务异常: {str(e)}',
+            'timings': {'总耗时': f'{time.time() - t0:.1f}s'}
+        }), 503
 
 
 # ─── Frontend ────────────────────────────────────────────────
