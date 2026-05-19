@@ -1,7 +1,7 @@
 # 报价系统 — 全量测试报告
 
 > **运行时间**: 2026-05-19  
-> **系统版本**: 1.7.1 (AI chat → Hermes Gateway Responses API)  
+> **系统版本**: 1.7.6 (AI 身份注入修复 + SSE 流式对话 + 产品搜索优化)  
 > **测试环境**: Debian 12 VPS, Python 3.11, SQLite  
 
 ---
@@ -35,16 +35,20 @@
 
 ---
 
-## 🤖 AI 对话验证 (v1.7.1 新增)
+## 🤖 AI 对话验证 (v1.7.1~1.7.6)
 
 | 测试项 | 方法 | 结果 |
 |--------|------|:--:|
-| 首轮注入 instructions | 冷启动 ~35s | ✅ |
-| 后续轮次 11.3s | 不复用 instructions | ✅ |
+| 首轮注入 instructions | Gateway Responses API | ✅ |
 | 会话连续性 | 第二轮记得第一轮内容 | ✅ |
 | 用户隔离 | `conversation=quote-user-{id}` | ✅ |
 | 工具调用过滤 | 用户只看到最终文本 | ✅ |
-| System prompt 复用 | 第二轮不传 instructions | ✅ |
+| AI 创建报价单 | 上下文确认后再创建 | ✅ |
+| Excel 导出链接 | 返回下载 URL 而非本地路径 | ✅ |
+| 产品搜索策略 | 型号→全名→关键词多策略回退 | ✅ |
+| SSE 流式对话 | 分段计时（连接/TTFT/首字） | ✅ |
+| AI 身份注入 | 自定义 Prompt 注入用户消息头部 | ✅ |
+| Prompt 变更自动刷新 | hash 对比 → 自动清 AIChatSession | ✅ |
 
 ---
 
