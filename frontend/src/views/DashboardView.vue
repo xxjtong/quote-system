@@ -351,22 +351,28 @@ onMounted(() => { fetchDashboard(); loadHistory() })
         </div>
       </div>
 
-      <!-- Chat History Sidebar -->
-      <div v-if="historyOpen" class="chat-history-panel">
-        <div class="small fw-bold text-muted mb-2">对话历史</div>
-        <div v-if="chatHistory.length === 0" class="text-muted small">暂无历史</div>
-        <div v-for="h in chatHistory" :key="h.id"
-          class="history-item py-1 px-2 rounded small"
-          :class="{ 'bg-light': h.id === currentSessionId }"
-          style="cursor:pointer"
-          @click="loadChat(h.id)">
-          <div class="text-truncate">{{ h.preview }}</div>
-          <div class="d-flex justify-content-between" style="font-size:.65rem;color:var(--gray-500)">
-            <span>{{ h.count }} 条消息</span>
-            <span>{{ new Date(h.time).toLocaleDateString() }}</span>
+      <!-- Chat History Sidebar (teleported to avoid clipping) -->
+      <Teleport to="body">
+        <div v-if="historyOpen" class="history-backdrop" @click="historyOpen = false"></div>
+        <div v-if="historyOpen" class="chat-history-panel">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="small fw-bold text-muted">对话历史</span>
+            <button class="btn-close btn-close-sm" @click="historyOpen = false" style="font-size:.5rem"></button>
+          </div>
+          <div v-if="chatHistory.length === 0" class="text-muted small">暂无历史</div>
+          <div v-for="h in chatHistory" :key="h.id"
+            class="history-item py-1 px-2 rounded small"
+            :class="{ 'bg-light': h.id === currentSessionId }"
+            style="cursor:pointer"
+            @click="loadChat(h.id)">
+            <div class="text-truncate">{{ h.preview }}</div>
+            <div class="d-flex justify-content-between" style="font-size:.65rem;color:var(--gray-500)">
+              <span>{{ h.count }} 条消息</span>
+              <span>{{ new Date(h.time).toLocaleDateString() }}</span>
+            </div>
           </div>
         </div>
-      </div>
+      </Teleport>
 
       <!-- Messages -->
       <div ref="chatBox" class="chat-messages" style="max-height:60vh;overflow-y:auto;margin-bottom:.75rem">
@@ -543,18 +549,23 @@ onMounted(() => { fetchDashboard(); loadHistory() })
 .msg-action-btn:hover { background: var(--gray-200); color: var(--gray-700); }
 
 .chat-history-panel {
-  position: absolute;
-  top: 48px;
-  right: 12px;
-  width: 240px;
-  max-height: 300px;
+  position: fixed;
+  top: 56px;
+  right: 24px;
+  width: 260px;
+  max-height: 400px;
   overflow-y: auto;
   background: white;
   border: 1px solid var(--gray-200);
   border-radius: 8px;
   padding: 10px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.08);
-  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  z-index: 1060;
+}
+.history-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1059;
 }
 .history-item:hover { background: var(--gray-100); }
 .history-item.active { background: var(--primary-light); }
