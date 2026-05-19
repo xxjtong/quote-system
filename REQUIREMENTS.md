@@ -2,7 +2,7 @@
 
 > 写给 AI：本文档涵盖该报价系统的全部功能与交互细节。照着做就能复刻。
 
-**当前版本**: v1.7.0 | **最后更新**: 2026-05-17
+**当前版本**: v1.7.1 | **最后更新**: 2026-05-19
 
 ---
 
@@ -10,13 +10,14 @@
 
 | 层 | 技术 | 说明 |
 |---|------|------|
-| Web 服务器 | nginx | 反向代理，`/quote/` → `127.0.0.1:5000/`，处理 TLS |
-| 应用服务器 | Gunicorn | 2 worker (`--preload`)，绑定 `127.0.0.1:5000` |
+| Web 服务器 | nginx | 反向代理，`/quote/` → `127.0.0.1:5001/`，处理 TLS |
+| 应用服务器 | Gunicorn | 2 worker (`--preload`)，绑定 `127.0.0.1:5001` |
 | 后端框架 | Flask + SQLAlchemy | REST JSON API |
+| AI 引擎 | Hermes Gateway | Responses API (`/v1/responses`)，服务端会话存储，工具调用过滤 (v1.7.1) |
 | 数据库 | SQLite | 单文件 `/opt/quote-system/quote.db` |
-|| 前端 | Vue 3 SPA | Composition API + Vite 构建 + Vue Router 历史模式 (v1.6.0) + Bootstrap 5 CSS |
-|| 部署 | systemd | 服务名 `quote-system`，用户 `tong` |
-|| 视觉识别 | 火山引擎豆包 | Seed Lite 视觉模型直出 JSON (v1.6.0)，API_KEY 从环境变量读取 |
+| 前端 | Vue 3 SPA | Composition API + Vite 构建 + Vue Router 历史模式 + Bootstrap 5 CSS |
+| 部署 | systemd | 服务名 `quote-system`，用户 `tong` |
+| 视觉识别 | 火山引擎豆包 | Seed Lite 视觉模型直出 JSON，API_KEY 从环境变量读取 |
 
 ---
 
@@ -94,7 +95,7 @@
 
 ## 3. REST API
 
-Base: `http://127.0.0.1:5000` | 公网: `https://bwh.ddns.mobi/quote`
+Base: `http://127.0.0.1:5001` | 公网: `https://bwh.ddns.mobi/quote`
 
 ### 3.1 产品 API
 
@@ -136,6 +137,20 @@ Base: `http://127.0.0.1:5000` | 公网: `https://bwh.ddns.mobi/quote`
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/version` | 系统版本号 |
+
+### 3.4 AI 对话 API (v1.7.1)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/chat` | AI 对话 — `{input: "问题"}` → `{reply, timings}` |
+| `GET` | `/api/ai/token` | 获取当前用户 JWT token（供 AI 代理以正确身份操作报价 API） |
+
+**架构：** Flask `/api/chat` → Hermes Gateway `POST /v1/responses`：
+- `instructions` 首轮注入系统提示 + 用户身份，自动复用
+- `conversation=quote-user-{id}` 按用户隔离
+- Flask 过滤工具调用输出（用户看不到内部 SQL/终端命令）
+- 前端只发送 `{input: "一句话"}`，无需维护消息数组
+- 页面刷新不丢对话（服务端存储）
 | `GET` | `/api/stats` | 统计数据（产品数、报价单数等） |
 
 ---
@@ -171,6 +186,7 @@ Gunicorn 缓存 Jinja2 模板，每次修改 `index.html` 后需重启服务。�
 - 顶部统计卡片：产品总数、报价单总数、总下载次数
 - 最近报价单列表（最新 10 条），含客户名、金额、状态、下载次数
 - 快捷操作区
+- **AI 产品助手**：内嵌 AI 对话框，问产品/推方案/查参数。进度条 + 分阶段预估（分析→查询→整理→回复）+ 实时计时。AI 直接查询报价系统数据库推荐产品 (v1.7.1)
 - **缓存优先 + 后台刷新**：首次渲染用缓存数据（0ms），后台异步拉取新数据，有变化时静默更新 DOM
 
 ---

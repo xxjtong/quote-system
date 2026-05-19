@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.7.0-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.7.1-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -37,6 +37,7 @@
 | 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权） |
 | 📧 **邮件** | SMTP 配置，一键发送报价单 Excel 附件 |
 | 🔍 **智能识别** | 粘贴文本自动解析产品信息、火山引擎豆包 Vision 图片识别、**发票 OCR → 批量更新成本价** |
+| 🤖 **AI 助手** | Dashboard 内嵌 AI 产品助手，服务端会话存储，工具调用透明过滤，按用户隔离 (v1.7.1) |
 | 🎨 **UI** | 统一页面风格、上下布局、`.page-header` / `.card-modern` / `.form-label-modern` 一致样式体系 |
 | ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹、前端本地拼音过滤 |
 
@@ -45,17 +46,17 @@
 ## 技术架构
 
 ```
-┌──────────────┐     ┌──────────┐     ┌──────────────┐
-│   浏览器      │────▶│  nginx   │────▶│   Gunicorn   │
-│  Bootstrap 5  │     │  :443    │     │  2 workers   │
-│  SPA (3 JS)   │     │  proxy   │     │  :5000       │
-└──────────────┘     └──────────┘     └──────┬───────┘
-                                             │
-                                        ┌────▼───────┐
-                                        │   Flask     │
-                                        │ JWT Auth    │
-                                        │ SQLAlchemy  │
-                                        └────┬───────┘
+┌──────────────┐     ┌──────────┐     ┌──────────────┐     ┌────────────────┐
+│   浏览器      │────▶│  nginx   │────▶│   Gunicorn   │     │ Hermes Gateway │
+│  Bootstrap 5  │     │  :443    │     │  2 workers   │     │    :8642        │
+│  SPA (3 JS)   │     │  proxy   │     │  :5001       │     │  AI 会话池      │
+└──────────────┘     └──────────┘     └──────┬───────┘     └──────┬─────────┘
+                                             │                    │
+                                        ┌────▼───────┐     ┌─────▼─────────┐
+                                        │   Flask     │────▶│ Responses API  │
+                                        │ JWT Auth    │     │ 会话存储       │
+                                        │ SQLAlchemy  │     │ 工具调用过滤    │
+                                        └────┬───────┘     └───────────────┘
                                              │
                                         ┌────▼───────┐
                                         │  SQLite     │
@@ -66,15 +67,16 @@
 | 层 | 技术 | 说明 |
 |---|------|------|
 | Web 服务器 | nginx | 反向代理，TLS 终端，路径 `/quote/` → Gunicorn |
-| 应用服务器 | Gunicorn | 2 worker 进程（`--preload`），绑定 `127.0.0.1:5000` |
+| 应用服务器 | Gunicorn | 2 worker 进程（`--preload`），绑定 `127.0.0.1:5001` |
 | 后端框架 | Flask + SQLAlchemy | RESTful JSON API，字段可见性控制 |
+| AI 引擎 | Hermes Gateway | Responses API（`/v1/responses`），服务端会话存储，工具调用过滤 (v1.7.1) |
 | 认证 | JWT (PyJWT) | 无状态 token，SHA256+盐密码，自动续签 |
 | 数据库 | SQLite | 单文件，零配置 |
-|| 前端 | Vue 3 SPA | Composition API + Vite 构建 + Vue Router 历史模式 (v1.6.0) + Bootstrap 5 CSS |
-|| 拼音 | pypinyin | 后端拼音搜索 + 前端本地拼音过滤 |
-|| Excel | openpyxl | 读写 `.xlsx`，含格式化 |
-|| 视觉识别 | 火山引擎豆包 | Seed Lite 视觉模型，直出 JSON (v1.6.0) |
-|| 降级 OCR | OCR.space API | 免费 tier 兜底 |
+| 前端 | Vue 3 SPA | Composition API + Vite 构建 + Vue Router 历史模式 + Bootstrap 5 CSS |
+| 拼音 | pypinyin | 后端拼音搜索 + 前端本地拼音过滤 |
+| Excel | openpyxl | 读写 `.xlsx`，含格式化 |
+| 视觉识别 | 火山引擎豆包 | Seed Lite 视觉模型，直出 JSON |
+| 降级 OCR | OCR.space API | 免费 tier 兜底 |
 
 ---
 
@@ -217,7 +219,7 @@ sudo systemctl enable --now quote-system
 
 # 7. 配置 nginx（示例）
 # location /quote/ {
-#     proxy_pass http://127.0.0.1:5000/;
+#     proxy_pass http://127.0.0.1:5001/;
 #     proxy_set_header Host $host;
 #     client_max_body_size 50m;
 # }
@@ -235,7 +237,7 @@ sudo systemctl restart quote-system
 
 ## REST API
 
-Base URL: `http://127.0.0.1:5000`
+Base URL: `http://127.0.0.1:5001`
 
 > ⚠️ 除公开路由外，所有 API 需 `Authorization: Bearer <token>` 请求头。
 
@@ -348,6 +350,15 @@ Base URL: `http://127.0.0.1:5000`
 |------|------|------|
 | `GET` | `/api/version` | 系统版本号（公开） |
 
+### AI 对话 (v1.7.1)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/chat` | AI 对话（`{input: "问题"}`），通过 Hermes Gateway Responses API |
+| `GET` | `/api/ai/token` | 获取当前用户 JWT token（AI 代理用此接口以正确用户身份操作） |
+
+**架构：** Flask `/api/chat` → Hermes Gateway `POST /v1/responses`（服务端会话存储，`conversation=quote-user-{id}` 按用户隔离）。Flask 层过滤工具调用输出，用户只看到最终文本。前端仅发送 `{input: "一句话"}`，无需维护消息数组。页面刷新不丢对话。
+
 ---
 
 ## 前端功能详解
@@ -391,6 +402,7 @@ frontend/src/
 
 - **统计卡片**：产品总数、报价单总数、总下载次数
 - **最近报价单**：最新 10 条，含客户、金额、状态、下载次数
+- **AI 产品助手**：内嵌 AI 对话框，问产品、推方案、查参数。进度条 + 分阶段预估 + 实时计时。直接查询数据库推荐产品 (v1.7.1)
 - **快捷操作**：新建报价单、导入产品
 - **性能**：缓存优先渲染，切换标签 <100ms
 

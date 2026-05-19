@@ -1,5 +1,23 @@
 # 更新日志
 
+## v1.7.1 (2026-05-19)
+### 🤖 AI 对话升级 — Hermes Gateway Responses API
+- **Chat Completions → Responses API**：`POST /v1/chat/completions` → `POST /v1/responses`
+- **服务端会话存储**：`conversation=quote-user-{id}` 按用户隔离，页面刷新不丢对话
+- **前端极简化**：从 `{messages: [全部历史]}` → `{input: "一句话"}`，3 行代码变 1 行
+- **instructions 自动复用**：system prompt 首轮注入，无需每轮重发（省 ~1K token/轮）
+- **工具调用过滤**：Flask 只返回最终文本，用户看不到内部 SQL/终端命令
+- **用户身份注入**：AI 首轮知晓当前用户，通过 `/api/ai/token` 以正确身份操作报价
+- **truncation: auto**：自动截断超长对话（100 条历史）
+
+### 🏗️ 架构简化
+- Flask 不直接 import Hermes（去掉 `run_agent`、`httpx`、`websockets`、`openai` 等依赖）
+- AI 会话池由 Gateway 独立管理（`systemd Restart=always`），gunicorn 重启不丢
+- Flask 代码从 ~90 行减至 ~40 行
+
+### 🧪 测试
+- 127/127 API 测试通过
+
 ## v1.7.0 (2026-05-17)
 ### 🔍 报价单管理增强
 - **搜索过滤**：报价单列表新增搜索框（标题/客户），支持拼音+中文，500ms 防抖，IME 安全
