@@ -2496,10 +2496,17 @@ def ai_chat():
 
     data = request.get_json(silent=True) or {}
     user_input = (data.get('input', '') or '').strip()
-    stream = data.get('stream', False)
-
     if not user_input:
         return jsonify({'error': '请输入问题'}), 400
+
+    # 注入身份指令到用户消息头部（对抗 Gateway 基础 persona）
+    prompt = _get_ai_system_prompt()
+    for line in prompt.split('\n')[:3]:
+        if '童小军' in line or '不是 Hermes' in line:
+            user_input = f'[{line.strip()}] {user_input}'
+            break
+
+    stream = data.get('stream', False)
 
     user = g.current_user
     conversation = f'quote-user-{user.id}'
