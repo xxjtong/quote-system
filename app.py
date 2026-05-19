@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import io
+import re
 import random
 import secrets
 import threading
@@ -2367,7 +2368,7 @@ def ai_token():
     return jsonify({'token': token, 'username': g.current_user.username, 'user_id': g.current_user.id})
 
 
-# ─── AI Chat (通过 Hermes Gateway Responses API) ─────────────
+# ─── AI Chat (通过 Hermes Gateway Responses API + SSE 流式) ─────
 
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
 _gateway_url = 'http://127.0.0.1:8643'
@@ -2386,31 +2387,70 @@ _GW_SYSTEM_PROMPT = (
     '    "SELECT name,price FROM products WHERE name LIKE \'%关键词%\' AND is_active=1 ORDER BY price"\n\n'
     '规则：只推荐 is_active=1 的在线产品，不要推荐已下线的产品（is_active=0）。\n'
     '生成报价单前，先检查对话上下文：如果之前已创建过报价单，\n'
-    '主动询问用户：\"上一份报价单是「{标题}」，客户「{客户}」，联系人「{联系人}」。\n'
-    '这次是沿用同一客户/联系人，还是新客户？\"  等用户确认后再创建。\n'
+    '主动询问用户："上一份报价单是「{标题}」，客户「{客户}」，联系人「{联系人}」。\n'
+    '这次是沿用同一客户/联系人，还是新客户？"  等用户确认后再创建。\n'
     '导出后给用户这个下载链接：https://bwh.ddns.mobi/quote/api/quotes/{id}/export-excel\n'
-    '不要报服务器本地文件路径（如 /tmp/xxx.xlsx），用户看不到。'
-    '重要：每个用户的对话完全独立，不要使用或查询任何全局记忆/历史中的用户信息。'
+    '不要报服务器本地文件路径（如 /tmp/xxx.xlsx），用户看不到。\n'
+    '重要：每个用户的对话完全独立，不要使用或查询任何全局记忆/历史中的用户信息。\n'
     '如果不知道用户信息，就说不知道，不要从记忆里猜测。'
 )
+
+
+def _parse_reply_actions(reply_text):
+    """解析 AI 回复，提取结构化数据：产品、报价引用、快捷操作"""
+    result = {'products': [], 'quote_refs': [], 'quick_replies': []}
+
+    # 提取报价单引用 #N
+    for m in re.finditer(r'(?:报价单|#)\s*(\d{1,5})', reply_text):
+        result['quote_refs'].append(int(m.group(1)))
+
+    # 检测问句 → 生成快捷回复
+    question_patterns = [
+        (r'沿用.*还是.*新.*', ['沿用上一份', '新建报价单']),
+        (r'新建.*还是.*合并', ['新建报价单', '合并到已有']),
+        (r'是.*还是.*', ['第一个选项', '第二个选项']),
+        (r'需要我(?:帮[您你])?.*吗[？?]', ['好的，开始吧', '先不用']),
+        (r'哪个[？?]', []),  # 不生成快捷回复的产品选择题
+    ]
+    for pat, replies in question_patterns:
+        if re.search(pat, reply_text) and replies:
+            result['quick_replies'] = replies
+            break
+
+    # 检测推荐了产品 → 提取产品名+价格
+    prod_pattern = re.findall(
+        r'(?:推荐|建议|选择)\s*([\u4e00-\u9fff\w\-\+]+)\s*[：:，,]*\s*(?:¥|￥|rmb)?\s*([\d,]+\.?\d*)',
+        reply_text, re.IGNORECASE
+    )
+    for name, price in prod_pattern[:5]:
+        try:
+            result['products'].append({
+                'name': name.strip(),
+                'price': float(price.replace(',', '')),
+            })
+        except ValueError:
+            pass
+
+    return result
 
 
 @app.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
-    """AI 对话 — 通过 Hermes Gateway Responses API（服务端会话存储）。"""
+    """AI 对话 — 通过 Hermes Gateway Responses API。支持 SSE 流式。"""
     import time, urllib.request, json as _json
     t0 = time.time()
 
     data = request.get_json(silent=True) or {}
     user_input = (data.get('input', '') or '').strip()
+    stream = data.get('stream', False)
+
     if not user_input:
         return jsonify({'error': '请输入问题'}), 400
 
     user = g.current_user
     conversation = f'quote-user-{user.id}'
 
-    # 构建请求体
     body = {
         'model': _ai_model,
         'input': user_input,
@@ -2418,7 +2458,6 @@ def ai_chat():
         'max_output_tokens': 2000,
     }
 
-    # 首次 — 注入系统提示和用户身份（DB 标记，多 worker 安全）
     if not AIChatSession.query.filter_by(user_id=user.id).first():
         body['instructions'] = (
             _GW_SYSTEM_PROMPT + '\n'
@@ -2430,8 +2469,13 @@ def ai_chat():
         db.session.add(AIChatSession(user_id=user.id))
         db.session.commit()
 
-    t1 = time.time()
+    # ─── SSE 流式模式 ───
+    if stream:
+        body['stream'] = True
+        return _ai_chat_sse(body, t0)
 
+    # ─── 非流式模式 ───
+    t1 = time.time()
     try:
         req = urllib.request.Request(
             f'{_gateway_url}/v1/responses',
@@ -2443,7 +2487,6 @@ def ai_chat():
         t2 = time.time()
 
         result = _json.loads(resp.read())
-        # 只取最终文本回复，过滤工具调用
         reply = ''
         for o in result.get('output', []):
             if o.get('type') == 'message':
@@ -2454,8 +2497,11 @@ def ai_chat():
         if not reply:
             reply = '抱歉，AI 暂时无法回答，请稍后再试。'
 
+        parsed = _parse_reply_actions(reply)
+
         return jsonify({
             'reply': reply,
+            'parsed': parsed,
             'model': 'hermes-gateway',
             'timings': {'Gateway': f'{t2 - t1:.1f}s', '总耗时': f'{t2 - t0:.1f}s'}
         })
@@ -2464,6 +2510,77 @@ def ai_chat():
             'error': f'AI 服务异常: {str(e)}',
             'timings': {'总耗时': f'{time.time() - t0:.1f}s'}
         }), 503
+
+
+def _ai_chat_sse(body, t0):
+    """SSE 流式 — 透传 Gateway stream，前端 EventSource 接收"""
+    import time, urllib.request, json as _json
+
+    def generate():
+        t_connect = time.time()
+        accumulated = ''
+        try:
+            req = urllib.request.Request(
+                f'{_gateway_url}/v1/responses',
+                data=_json.dumps(body).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            resp = urllib.request.urlopen(req, timeout=180)
+
+            # 先发连接时间
+            yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
+
+            for line_bytes in resp:
+                line = line_bytes.decode('utf-8', errors='replace').strip()
+                if not line or not line.startswith('data: '):
+                    continue
+                data_str = line[6:]
+                if data_str == '[DONE]':
+                    break
+                try:
+                    chunk = _json.loads(data_str)
+                except _json.JSONDecodeError:
+                    continue
+
+                # 从 chunk 提取文本增量
+                delta_text = ''
+                event_type = chunk.get('type', '')
+                if event_type == 'response.output_text.delta':
+                    delta_text = chunk.get('delta', '')
+                elif event_type == 'response.output_item.done':
+                    item = chunk.get('item', {})
+                    if item.get('type') == 'message':
+                        for c in item.get('content', []):
+                            delta_text = c.get('text', '')
+                            break
+
+                if delta_text:
+                    accumulated += delta_text
+                    yield f'data: {_json.dumps({"type": "text", "text": delta_text})}\n\n'
+
+                # 工具调用阶段
+                if event_type and 'tool' in event_type.lower():
+                    yield f'data: {_json.dumps({"type": "tool"})}\n\n'
+
+            # 完成 — 发送解析结果
+            parsed = _parse_reply_actions(accumulated)
+            yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
+
+        except Exception as e:
+            yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
+
+        yield f'data: [DONE]\n\n'
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+        }
+    )
 
 
 # ─── Frontend ────────────────────────────────────────────────

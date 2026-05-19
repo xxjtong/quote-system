@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, inject, nextTick } from 'vue'
+import { ref, computed, onMounted, inject, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
@@ -8,41 +8,26 @@ const router = useRouter()
 const toast = inject('toast')
 const { api, isAdmin } = useApi()
 
-const stats = ref({
-  prodCount: 0,
-  quoteCount: 0,
-  downloadTotal: 0,
-  totalAmount: 0,
-  catCount: 0,
-})
+const stats = ref({ prodCount: 0, quoteCount: 0, downloadTotal: 0, totalAmount: 0, catCount: 0 })
 const recentQuotes = ref([])
 const loading = ref(true)
 
 async function fetchDashboard() {
   try {
-    const [p, q] = await Promise.all([
-      api('/api/products?per_page=1'),
-      api('/api/quotes'),
-    ])
+    const [p, q] = await Promise.all([api('/api/products?per_page=1'), api('/api/quotes')])
     const quotes = q.quotes || []
     stats.value = {
-      prodCount: p.total || 0,
-      quoteCount: quotes.length,
+      prodCount: p.total || 0, quoteCount: quotes.length,
       totalAmount: quotes.reduce((s, qq) => s + (qq.total_amount || 0), 0),
       downloadTotal: quotes.reduce((s, qq) => s + (qq.download_count || 0), 0),
       catCount: p.categories?.length || 0,
     }
     recentQuotes.value = quotes.slice(0, 10)
-  } catch (e) {
-    toast('加载概览失败', 'danger')
-  } finally {
-    loading.value = false
-  }
+  } catch (e) { toast('加载概览失败', 'danger') }
+  finally { loading.value = false }
 }
 
-function goTo(name) {
-  router.push({ name })
-}
+function goTo(name) { router.push({ name }) }
 
 // ─── AI Chat ────────────────────────────────────────────────
 
@@ -51,106 +36,234 @@ const chatInput = ref('')
 const chatLoading = ref(false)
 const chatBox = ref(null)
 const elapsedSeconds = ref(0)
-const estimatedTotal = ref(0)
 const currentPhase = ref(-1)
 const estLabel = ref('')
+// SSE real progress tracking
+const lastPhase = ref('')
+const phases = ['连接', '分析问题', '查询数据', '生成回复']
 let timerInterval = null
 
-const phaseList = ['分析问题', '查询数据', '整理信息', '生成回复']
+// Chat history (localStorage)
+const historyOpen = ref(false)
+const chatHistory = ref([])
 
-// 根据消息内容预估耗时
+function loadHistory() {
+  try {
+    chatHistory.value = JSON.parse(localStorage.getItem('ai_chat_history') || '[]')
+  } catch { chatHistory.value = [] }
+}
+
+function saveHistory() {
+  if (chatMessages.value.length === 0) return
+  const existing = chatHistory.value.find(h => h.id === currentSessionId.value)
+  const preview = chatMessages.value[0]?.content?.slice(0, 30) || '新对话'
+  const entry = { id: currentSessionId.value, preview, count: chatMessages.value.length, time: Date.now() }
+  if (existing) {
+    Object.assign(existing, entry)
+  } else {
+    chatHistory.value.unshift(entry)
+  }
+  chatHistory.value = chatHistory.value.slice(0, 50)
+  try { localStorage.setItem('ai_chat_history', JSON.stringify(chatHistory.value)) } catch {}
+}
+
+const currentSessionId = ref(Date.now().toString(36))
+
+function newChat() {
+  chatMessages.value = []
+  currentSessionId.value = Date.now().toString(36)
+  historyOpen.value = false
+}
+
+function loadChat(id) {
+  // reloads start fresh — just set session id and clear
+  chatMessages.value = []
+  currentSessionId.value = id
+  historyOpen.value = false
+}
+
+// SSE stream
 function estimateTime(text) {
   const hasQuote = /报价|创建|生成报价|导出|excel/i.test(text)
   const hasSearch = /搜索|查询|查找|有哪些|推荐|哪个|什么|怎么|比较|最低|最高/i.test(text)
-  if (hasQuote) return { phases: 4, total: 75, label: '创建报价约 60-90s' }
-  if (hasSearch && text.length > 6) return { phases: 3, total: 40, label: '数据查询约 20-60s' }
-  return { phases: 2, total: 10, label: '快速问答约 5-15s' }
+  if (hasQuote) return { phases: 3, total: 75, label: '创建报价约 60-90s' }
+  if (hasSearch && text.length > 6) return { phases: 2, total: 40, label: '数据查询约 20-60s' }
+  return { phases: 1, total: 10, label: '快速问答约 5-15s' }
 }
 
-// 当前阶段名（实时）
 const currentPhaseName = computed(() => {
   if (currentPhase.value < 0) return ''
-  return phaseList[currentPhase.value] || phaseList[phaseList.length - 1]
+  return phases[currentPhase.value] || phases[phases.length - 1]
 })
 
-// 进度百分比
 const progressPercent = computed(() => {
-  if (estimatedTotal.value <= 0) return 0
-  return Math.min(100, Math.round((elapsedSeconds.value / estimatedTotal.value) * 100))
+  if (!chatLoading.value) return 0
+  // Real SSE phases: 0=connect→10%, 1=analyze→30%, 2=query→60%, 3=reply→90%
+  const stepMap = [10, 30, 60, 90]
+  return stepMap[currentPhase.value] || 0
 })
 
-async function sendMessage() {
-  const text = chatInput.value.trim()
+const displayedPhases = computed(() => {
+  const est = estimateTime(chatMessages.value[chatMessages.value.length - 1]?.content || '')
+  return phases.slice(0, est.phases + 1)
+})
+
+// Selected products for comparison
+const compareList = ref([])
+const showCompare = ref(false)
+
+function toggleCompare(product) {
+  const idx = compareList.value.findIndex(p => p.name === product.name)
+  if (idx >= 0) {
+    compareList.value.splice(idx, 1)
+  } else {
+    compareList.value.push(product)
+  }
+}
+
+function isCompared(product) {
+  return compareList.value.some(p => p.name === product.name)
+}
+
+async function sendMessage(textOverride) {
+  const text = (textOverride || chatInput.value).trim()
   if (!text || chatLoading.value) return
 
   const est = estimateTime(text)
-  estimatedTotal.value = est.total
   estLabel.value = est.label
 
   chatMessages.value.push({ role: 'user', content: text })
   chatInput.value = ''
   chatLoading.value = true
 
-  // Start timer + phase tracker
   elapsedSeconds.value = 0
   currentPhase.value = 0
-  timerInterval = setInterval(() => {
-    elapsedSeconds.value++
-    const ratio = elapsedSeconds.value / estimatedTotal.value
-    currentPhase.value = Math.min(Math.floor(ratio * est.phases), est.phases - 1)
-  }, 1000)
+  lastPhase.value = ''
+  timerInterval = setInterval(() => { elapsedSeconds.value++ }, 1000)
 
-  await nextTick()
-  scrollChat()
+  await nextTick(); scrollChat()
 
   try {
-    const data = await api('/api/chat', 'POST', { input: text }, 180000)
-    const elapsed = elapsedSeconds.value
-    if (data.error) {
-      chatMessages.value.push({
-        role: 'assistant',
-        content: `❌ ${data.error}`,
-        elapsed,
-        timings: data.timings || null,
-      })
-    } else {
-      chatMessages.value.push({
-        role: 'assistant',
-        content: data.reply,
-        elapsed,
-        timings: data.timings || null,
-      })
+    // Use SSE streaming
+    const token = localStorage.getItem('token')
+    const base = import.meta.env.BASE_URL || ''
+
+    // Replace router-based token with direct localStorage read
+    const resp = await fetch(base + '/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ input: text, stream: true }),
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      throw new Error(err.error || `HTTP ${resp.status}`)
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let accumulated = ''
+    const msgIndex = chatMessages.value.length
+    chatMessages.value.push({ role: 'assistant', content: '', parsed: null, elapsed: 0 })
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const dataStr = line.slice(6)
+        if (dataStr === '[DONE]') continue
+        try {
+          const data = JSON.parse(dataStr)
+
+          if (data.type === 'connect') {
+            currentPhase.value = 0
+            lastPhase.value = 'connect'
+          } else if (data.type === 'tool') {
+            currentPhase.value = Math.min(currentPhase.value + 1, phases.length - 1)
+            lastPhase.value = 'tool'
+          } else if (data.type === 'text') {
+            accumulated += data.text
+            chatMessages.value[msgIndex].content = accumulated
+            // Advance phase: first text means "generating"
+            if (lastPhase.value !== 'reply') {
+              currentPhase.value = Math.max(currentPhase.value, phases.length - 1)
+              lastPhase.value = 'reply'
+            }
+            await nextTick(); scrollChat()
+          } else if (data.type === 'done') {
+            chatMessages.value[msgIndex].parsed = data.parsed
+            chatMessages.value[msgIndex].elapsed = parseFloat(data.elapsed) || elapsedSeconds.value
+            currentPhase.value = phases.length - 1
+          } else if (data.type === 'error') {
+            chatMessages.value[msgIndex].content = `❌ ${data.error}`
+          }
+        } catch {}
+      }
     }
   } catch (e) {
     chatMessages.value.push({
-      role: 'assistant',
-      content: `❌ 网络错误，请重试`,
+      role: 'assistant', content: `❌ ${e.message || '网络错误，请重试'}`,
       elapsed: elapsedSeconds.value,
-      timings: null,
     })
   } finally {
     clearInterval(timerInterval)
     chatLoading.value = false
     currentPhase.value = -1
-    await nextTick()
-    scrollChat()
+    saveHistory()
+    await nextTick(); scrollChat()
   }
 }
 
 function scrollChat() {
-  if (chatBox.value) {
-    chatBox.value.scrollTop = chatBox.value.scrollHeight
-  }
+  if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight
 }
 
 function onChatKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    sendMessage()
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
 }
 
-// 格式化 timings 为紧凑行
+// ─── Message Actions ────────────────────────────────────────
+function copyMessage(text) {
+  navigator.clipboard.writeText(text).then(() => toast('已复制', 'success'))
+}
+
+function regenerateLast() {
+  if (chatMessages.value.length < 2) return
+  const lastUser = [...chatMessages.value].reverse().find(m => m.role === 'user')
+  if (!lastUser) return
+  chatMessages.value = chatMessages.value.slice(0, -1) // Remove last AI reply
+  sendMessage(lastUser.content)
+}
+
+function rateMessage(idx, rating) {
+  chatMessages.value[idx].rating = rating
+}
+
+// ─── Render markdown with clickable #N ──────────────────────
+
+// Jump to quote
+function jumpToQuote(id) {
+  router.push({ name: 'quotes', query: { highlight: id } })
+}
+
+// Create quote from product
+async function createQuoteFromProduct(productName) {
+  router.push({ name: 'newquote', query: { product: productName } })
+}
+
+// Handle quick reply button
+function quickReply(text) {
+  chatMessages.value.push({ role: 'user', content: text })
+  sendMessage(text)
+}
+
 function formatTimings(t) {
   if (!t) return ''
   const lines = []
@@ -159,7 +272,7 @@ function formatTimings(t) {
   return lines.join(' · ')
 }
 
-onMounted(fetchDashboard)
+onMounted(() => { fetchDashboard(); loadHistory() })
 </script>
 
 <template>
@@ -181,10 +294,7 @@ onMounted(fetchDashboard)
             <div class="stat-icon" :style="{background: stats.catCount > 0 ? 'var(--primary-light)' : '#f1f5f9', color: 'var(--primary)'}">
               <i class="bi bi-box-seam"></i>
             </div>
-            <div>
-              <div class="text-muted" style="font-size:.72rem">产品总数</div>
-              <div class="fw-bold fs-4">{{ stats.prodCount }}</div>
-            </div>
+            <div><div class="text-muted" style="font-size:.72rem">产品总数</div><div class="fw-bold fs-4">{{ stats.prodCount }}</div></div>
           </div>
           <div class="mt-2 small text-muted">{{ stats.catCount }} 个分类</div>
         </div>
@@ -192,13 +302,8 @@ onMounted(fetchDashboard)
       <div class="col-6 col-md-3">
         <div class="stat-card">
           <div class="d-flex align-items-center gap-3">
-            <div class="stat-icon" style="background:#d1fae5;color:var(--success)">
-              <i class="bi bi-file-earmark-text"></i>
-            </div>
-            <div>
-              <div class="text-muted" style="font-size:.72rem">报价单</div>
-              <div class="fw-bold fs-4">{{ stats.quoteCount }}</div>
-            </div>
+            <div class="stat-icon" style="background:#d1fae5;color:var(--success)"><i class="bi bi-file-earmark-text"></i></div>
+            <div><div class="text-muted" style="font-size:.72rem">报价单</div><div class="fw-bold fs-4">{{ stats.quoteCount }}</div></div>
           </div>
           <div class="mt-2 small text-muted">共 {{ formatMoney(stats.totalAmount) }}</div>
         </div>
@@ -206,26 +311,16 @@ onMounted(fetchDashboard)
       <div class="col-6 col-md-3">
         <div class="stat-card">
           <div class="d-flex align-items-center gap-3">
-            <div class="stat-icon" style="background:#fef3c7;color:var(--warning)">
-              <i class="bi bi-download"></i>
-            </div>
-            <div>
-              <div class="text-muted" style="font-size:.72rem">下载</div>
-              <div class="fw-bold fs-4">{{ stats.downloadTotal }}</div>
-            </div>
+            <div class="stat-icon" style="background:#fef3c7;color:var(--warning)"><i class="bi bi-download"></i></div>
+            <div><div class="text-muted" style="font-size:.72rem">下载</div><div class="fw-bold fs-4">{{ stats.downloadTotal }}</div></div>
           </div>
         </div>
       </div>
       <div class="col-6 col-md-3">
         <div class="stat-card">
           <div class="d-flex align-items-center gap-3">
-            <div class="stat-icon" style="background:#fee2e2;color:var(--danger)">
-              <i class="bi bi-currency-yen"></i>
-            </div>
-            <div style="min-width:0">
-              <div class="text-muted" style="font-size:.72rem">总金额</div>
-              <div class="fw-bold fs-4 text-truncate" style="color:var(--danger)">{{ formatMoney(stats.totalAmount) }}</div>
-            </div>
+            <div class="stat-icon" style="background:#fee2e2;color:var(--danger)"><i class="bi bi-currency-yen"></i></div>
+            <div style="min-width:0"><div class="text-muted" style="font-size:.72rem">总金额</div><div class="fw-bold fs-4 text-truncate" style="color:var(--danger)">{{ formatMoney(stats.totalAmount) }}</div></div>
           </div>
         </div>
       </div>
@@ -235,10 +330,8 @@ onMounted(fetchDashboard)
     <div class="card-modern anim-in">
       <div class="card-title-modern"><i class="bi bi-clock-history text-primary"></i>最近报价</div>
       <template v-if="recentQuotes.length">
-        <div v-for="qq in recentQuotes" :key="qq.id"
-          class="d-flex justify-content-between align-items-center py-2"
-          style="border-bottom:1px solid var(--gray-100);cursor:pointer"
-          @click="goTo('quotes')">
+        <div v-for="qq in recentQuotes" :key="qq.id" class="d-flex justify-content-between align-items-center py-2"
+          style="border-bottom:1px solid var(--gray-100);cursor:pointer" @click="goTo('quotes')">
           <span><i class="bi bi-file-text me-2 text-muted"></i>{{ qq.title || '未命名' }}</span>
           <span class="text-muted small fw-medium">{{ formatMoney(qq.total_amount) }}</span>
         </div>
@@ -250,56 +343,137 @@ onMounted(fetchDashboard)
     <div class="card-modern anim-in">
       <div class="card-title-modern"><i class="bi bi-lightning text-primary"></i>快速操作</div>
       <div class="d-flex flex-wrap gap-2">
-        <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="goTo('import')">
-          <i class="bi bi-upload me-1"></i>从Excel导入产品
-        </button>
-        <button class="btn btn-outline-primary btn-modern" @click="goTo('newquote')">
-          <i class="bi bi-plus-circle me-1"></i>新建报价单
-        </button>
-        <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="goTo('products')">
-          <i class="bi bi-box-seam me-1"></i>管理产品库
-        </button>
+        <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="goTo('import')"><i class="bi bi-upload me-1"></i>从Excel导入产品</button>
+        <button class="btn btn-outline-primary btn-modern" @click="goTo('newquote')"><i class="bi bi-plus-circle me-1"></i>新建报价单</button>
+        <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="goTo('products')"><i class="bi bi-box-seam me-1"></i>管理产品库</button>
       </div>
     </div>
 
     <!-- AI Chat -->
-    <div class="card-modern anim-in">
-      <div class="card-title-modern">
-        <i class="bi bi-robot text-primary"></i>AI 产品助手
-        <small class="text-muted ms-2" style="font-weight:400">问产品、推方案、查参数</small>
+    <div class="card-modern anim-in" style="position:relative">
+      <div class="card-title-modern d-flex align-items-center justify-content-between">
+        <div>
+          <i class="bi bi-robot text-primary"></i>AI 产品助手
+          <small class="text-muted ms-2" style="font-weight:400">问产品、推方案、查参数</small>
+        </div>
+        <div class="d-flex gap-1">
+          <button class="btn btn-sm btn-outline-secondary" @click="newChat" title="新对话"><i class="bi bi-plus-lg"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" @click="historyOpen = !historyOpen" :class="{ active: historyOpen }" title="历史记录"><i class="bi bi-list"></i></button>
+        </div>
+      </div>
+
+      <!-- Chat History Sidebar -->
+      <div v-if="historyOpen" class="chat-history-panel">
+        <div class="small fw-bold text-muted mb-2">对话历史</div>
+        <div v-if="chatHistory.length === 0" class="text-muted small">暂无历史</div>
+        <div v-for="h in chatHistory" :key="h.id"
+          class="history-item py-1 px-2 rounded small"
+          :class="{ 'bg-light': h.id === currentSessionId }"
+          style="cursor:pointer"
+          @click="loadChat(h.id)">
+          <div class="text-truncate">{{ h.preview }}</div>
+          <div class="d-flex justify-content-between" style="font-size:.65rem;color:var(--gray-500)">
+            <span>{{ h.count }} 条消息</span>
+            <span>{{ new Date(h.time).toLocaleDateString() }}</span>
+          </div>
+        </div>
       </div>
 
       <!-- Messages -->
       <div ref="chatBox" class="chat-messages" style="max-height:60vh;overflow-y:auto;margin-bottom:.75rem">
         <div v-if="chatMessages.length === 0" class="text-muted text-center py-3 small">
-          💡 试试问我：房顶漏水用什么材料？最便宜的传感器是哪个？
+          💡 试试问我：20间会议室安装人数感应器 | 推荐最便宜的网关 | 比较星纵VS121和VS321
         </div>
+
         <div v-for="(msg, i) in chatMessages" :key="i"
           :class="msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-ai'">
-          <div class="chat-bubble" :class="msg.role === 'user' ? 'bg-primary text-white' : 'bg-light'"
-            style="max-width:85%;padding:.5rem .75rem;border-radius:12px;font-size:.85rem;line-height:1.5;white-space:pre-wrap">
-            {{ msg.content }}
-            <!-- 耗时标记 -->
-            <div v-if="msg.role === 'assistant' && msg.elapsed" class="mt-2 pt-1" style="font-size:.7rem;color:var(--gray-500);border-top:1px solid var(--gray-200)">
-              ⏱ {{ msg.elapsed }}s
-              <span v-if="msg.timings"> · {{ formatTimings(msg.timings) }}</span>
+          <div class="chat-bubble"
+            :class="msg.role === 'user' ? 'bg-primary text-white' : 'bg-light'"
+            style="max-width:88%;padding:.5rem .75rem;border-radius:12px;font-size:.85rem;line-height:1.5;white-space:pre-wrap">
+
+            <!-- AI message: render with clickable #N references -->
+            <template v-if="msg.role === 'assistant' && msg.content">
+              <span v-for="(part, pi) in msg.content.split(/(#\d+|报价单\s*\d+)/g)" :key="pi">
+                <template v-if="/^(?:#|报价单)\s*\d+$/.test(part)">
+                  <a href="#" class="chat-ref-link" @click.prevent="jumpToQuote(parseInt(part.replace(/\D/g,'')))">{{ part }}</a>
+                </template>
+                <template v-else>{{ part }}</template>
+              </span>
+            </template>
+            <template v-else>{{ msg.content }}</template>
+
+            <!-- Parsed: Product Cards -->
+            <div v-if="msg.role === 'assistant' && msg.parsed?.products?.length" class="mt-2">
+              <div v-for="(prod, pi) in msg.parsed.products.slice(0, 4)" :key="pi"
+                class="product-card d-flex align-items-center gap-2 p-2 rounded mb-1"
+                style="background:white;border:1px solid var(--gray-200);cursor:pointer"
+                @click="toggleCompare(prod)">
+                <div class="flex-grow-1">
+                  <div class="fw-medium small">{{ prod.name }}</div>
+                  <div class="text-primary fw-bold">{{ formatMoney(prod.price) }}</div>
+                </div>
+                <div class="d-flex gap-1">
+                  <button class="btn btn-sm btn-outline-primary" style="font-size:.7rem;padding:1px 6px"
+                    @click.stop="createQuoteFromProduct(prod.name)" title="创建报价单">
+                    <i class="bi bi-cart-plus"></i>
+                  </button>
+                  <div v-if="isCompared(prod)" class="text-success"><i class="bi bi-check-circle-fill"></i></div>
+                  <div v-else class="text-muted" style="font-size:.7rem">对比</div>
+                </div>
+              </div>
+
+              <!-- Compare action -->
+              <div v-if="compareList.length >= 2" class="mt-2 d-flex gap-2">
+                <button class="btn btn-sm btn-outline-success" @click="showCompare = true">
+                  <i class="bi bi-bar-chart me-1"></i>对比 {{ compareList.length }} 款
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" @click="compareList = []">清除选择</button>
+              </div>
+            </div>
+
+            <!-- Parsed: Quick Reply Buttons -->
+            <div v-if="msg.role === 'assistant' && msg.parsed?.quick_replies?.length && !chatLoading" class="mt-2 d-flex flex-wrap gap-1">
+              <button v-for="(qr, qi) in msg.parsed.quick_replies" :key="qi"
+                class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
+                @click="quickReply(qr)">{{ qr }}</button>
+              <button class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
+                @click="createQuoteFromProduct('')">
+                <i class="bi bi-plus-circle me-1"></i>一键创建报价单
+              </button>
+            </div>
+
+            <!-- Message Footer: time + actions -->
+            <div v-if="msg.role === 'assistant'" class="d-flex align-items-center justify-content-between mt-2 pt-1"
+              style="border-top:1px solid var(--gray-200)">
+              <div style="font-size:.7rem;color:var(--gray-500)">
+                <span v-if="msg.elapsed">⏱ {{ msg.elapsed }}s</span>
+                <span v-if="msg.timings"> · {{ formatTimings(msg.timings) }}</span>
+              </div>
+              <div class="d-flex gap-1">
+                <button class="msg-action-btn" @click="copyMessage(msg.content)" title="复制"><i class="bi bi-clipboard"></i></button>
+                <button class="msg-action-btn" @click="regenerateLast()" title="重新生成"><i class="bi bi-arrow-repeat"></i></button>
+                <button class="msg-action-btn" @click="rateMessage(i, 'up')"
+                  :class="{ 'text-success': msg.rating === 'up' }" title="有用"><i class="bi bi-hand-thumbs-up"></i></button>
+                <button class="msg-action-btn" @click="rateMessage(i, 'down')"
+                  :class="{ 'text-danger': msg.rating === 'down' }" title="没用"><i class="bi bi-hand-thumbs-down"></i></button>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Loading: 分阶段进度 -->
+        <!-- Loading: Real SSE Progress -->
         <div v-if="chatLoading" class="chat-msg-ai">
           <div class="chat-bubble bg-light" style="padding:.6rem .8rem;border-radius:12px;min-width:260px">
-            <!-- 进度条 -->
+            <!-- Progress bar -->
             <div class="progress mb-2" style="height:4px">
               <div class="progress-bar progress-bar-striped progress-bar-animated"
                 :style="{width: progressPercent + '%'}"
-                :class="progressPercent < 30 ? 'bg-info' : progressPercent < 70 ? 'bg-primary' : 'bg-success'"></div>
+                :class="progressPercent < 30 ? 'bg-info' : progressPercent < 60 ? 'bg-primary' : 'bg-success'"></div>
             </div>
 
-            <!-- 阶段列表 -->
+            <!-- Phase list -->
             <div style="font-size:.78rem">
-              <div v-for="(p, idx) in phaseList.slice(0, estimatedTotal > 30 ? 4 : estimatedTotal > 10 ? 3 : 2)" :key="idx"
+              <div v-for="(p, idx) in displayedPhases" :key="idx"
                 class="d-flex align-items-center gap-2 mb-1"
                 :style="{opacity: idx <= currentPhase ? 1 : 0.4}">
                 <span v-if="idx < currentPhase" class="text-success"><i class="bi bi-check-circle-fill"></i></span>
@@ -309,7 +483,6 @@ onMounted(fetchDashboard)
               </div>
             </div>
 
-            <!-- 预估 + 已用 -->
             <div class="mt-1 d-flex justify-content-between" style="font-size:.68rem;color:var(--gray-500)">
               <span>预估 {{ estLabel }}</span>
               <span>已用 {{ elapsedSeconds }}s</span>
@@ -321,33 +494,102 @@ onMounted(fetchDashboard)
       <!-- Input -->
       <div class="input-group">
         <input v-model="chatInput" class="form-control" placeholder="输入问题，Enter 发送..."
-          style="font-size:.85rem"
-          @keydown="onChatKeydown"
-          :disabled="chatLoading">
-        <button class="btn btn-primary" @click="sendMessage" :disabled="chatLoading || !chatInput.trim()">
+          style="font-size:.85rem" @keydown="onChatKeydown" :disabled="chatLoading">
+        <button class="btn btn-primary" @click="sendMessage()" :disabled="chatLoading || !chatInput.trim()">
           <i class="bi bi-send"></i>
         </button>
+      </div>
+    </div>
+
+    <!-- Compare Modal -->
+    <div v-if="showCompare" class="modal-backdrop fade show" style="z-index:1055" @click.self="showCompare = false"></div>
+    <div v-if="showCompare" class="modal fade show d-block" style="z-index:1056" tabindex="-1">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h6 class="modal-title"><i class="bi bi-bar-chart me-2"></i>产品对比</h6>
+            <button class="btn-close" @click="showCompare = false"></button>
+          </div>
+          <div class="modal-body">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>产品名称</th>
+                  <th class="text-end">价格</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(prod, ci) in compareList" :key="ci">
+                  <td>{{ prod.name }}</td>
+                  <td class="text-end fw-bold">{{ formatMoney(prod.price) }}</td>
+                  <td><button class="btn btn-sm btn-outline-danger" @click="compareList.splice(ci, 1); if (compareList.length < 2) showCompare = false"><i class="bi bi-x"></i></button></td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="compareList.length >= 2" class="mt-3">
+              <button class="btn btn-primary" @click="showCompare = false; createQuoteFromProduct(compareList.map(p=>p.name).join(', '))">
+                <i class="bi bi-cart me-1"></i>用对比结果创建报价
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </template>
 </template>
 
 <style scoped>
-.chat-msg-user {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: .5rem;
+.chat-msg-user { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
+.chat-msg-ai { display: flex; justify-content: flex-start; margin-bottom: .5rem; }
+.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 4px; }
+
+.chat-ref-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: pointer;
 }
-.chat-msg-ai {
-  display: flex;
-  justify-content: flex-start;
-  margin-bottom: .5rem;
+.chat-ref-link:hover { color: var(--primary-dark); }
+
+.product-card {
+  transition: all 0.15s;
 }
-.chat-messages::-webkit-scrollbar {
-  width: 4px;
+.product-card:hover {
+  border-color: var(--primary) !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
 }
-.chat-messages::-webkit-scrollbar-thumb {
-  background: var(--gray-300);
+
+.msg-action-btn {
+  background: none;
+  border: none;
+  padding: 1px 4px;
+  font-size: .7rem;
+  color: var(--gray-500);
+  cursor: pointer;
   border-radius: 4px;
+  transition: all 0.15s;
 }
+.msg-action-btn:hover { background: var(--gray-200); color: var(--gray-700); }
+
+.chat-history-panel {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  width: 240px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.08);
+  z-index: 10;
+}
+.history-item:hover { background: var(--gray-100); }
+.history-item.active { background: var(--primary-light); }
+
+.modal-backdrop { background: rgba(0,0,0,.3); }
 </style>
