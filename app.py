@@ -2666,82 +2666,26 @@ DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1'
 DEEPSEEK_MODEL = 'deepseek-chat'  # 快速模型，适合产品问答
 
 
-def _extract_search_terms(query):
-    """从用户查询中提取搜索关键词（中文 n-gram）。"""
-    import re
-    # 去标点，只保留中文
-    text = re.sub(r'[^\u4e00-\u9fff]', '', query)
-    if not text:
-        return [query]
-    terms = set()
-    # 2-4 字 n-gram
-    for n in (2, 3, 4):
-        for i in range(len(text) - n + 1):
-            terms.add(text[i:i+n])
-    # 加原 query 单字（避免太宽泛，只取前 20 个）
-    return list(terms)[:30]
-
-
-def _search_products_for_chat(query, limit=10):
-    """搜索产品，按 n-gram 命中数评分排序，只返回真正相关的。"""
-    terms = _extract_search_terms(query)
-    if not terms:
-        return []
-
-    # 宽捞候选（评分在 Python 做）
-    conditions = []
-    for t in terms:
-        like = f'%{t}%'
-        conditions.append(db.or_(
-            Product.name.ilike(like),
-            Product.category.ilike(like),
-            Product.function_desc.ilike(like),
-            Product.spec.ilike(like),
-            Product.supplier.ilike(like),
-        ))
-    candidates = Product.query.filter(
-        db.or_(*conditions),
-        Product.is_active == True
-    ).all()
-
-    # 相关性评分：统计产品命中多少个 n-gram
-    scored = []
-    for p in candidates:
-        fields = ' '.join(filter(None, [p.name, p.category, p.spec, p.function_desc, p.supplier]))
-        score = sum(1 for t in terms if t in fields)
-        scored.append((score, p))
-    scored.sort(key=lambda x: (-x[0], x[1].price or 0))
-
-    # 只返回至少命中 2 个 n-gram 的产品
-    relevant = [(s, p) for s, p in scored if s >= 2]
-    return [p for _, p in relevant[:limit]]
-
-
-def _build_product_context(products):
-    """将产品列表格式化为 AI prompt 上下文。"""
+def _build_full_catalog():
+    """构建精简产品目录（全库），注入 prompt 让 AI 自己搜索。"""
+    products = Product.query.filter(Product.is_active == True).order_by(Product.price.asc()).all()
     if not products:
-        return '（当前产品库未找到精确匹配的产品，请根据你的知识推荐通用方案）'
+        return '（产品库为空）'
 
     lines = []
     for p in products:
-        parts = [f"- {p.name}  ¥{p.price:.2f}"]
-        if p.sku:
-            parts.append(f"  SKU: {p.sku}")
-        if p.category:
-            parts.append(f"  分类: {p.category}")
-        if p.spec:
-            parts.append(f"  规格: {p.spec}")
-        if p.function_desc:
-            parts.append(f"  功能: {p.function_desc}")
-        lines.append('\n'.join(parts))
-
+        # 精简：名称 + 价格 + 分类 + 描述（截断）
+        desc = (p.function_desc or '')[:80]
+        cat = f' [{p.category}]' if p.category else ''
+        sku = f' SKU:{p.sku}' if p.sku else ''
+        lines.append(f"{p.name}{sku}{cat} ¥{p.price:.2f} {desc}")
     return '\n'.join(lines)
 
 
 @app.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
-    """AI 产品助手 — 搜索数据库产品 + 直调 DeepSeek。"""
+    """AI 产品助手 — 全库推给 DeepSeek，让 AI 自己搜索匹配。"""
     data = request.get_json(silent=True) or {}
     user_messages = data.get('messages', [])
 
@@ -2750,26 +2694,18 @@ def ai_chat():
 
     recent = user_messages[-10:]
 
-    # 取最后一条用户消息用于产品搜索
-    latest_query = ''
-    for msg in reversed(recent):
-        if msg.get('role') == 'user':
-            latest_query = msg.get('content', '')
-            break
+    # 构建全库产品目录，让 AI 自己找
+    catalog = _build_full_catalog()
 
-    # 搜索匹配产品
-    products = _search_products_for_chat(latest_query) if latest_query else []
-    product_context = _build_product_context(products)
-
-    # 构建 system prompt
     system_prompt = (
-        f'你是报价系统的 AI 产品助手。你**只能**从下面列出的产品库中推荐产品：\n\n'
-        f'{product_context}\n\n'
+        f'你是报价系统的 AI 产品助手。以下是完整的产品库（按价格升序）：\n\n'
+        f'{catalog}\n\n'
         f'严格规则：\n'
-        f'1. **只推荐上面列出的产品**，必须引用准确的名称和价格\n'
-        f'2. 如果上面的产品都不匹配用户需求，直接说"当前产品库没有匹配的产品"，绝对不要编造或推荐产品库以外的产品\n'
-        f'3. **禁止使用任何互联网资料** — 你只能基于上面提供的产品信息回答\n'
-        f'4. 回答简洁专业，有多个适用产品时按价格从低到高排列'
+        f'1. **只从上面的产品库中推荐**，引用准确的名称和价格\n'
+        f'2. 根据用户需求，从产品库中找出最匹配的产品推荐\n'
+        f'3. 如果所有产品都不匹配用户需求，直接说"当前产品库没有匹配的产品"，不要编造\n'
+        f'4. **禁止使用互联网或产品库以外的任何资料**\n'
+        f'5. 回答简洁专业，按价格从低到高排列推荐'
     )
 
     if not DEEPSEEK_API_KEY:
@@ -2799,15 +2735,7 @@ def ai_chat():
         if not reply:
             reply = '抱歉，AI 暂时无法回答，请稍后再试。'
 
-        # 显示搜索结果
-        search_info = ''
-        if products:
-            names = [p.name for p in products[:5]]
-            search_info = f'🔍 从产品库匹配到 {len(products)} 个产品：{", ".join(names)}\n\n'
-        else:
-            search_info = '🔍 产品库未找到精确匹配\n\n'
-
-        return jsonify({'reply': search_info + reply, 'model': DEEPSEEK_MODEL, 'products_found': len(products)})
+        return jsonify({'reply': reply, 'model': DEEPSEEK_MODEL})
     except Exception as e:
         return jsonify({'error': f'AI 服务连接失败: {str(e)}'}), 503
 
