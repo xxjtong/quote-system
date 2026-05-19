@@ -2418,10 +2418,10 @@ def _parse_reply_actions(reply_text):
             break
 
     # 检测推荐了产品 → 提取产品名+价格
-    # 格式: "绿米 Aqara 网关 M2 POE版 - ¥314"
-    # 关键：分隔符前后必须有空格，避免 "VS350-470M" 误匹配
+    # 格式: "AI热电堆人数统计传感器 - ¥429"
+    # 关键：逐行匹配，不跨行；分隔符前后必须有空格
     prod_pattern1 = re.findall(
-        r'(?:\d+[.、．]\s*)?([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-+\s]{3,50}?)\s+[-–—]\s+(?:¥|￥|[Rr][Mm][Bb])?\s*([\d,]+\.?\d*)',
+        r'(?:\d+[.、．]\s*)?([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-+ ]{3,50}?)[ ]+[-–—][ ]+(?:¥|￥|[Rr][Mm][Bb])?\s*([\d,]+\.?\d*)',
         reply_text
     )
     seen = set()
