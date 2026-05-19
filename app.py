@@ -2574,10 +2574,12 @@ def _ai_chat_sse(body, t0):
                 method='POST'
             )
             resp = urllib.request.urlopen(req, timeout=180)
+            t_connected = time.time()
 
-            # 先发连接时间
-            yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
+            # 先发连接时间（Flask→Gateway 网络 + Gateway 内部处理）
+            yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{t_connected - t0:.1f}s"})}\n\n'
 
+            first_token = True
             for line_bytes in resp:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
                 if not line or not line.startswith('data: '):
@@ -2590,7 +2592,6 @@ def _ai_chat_sse(body, t0):
                 except _json.JSONDecodeError:
                     continue
 
-                # 从 chunk 提取文本增量
                 delta_text = ''
                 event_type = chunk.get('type', '')
                 if event_type == 'response.output_text.delta':
@@ -2598,6 +2599,10 @@ def _ai_chat_sse(body, t0):
                 # Skip response.output_item.done — carries full text, duplicates deltas
 
                 if delta_text:
+                    if first_token:
+                        first_token = False
+                        ttft = time.time() - t_connected
+                        yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{ttft:.1f}s"})}\n\n'
                     accumulated += delta_text
                     yield f'data: {_json.dumps({"type": "text", "text": delta_text})}\n\n'
 

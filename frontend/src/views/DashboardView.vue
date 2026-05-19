@@ -39,8 +39,8 @@ const elapsedSeconds = ref(0)
 const currentPhase = ref(-1)
 // SSE real progress tracking
 const lastPhase = ref('')
-const phases = ['连接', '分析问题', '查询数据', '生成回复']
-const phaseIcons = ['bi-plug', 'bi-search', 'bi-database', 'bi-pencil']
+const phases = ['连接', '思考', '生成回复']
+const phaseIcons = ['bi-plug', 'bi-cpu', 'bi-pencil']
 let timerInterval = null
 
 const historyBtn = ref(null)
@@ -187,6 +187,9 @@ async function sendMessage(textOverride) {
           if (data.type === 'connect') {
             currentPhase.value = 0
             lastPhase.value = 'connect'
+          } else if (data.type === 'first_token') {
+            currentPhase.value = 1  // model thinking done, generating
+            lastPhase.value = 'first_token'
           } else if (data.type === 'tool') {
             currentPhase.value = Math.min(currentPhase.value + 1, phases.length - 1)
             lastPhase.value = 'tool'
