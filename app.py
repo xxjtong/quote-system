@@ -2679,7 +2679,7 @@ def ai_chat():
 
     try:
         import requests as http_req
-        resp = http_req.post(HERMES_API, json=payload, timeout=90)
+        resp = http_req.post(HERMES_API, json=payload, timeout=120)
         if resp.status_code != 200:
             return jsonify({'error': f'AI 服务异常 ({resp.status_code})'}), 502
 

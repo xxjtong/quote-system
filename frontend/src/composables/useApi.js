@@ -21,7 +21,7 @@ export function useApi() {
     return currentUser.value?.role === 'admin'
   }
 
-  async function api(url, method = 'GET', body = null) {
+  async function api(url, method = 'GET', body = null, timeoutMs = 0) {
     const isFormData = body instanceof FormData
     const headers = isFormData
       ? { Accept: 'application/json' }
@@ -29,6 +29,11 @@ export function useApi() {
     if (authToken.value) headers['Authorization'] = 'Bearer ' + authToken.value
     const opts = { method, headers }
     if (body) opts.body = isFormData ? body : JSON.stringify(body)
+    if (timeoutMs > 0) {
+      const controller = new AbortController()
+      opts.signal = controller.signal
+      setTimeout(() => controller.abort(), timeoutMs)
+    }
     const r = await fetch(BASE_URL + url, opts)
     if (r.status === 401) {
       setToken('')

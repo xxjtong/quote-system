@@ -63,7 +63,7 @@ async function sendMessage() {
 
   try {
     const messages = chatMessages.value.map(m => ({ role: m.role, content: m.content }))
-    const data = await api('/api/chat', 'POST', { messages })
+    const data = await api('/api/chat', 'POST', { messages }, 120000)
     if (data.error) {
       chatMessages.value.push({ role: 'assistant', content: `❌ ${data.error}` })
     } else {
