@@ -220,7 +220,7 @@ class TestSystemEndpoints:
         """首页加载"""
         import requests
         import os
-        base = os.environ.get('QUOTE_TEST_URL', 'http://127.0.0.1:5000')
+        base = os.environ.get('QUOTE_TEST_URL', 'http://127.0.0.1:5001')
         resp = requests.get(f"{base}/", timeout=10)
         assert resp.status_code == 200
         assert "</html>" in resp.text
