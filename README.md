@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.7.1-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.7.6-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -37,7 +37,7 @@
 | 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权） |
 | 📧 **邮件** | SMTP 配置，一键发送报价单 Excel 附件 |
 | 🔍 **智能识别** | 粘贴文本自动解析产品信息、火山引擎豆包 Vision 图片识别、**发票 OCR → 批量更新成本价** |
-| 🤖 **AI 助手** | Dashboard 内嵌 AI 产品助手，服务端会话存储，工具调用透明过滤，按用户隔离 (v1.7.1) |
+| 🤖 **AI 助手** | Dashboard 内嵌 AI 产品助手，SSE 流式输出、快捷回复、产品卡片、对比表、一键报价、对话历史、自定义 Prompt（管理员可编辑，身份注入防 Gateway persona 覆盖） (v1.7.6) |
 | 🎨 **UI** | 统一页面风格、上下布局、`.page-header` / `.card-modern` / `.form-label-modern` 一致样式体系 |
 | ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹、前端本地拼音过滤 |
 
@@ -48,7 +48,7 @@
 ```
 ┌──────────────┐     ┌──────────┐     ┌──────────────┐     ┌────────────────┐
 │   浏览器      │────▶│  nginx   │────▶│   Gunicorn   │     │ Hermes Gateway │
-│  Bootstrap 5  │     │  :443    │     │  2 workers   │     │    :8642        │
+│  Bootstrap 5  │     │  :443    │     │  2 workers   │     │    :8643        │
 │  SPA (3 JS)   │     │  proxy   │     │  :5001       │     │  AI 会话池      │
 └──────────────┘     └──────────┘     └──────┬───────┘     └──────┬─────────┘
                                              │                    │
@@ -350,37 +350,46 @@ Base URL: `http://127.0.0.1:5001`
 |------|------|------|
 | `GET` | `/api/version` | 系统版本号（公开） |
 
-### AI 对话 (v1.7.1)
+### AI 对话 (v1.7.6)
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/chat` | AI 对话（`{input: "问题"}`），通过 Hermes Gateway Responses API |
+| `POST` | `/api/chat` | AI 对话 — 支持 `{input, stream: true/false}`，SSE 流式输出 |
 | `GET` | `/api/ai/token` | 获取当前用户 JWT token（AI 代理用此接口以正确用户身份操作） |
+| `GET` | `/api/admin/prompt` | 获取 AI 系统提示词（管理员） |
+| `PUT` | `/api/admin/prompt` | 更新 AI 系统提示词 + 清除所有会话缓存，下次对话生效（管理员） |
 
-**架构：** Flask `/api/chat` → Hermes Gateway `POST /v1/responses`（服务端会话存储，`conversation=quote-user-{id}` 按用户隔离）。Flask 层过滤工具调用输出，用户只看到最终文本。前端仅发送 `{input: "一句话"}`，无需维护消息数组。页面刷新不丢对话。
+**架构：** Flask `/api/chat` → Hermes Gateway `POST /v1/responses`（`conversation=quote-user-{id}` 按用户隔离）。
+
+**流式模式：** `stream: true` → SSE 透传 Gateway 事件流，前端 EventSource 逐字渲染。非流式同源返回完整 JSON。
+
+**身份注入：** 自定义 Prompt 第一行身份声明自动注入到每条用户消息头部（对抗 Gateway 基础 persona）。Prompt 变更时自动检测（hash 对比）→ 清空 AIChatSession → 重新发送 instructions。
+
+**会话管理：** `AIChatSession` 表持久化 `(user_id, prompt_hash)`。Prompt 未变 → 复用 Gateway 已缓存 instructions。Prompt 变更 → 自动清空并重新注入。
 
 ---
 
 ## 前端功能详解
 
-### 前端架构（v1.6.0+ Vue 3）
+### 前端架构（v1.7.6 Vue 3）
 
 ```
 frontend/src/
 ├── App.vue              # 根组件 + 导航 + 全局状态（BASE_URL, 认证, 登出）
 ├── router/index.js      # Vue Router 历史模式，路由守卫
-├── style.css            # 全局样式（Bootstrap 5 主题）
+├── style.css            # 全局样式（Bootstrap 5 主题 + AI 聊天面板样式）
 ├── composables/
 │   └── useApi.js        # 统一 API 调用（自动附加 token, 401 拦截）
 ├── components/
+│   ├── Sidebar.vue       # 侧边导航栏（产品管理/报价管理/导入导出）
 │   └── ToastMessage.vue # Toast 通知组件
 └── views/
     ├── LoginView.vue      # 登录/注册页
-    ├── DashboardView.vue  # 概览仪表盘
+    ├── DashboardView.vue  # 仪表盘 + AI 产品助手（SSE 流式/快捷回复/产品卡片/对比表/历史面板）
     ├── ProductsView.vue   # 产品管理（列表/搜索/新增/编辑/导入/智能识别）
     ├── QuotesView.vue     # 报价单管理（列表/搜索/预览/导出/邮件）
-    ├── NewQuoteView.vue   # 新建/编辑报价单（产品选择器/拖拽排序/毛利）
-    ├── AdminView.vue      # 管理员面板（用户/字段/设置/SMTP/发票OCR）
+    ├── NewQuoteView.vue   # 新建/编辑报价单（产品选择器/购物车跳转/毛利）
+    ├── AdminView.vue      # 管理员面板（用户/字段/设置/SMTP/AI Prompt 编辑器/发票OCR）
     └── ImportView.vue     # Excel 导入
 ```
 
@@ -402,7 +411,7 @@ frontend/src/
 
 - **统计卡片**：产品总数、报价单总数、总下载次数
 - **最近报价单**：最新 10 条，含客户、金额、状态、下载次数
-- **AI 产品助手**：内嵌 AI 对话框，问产品、推方案、查参数。进度条 + 分阶段预估 + 实时计时。直接查询数据库推荐产品 (v1.7.1)
+- **AI 产品助手**：内嵌 AI 对话框，SSE 流式逐字渲染。快捷回复按钮（右键/点赞/踩）。产品卡片渲染（提取产品名+价格）。产品对比表（勾选 2+ 产品弹出）。一键创建报价单。上下文引用（`#N` 链接）。对话历史（localStorage 存储，右上角面板切换/新建）。加载状态简化为单行阶段切换（连接→思考→生成回复）+ 计时器。Gateway Responses API 透传 (v1.7.6)
 - **快捷操作**：新建报价单、导入产品
 - **性能**：缓存优先渲染，切换标签 <100ms
 
