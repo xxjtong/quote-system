@@ -331,19 +331,6 @@ onMounted(() => { fetchDashboard(); loadHistory() })
       </div>
     </div>
 
-    <!-- Recent Quotes -->
-    <div class="card-modern anim-in">
-      <div class="card-title-modern"><i class="bi bi-clock-history text-primary"></i>最近报价</div>
-      <template v-if="recentQuotes.length">
-        <div v-for="qq in recentQuotes" :key="qq.id" class="d-flex justify-content-between align-items-center py-2"
-          style="border-bottom:1px solid var(--gray-100);cursor:pointer" @click="goTo('quotes')">
-          <span><i class="bi bi-file-text me-2 text-muted"></i>{{ qq.title || '未命名' }}</span>
-          <span class="text-muted small fw-medium">{{ formatMoney(qq.total_amount) }}</span>
-        </div>
-      </template>
-      <div v-else class="text-muted text-center py-3 small">暂无报价单</div>
-    </div>
-
     <!-- Quick Actions -->
     <div class="card-modern anim-in">
       <div class="card-title-modern"><i class="bi bi-lightning text-primary"></i>快速操作</div>
@@ -489,6 +476,19 @@ onMounted(() => { fetchDashboard(); loadHistory() })
           <i class="bi bi-send"></i>
         </button>
       </div>
+    </div>
+
+    <!-- Recent Quotes -->
+    <div class="card-modern anim-in">
+      <div class="card-title-modern"><i class="bi bi-clock-history text-primary"></i>最近报价</div>
+      <template v-if="recentQuotes.length">
+        <div v-for="qq in recentQuotes" :key="qq.id" class="d-flex justify-content-between align-items-center py-2"
+          style="border-bottom:1px solid var(--gray-100);cursor:pointer" @click="goTo('quotes')">
+          <span><i class="bi bi-file-text me-2 text-muted"></i>{{ qq.title || '未命名' }}</span>
+          <span class="text-muted small fw-medium">{{ formatMoney(qq.total_amount) }}</span>
+        </div>
+      </template>
+      <div v-else class="text-muted text-center py-3 small">暂无报价单</div>
     </div>
 
     <!-- Compare Modal -->
