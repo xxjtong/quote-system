@@ -203,6 +203,7 @@ body {
   letter-spacing: .03em; border-bottom: 1px solid var(--gray-200);
 }
 .table-modern > tbody > tr:hover { background: var(--gray-50); }
+.table-modern > tbody > tr:nth-child(even) { background: #fafbfc; }
 
 /* Empty State */
 .empty-state {

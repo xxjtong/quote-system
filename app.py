@@ -9,8 +9,6 @@ import sys
 import json
 import io
 import random
-import hashlib
-import hmac
 import secrets
 import threading
 from datetime import datetime, timedelta
@@ -29,9 +27,13 @@ from openpyxl.utils import get_column_letter
 
 from extensions import db
 from models import Product, Quote, QuoteItem, User, DownloadLog, FieldSetting, SystemSetting, AIChatSession
+from auth import auth_bp, hash_password, verify_password, create_token, require_auth, require_admin, _is_registration_open
 
 app = Flask(__name__)
 CORS(app)
+
+# Register auth blueprint
+app.register_blueprint(auth_bp)
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'uploads'
@@ -88,61 +90,7 @@ def preload_products_for_quote(quote):
     products = Product.query.filter(Product.id.in_(pids)).all()
     return {p.id: p for p in products}
 
-# ─── JWT & Auth Helpers ──────────────────────────────────────
-
-def hash_password(password):
-    salt = secrets.token_hex(16)
-    h = hashlib.sha256((salt + password).encode()).hexdigest()
-    return f'{salt}${h}'
-
-def verify_password(password, password_hash):
-    try:
-        salt, h = password_hash.split('$', 1)
-        return hashlib.sha256((salt + password).encode()).hexdigest() == h
-    except:
-        return False
-
-def create_token(user):
-    payload = {
-        'user_id': user.id, 'username': user.username, 'role': user.role,
-        'exp': datetime.utcnow() + timedelta(hours=app.config['JWT_EXPIRY_HOURS']),
-    }
-    return jwt.encode(payload, app.config['JWT_SECRET'], algorithm='HS256')
-
-def get_current_user():
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    if not token:
-        return None
-    try:
-        data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
-        user = db.session.get(User, data['user_id'])
-        if user and user.is_active:
-            return user
-    except:
-        pass
-    return None
-
-def require_auth(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        user = get_current_user()
-        if not user:
-            return jsonify({'error': '请先登录'}), 401
-        g.current_user = user
-        return fn(*args, **kwargs)
-    return wrapper
-
-def require_admin(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        user = get_current_user()
-        if not user:
-            return jsonify({'error': '请先登录'}), 401
-        if user.role != 'admin':
-            return jsonify({'error': '需要管理员权限'}), 403
-        g.current_user = user
-        return fn(*args, **kwargs)
-    return wrapper
+# ─── JWT & Auth Helpers (moved to auth.py) ──────────────────
 
 def check_quote_owner(quote_id):
     """非管理员只能操作自己的报价单。返回 (quote_or_error, status_code)."""
@@ -152,83 +100,6 @@ def check_quote_owner(quote_id):
     if g.current_user.role != 'admin' and quote.created_by != g.current_user.id:
         return None, jsonify({'error': '无权操作此报价单'}), 403
     return quote, None, None
-
-
-# ─── Auth API ────────────────────────────────────────────────
-
-@app.route('/api/auth/registration-status', methods=['GET'])
-def auth_registration_status():
-    return jsonify({'registration_open': _is_registration_open()})
-
-@app.route('/api/auth/register', methods=['POST'])
-def auth_register():
-    if not _is_registration_open():
-        return jsonify({'error': '暂不开放自主注册'}), 403
-    data = request.get_json()
-    if not data or not data.get('username', '').strip() or not data.get('password', '').strip():
-        return jsonify({'error': '用户名和密码不能为空'}), 400
-    username = data['username'].strip()
-    if User.query.filter_by(username=username).first():
-        return jsonify({'error': '用户名已存在'}), 409
-    user = User(
-        username=username,
-        password_hash=hash_password(data['password'].strip()),
-        role='user', is_active=True,
-        email=data.get('email', '').strip(),
-    )
-    db.session.add(user)
-    db.session.commit()
-    token = create_token(user)
-    return jsonify({'token': token, 'user': user.to_dict()}), 201
-
-
-@app.route('/api/auth/login', methods=['POST'])
-def auth_login():
-    data = request.get_json()
-    if not data or not data.get('username', '').strip() or not data.get('password', '').strip():
-        return jsonify({'error': '用户名和密码不能为空'}), 400
-    user = User.query.filter_by(username=data['username'].strip()).first()
-    if not user or not verify_password(data['password'].strip(), user.password_hash):
-        return jsonify({'error': '用户名或密码错误'}), 401
-    if not user.is_active:
-        return jsonify({'error': '账号已被停用'}), 403
-    token = create_token(user)
-    return jsonify({'token': token, 'user': user.to_dict()})
-
-
-@app.route('/api/auth/me', methods=['GET'])
-@require_auth
-def auth_me():
-    return jsonify({'user': g.current_user.to_dict()})
-
-@app.route('/api/auth/profile', methods=['PUT'])
-@require_auth
-def update_profile():
-    """修改当前用户邮箱和密码"""
-    data = request.get_json()
-    user = g.current_user
-    changed = False
-
-    # 改邮箱
-    if 'email' in data:
-        user.email = (data['email'] or '').strip()
-        changed = True
-
-    # 改密码
-    new_pw = (data.get('new_password') or '').strip()
-    if new_pw:
-        current_pw = (data.get('current_password') or '').strip()
-        if not verify_password(current_pw, user.password_hash):
-            return jsonify({'error': '当前密码错误'}), 400
-        if len(new_pw) < 3:
-            return jsonify({'error': '新密码至少3位'}), 400
-        user.password_hash = hash_password(new_pw)
-        changed = True
-
-    if changed:
-        db.session.commit()
-        return jsonify({'user': user.to_dict(), 'message': '个人信息已更新'})
-    return jsonify({'error': '没有需要修改的内容'}), 400
 
 
 # ─── Admin API ───────────────────────────────────────────────
@@ -262,13 +133,6 @@ def get_setting(key, default=''):
 def get_all_settings():
     """读取所有系统设置 (返回dict)"""
     return {s.key: s.value for s in SystemSetting.query.all()}
-
-def _is_registration_open():
-    """检查注册是否开放（DB 优先，解决多 worker 不一致问题）"""
-    db_val = get_setting('registration_open', '').strip().lower()
-    if db_val in ('true', 'false'):
-        return db_val == 'true'
-    return app.config.get('REGISTRATION_OPEN', True)
 
 @app.route('/api/admin/settings', methods=['GET'])
 @require_admin
@@ -2499,7 +2363,7 @@ def number_to_cn(num):
 @require_auth
 def ai_token():
     """AI 助手获取当前用户的 JWT token（用于 API 操作）。"""
-    token = create_token(g.current_user)
+    token = create_token(g.current_user, app)
     return jsonify({'token': token, 'username': g.current_user.username, 'user_id': g.current_user.id})
 
 
@@ -2631,30 +2495,6 @@ def get_version():
     except:
         ver = '0.1.1'
     return jsonify({'version': ver})
-
-# 前端获取当前用户信息 + 字段可见性
-@app.route('/api/session', methods=['GET'])
-@require_auth
-def session_info():
-    is_admin = g.current_user.role == 'admin'
-    # 剩余不足24h自动续签token
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    new_token = None
-    try:
-        data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
-        remaining = data['exp'] - int(datetime.utcnow().timestamp())
-        if remaining < 86400:
-            new_token = create_token(g.current_user)
-    except:
-        pass
-    resp = jsonify({
-        'user': g.current_user.to_dict(),
-        'field_visibility': get_field_visibility() if not is_admin else {},
-        'registration_open': _is_registration_open(),
-    })
-    if new_token:
-        resp.headers['X-New-Token'] = new_token
-    return resp
 
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):

@@ -270,7 +270,7 @@ onMounted(fetchDashboard)
       </div>
 
       <!-- Messages -->
-      <div ref="chatBox" class="chat-messages" style="max-height:400px;overflow-y:auto;margin-bottom:.75rem">
+      <div ref="chatBox" class="chat-messages" style="max-height:60vh;overflow-y:auto;margin-bottom:.75rem">
         <div v-if="chatMessages.length === 0" class="text-muted text-center py-3 small">
           💡 试试问我：房顶漏水用什么材料？最便宜的传感器是哪个？
         </div>
