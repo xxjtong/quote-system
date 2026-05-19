@@ -34,9 +34,9 @@ jobs:
           with app.app_context():
               db.create_all()
           "
-          python app.py &
+          python app.py --port 5001 &
           sleep 3
-          curl -f http://127.0.0.1:5000/api/version
+          curl -f http://127.0.0.1:5001/api/version
 
       - name: Run tests
         run: |
