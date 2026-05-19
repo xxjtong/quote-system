@@ -205,21 +205,43 @@ onMounted(() => {
 
 async function autoAddProduct() {
   // Search for products matching the name from AI chat
-  // Try multiple strategies: full name → model number → individual keywords
+  // Strategy priority: model number → full name → longest keyword (limited to 1)
   const name = autoProduct.value
-  const strategies = [
-    name,
-    ...name.split(/\s+/).filter(s => s.length >= 2),
-    ...name.match(/[A-Z]{2,}[\d\-]+/gi) || [],
-  ]
+  const modelMatch = name.match(/[A-Z]{2,}[\d\-]+/gi) || []
+  const keywords = name.split(/\s+/).filter(s => s.length >= 2 && !/^[A-Z]{2,}[\d\-]+$/i.test(s))
+
   let found = []
-  for (const q of strategies.slice(0, 6)) {
+
+  // 1. Try model number (most specific)
+  for (const m of modelMatch) {
     if (found.length > 0) break
     try {
-      const data = await api(`/api/products?search=${encodeURIComponent(q)}&per_page=5`)
+      const data = await api(`/api/products?search=${encodeURIComponent(m)}&per_page=3`)
       found = (data.products || []).filter(p => p.is_active !== false)
     } catch {}
   }
+
+  // 2. Try full name
+  if (found.length === 0) {
+    try {
+      const data = await api(`/api/products?search=${encodeURIComponent(name)}&per_page=3`)
+      found = (data.products || []).filter(p => p.is_active !== false)
+    } catch {}
+  }
+
+  // 3. Try longest keyword (limit to 1 to avoid noise)
+  if (found.length === 0 && keywords.length > 0) {
+    const sorted = keywords.sort((a, b) => b.length - a.length)
+    for (const kw of sorted.slice(0, 2)) {
+      if (found.length > 0) break
+      try {
+        const data = await api(`/api/products?search=${encodeURIComponent(kw)}&per_page=1`)
+        const hits = (data.products || []).filter(p => p.is_active !== false)
+        if (hits.length > 0) found = [hits[0]]
+      } catch {}
+    }
+  }
+
   if (found.length === 0) {
     toast(`未找到产品「${name}」`, 'warning')
     return
