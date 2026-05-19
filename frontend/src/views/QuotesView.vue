@@ -49,10 +49,18 @@ function clearSearch() {
 
 // ─── Pagination pages ───
 const pageNumbers = computed(() => {
-  if (totalPages.value <= 1) return []
-  let start = Math.max(1, Math.min(currentPage.value - 3, totalPages.value - 6))
-  let end = Math.min(totalPages.value, start + 6)
-  if (end - start < 6) start = Math.max(1, end - 6)
+  const total = totalPages.value
+  if (total <= 1) return []
+
+  // 始终显示最多 7 页，当前页居中
+  const half = 3
+  let start = Math.max(1, currentPage.value - half)
+  let end = Math.min(total, currentPage.value + half)
+
+  // 靠近边界时补齐
+  if (start === 1) end = Math.min(total, start + 6)
+  else if (end === total) start = Math.max(1, end - 6)
+
   const pages = []
   for (let p = start; p <= end; p++) pages.push(p)
   return pages
@@ -187,13 +195,14 @@ async function batchDelete() {
   const ids = [...selectedIds.value]
   if (!ids.length) return
   if (!confirm(`确定删除选中的 ${ids.length} 条报价单吗？`)) return
-  let ok = 0, fail = 0
-  for (const id of ids) {
-    const r = await api(`/api/quotes/${id}`, 'DELETE')
-    if (r.error) fail++
-    else ok++
-  }
-  toast(`已删除 ${ok} 条` + (fail ? `，${fail} 条失败` : ''), fail ? 'warning' : 'success')
+
+  const r = await api('/api/quotes/batch', 'DELETE', { ids })
+  if (r.error) { toast(r.error, 'danger'); return }
+
+  const msg = `已删除 ${r.deleted} 条`
+  if (r.forbidden?.length) toast(`${msg}，${r.forbidden.length} 条无权限`, 'warning')
+  else toast(msg, 'success')
+
   selectedIds.value = new Set()
   selectAll.value = false
   fetchQuotes()

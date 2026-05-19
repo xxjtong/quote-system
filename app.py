@@ -18,7 +18,6 @@ from functools import wraps
 from pathlib import Path
 
 from flask import Flask, request, jsonify, send_file, send_from_directory, render_template, g, Response
-from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from sqlalchemy import func
 import jwt
@@ -27,6 +26,9 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
 from openpyxl.utils import get_column_letter
+
+from extensions import db
+from models import Product, Quote, QuoteItem, User, DownloadLog, FieldSetting, SystemSetting, AIChatSession
 
 app = Flask(__name__)
 CORS(app)
@@ -45,7 +47,7 @@ app.config['JWT_EXPIRY_HOURS'] = 72
 app.config['DEFAULT_ADMIN_PASSWORD'] = os.environ.get('QUOTE_ADMIN_PASSWORD', 'admin123')
 app.config['REGISTRATION_OPEN'] = os.environ.get('QUOTE_REGISTRATION', 'true').lower() == 'true'
 
-db = SQLAlchemy(app)
+db.init_app(app)
 
 # ─── Helpers ─────────────────────────────────────────────────────
 
@@ -85,193 +87,6 @@ def preload_products_for_quote(quote):
         return {}
     products = Product.query.filter(Product.id.in_(pids)).all()
     return {p.id: p for p in products}
-
-# ─── Models ───────────────────────────────────────────────────
-
-class Product(db.Model):
-    __tablename__ = 'products'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False, index=True)
-    sku = db.Column(db.String(100), nullable=True)
-    category = db.Column(db.String(100), nullable=True, index=True)
-    spec = db.Column(db.String(500), nullable=True)
-    unit = db.Column(db.String(20), nullable=True)
-    price = db.Column(db.Float, nullable=True)
-    cost_price = db.Column(db.Float, nullable=True)
-    supplier = db.Column(db.String(200), nullable=True)
-    function_desc = db.Column(db.Text, nullable=True)
-    remark = db.Column(db.Text, nullable=True)
-    image_url = db.Column(db.String(500), nullable=True)
-    image_data = db.Column(db.LargeBinary, nullable=True)  # BLOB 存储图片二进制
-    image_mime = db.Column(db.String(30), nullable=True)     # 如 image/jpeg
-    is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
-    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'sku': self.sku or '',
-            'category': self.category or '',
-            'spec': self.spec or '',
-            'unit': self.unit or '',
-            'price': self.price or 0,
-            'cost_price': self.cost_price or 0,
-            'supplier': self.supplier or '',
-            'function_desc': self.function_desc or '',
-            'remark': self.remark or '',
-            'image_url': self.image_url or '',
-            'has_image': bool(self.image_data),
-            'is_active': self.is_active if self.is_active is not None else True,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
-        }
-
-
-class Quote(db.Model):
-    __tablename__ = 'quotes'
-    id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=True)
-    client = db.Column(db.String(200), nullable=True)
-    contact = db.Column(db.String(100), nullable=True)
-    phone = db.Column(db.String(50), nullable=True)
-    quote_date = db.Column(db.String(20), nullable=True)
-    valid_days = db.Column(db.Integer, default=15)
-    status = db.Column(db.String(20), default='draft')
-    total_amount = db.Column(db.Float, default=0)
-    download_count = db.Column(db.Integer, default=0)
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    remark = db.Column(db.Text, nullable=True)
-    tax_rate = db.Column(db.Float, default=0)  # 税率(%): 台湾5%, 大陆0%
-    created_at = db.Column(db.DateTime, default=datetime.now)
-    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
-    items = db.relationship('QuoteItem', backref='quote', lazy='dynamic', cascade='all, delete-orphan', order_by='QuoteItem.sort_order')
-
-    def to_dict(self, products_map=None, users_map=None):
-        creator_name = None
-        if self.created_by:
-            if users_map is not None:
-                creator_name = users_map.get(self.created_by)
-            else:
-                creator = db.session.get(User, self.created_by)
-                creator_name = creator.username if creator else None
-        return {
-            'id': self.id,
-            'title': self.title or '',
-            'client': self.client or '',
-            'contact': self.contact or '',
-            'phone': self.phone or '',
-            'quote_date': self.quote_date or '',
-            'valid_days': self.valid_days,
-            'status': self.status,
-            'total_amount': self.total_amount or 0,
-            'download_count': self.download_count or 0,
-            'created_by': self.created_by,
-            'created_by_name': creator_name,
-            'remark': self.remark or '',
-            'tax_rate': self.tax_rate or 0,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
-            'items': [item.to_dict(products_map) for item in self.items],
-        }
-
-
-class QuoteItem(db.Model):
-    __tablename__ = 'quote_items'
-    id = db.Column(db.Integer, primary_key=True)
-    quote_id = db.Column(db.Integer, db.ForeignKey('quotes.id', ondelete='CASCADE'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True)
-    product_name = db.Column(db.String(200), nullable=False)
-    product_sku = db.Column(db.String(100), nullable=True)
-    product_spec = db.Column(db.String(500), nullable=True)
-    product_unit = db.Column(db.String(20), nullable=True)
-    quantity = db.Column(db.Integer, default=1)
-    unit_price = db.Column(db.Float, default=0)
-    amount = db.Column(db.Float, default=0)
-    remark = db.Column(db.String(500), nullable=True)
-    sort_order = db.Column(db.Integer, default=0)
-
-    def to_dict(self, products_map=None):
-        # 利润计算
-        profit = 0
-        profit_rate = 0
-        if self.product_id:
-            product = products_map.get(self.product_id) if products_map else db.session.get(Product, self.product_id)
-            if product and product.cost_price:
-                profit = round((self.unit_price or 0) - (product.cost_price or 0), 2)
-                profit_rate = round(profit / (self.unit_price or 1) * 100, 1) if self.unit_price else 0
-        return {
-            'id': self.id,
-            'quote_id': self.quote_id,
-            'product_id': self.product_id,
-            'product_name': self.product_name,
-            'product_sku': self.product_sku or '',
-            'product_spec': self.product_spec or '',
-            'product_unit': self.product_unit or '',
-            'quantity': self.quantity,
-            'unit_price': self.unit_price,
-            'amount': self.amount,
-            'remark': self.remark or '',
-            'sort_order': self.sort_order,
-            'profit': profit,
-            'profit_rate': profit_rate,
-        }
-
-
-class DownloadLog(db.Model):
-    __tablename__ = 'download_logs'
-    id = db.Column(db.Integer, primary_key=True)
-    quote_id = db.Column(db.Integer, db.ForeignKey('quotes.id', ondelete='CASCADE'), nullable=False)
-    user_name = db.Column(db.String(100), nullable=False)
-    downloaded_at = db.Column(db.DateTime, default=datetime.now)
-    quote = db.relationship('Quote', backref=db.backref('download_logs', cascade='all, delete-orphan'))
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'quote_id': self.quote_id,
-            'user_name': self.user_name,
-            'downloaded_at': self.downloaded_at.strftime('%Y-%m-%d %H:%M') if self.downloaded_at else '',
-            'quote_title': self.quote.title if self.quote else '',
-            'quote_client': self.quote.client if self.quote else '',
-        }
-
-
-class User(db.Model):
-    __tablename__ = 'users'
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False, index=True)
-    password_hash = db.Column(db.String(128), nullable=False)
-    role = db.Column(db.String(10), default='user')  # 'admin' or 'user'
-    is_active = db.Column(db.Boolean, default=True)
-    email = db.Column(db.String(200), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
-
-    def to_dict(self):
-        return {
-            'id': self.id, 'username': self.username,
-            'role': self.role, 'is_active': self.is_active,
-            'email': self.email or '',
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
-        }
-
-
-class FieldSetting(db.Model):
-    __tablename__ = 'field_settings'
-    id = db.Column(db.Integer, primary_key=True)
-    field_name = db.Column(db.String(50), unique=True, nullable=False)
-    label = db.Column(db.String(100), nullable=False)
-    user_visible = db.Column(db.Boolean, default=True)
-
-
-class SystemSetting(db.Model):
-    """系统设置 key-value 存储 (v1.3.8)"""
-    __tablename__ = 'system_settings'
-    id = db.Column(db.Integer, primary_key=True)
-    key = db.Column(db.String(100), unique=True, nullable=False, index=True)
-    value = db.Column(db.Text, nullable=True, default='')
-
 
 # ─── JWT & Auth Helpers ──────────────────────────────────────
 
@@ -2057,6 +1872,40 @@ def delete_quote(quote_id):
     return jsonify({'message': '已删除'})
 
 
+@app.route('/api/quotes/batch', methods=['DELETE'])
+@require_auth
+def batch_delete_quotes():
+    """批量删除报价单（仅限自己创建的或管理员删除全部）"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids', [])
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'error': '请提供要删除的报价单 ID 列表'}), 400
+    if len(ids) > 100:
+        return jsonify({'error': '单次最多删除 100 条'}), 400
+
+    user = g.current_user
+    is_admin = user.role == 'admin'
+
+    quotes = Quote.query.filter(Quote.id.in_(ids)).all()
+    deletable = []
+    forbidden = []
+    for q in quotes:
+        if is_admin or q.created_by == user.id:
+            deletable.append(q)
+        else:
+            forbidden.append(q.id)
+
+    for q in deletable:
+        db.session.delete(q)
+    db.session.commit()
+
+    return jsonify({
+        'deleted': len(deletable),
+        'total': len(ids),
+        'forbidden': forbidden,
+    })
+
+
 @app.route('/api/quotes/<int:quote_id>/export-excel', methods=['GET'])
 def export_quote_excel(quote_id):
     """导出报价单 — 样式精确克隆模板.xlsx"""
@@ -2656,9 +2505,9 @@ def ai_token():
 
 # ─── AI Chat (通过 Hermes Gateway Responses API) ─────────────
 
+_ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
 _gateway_url = 'http://127.0.0.1:8643'
 
-_initialized_convos = set()
 
 _GW_SYSTEM_PROMPT = (
     '你是报价管理系统（/opt/quote-system）的 AI 助手。'
@@ -2699,14 +2548,14 @@ def ai_chat():
 
     # 构建请求体
     body = {
-        'model': 'deepseek-v4-flash',
+        'model': _ai_model,
         'input': user_input,
         'conversation': conversation,
         'max_output_tokens': 2000,
     }
 
-    # 首次 — 注入系统提示和用户身份
-    if conversation not in _initialized_convos:
+    # 首次 — 注入系统提示和用户身份（DB 标记，多 worker 安全）
+    if not AIChatSession.query.filter_by(user_id=user.id).first():
         body['instructions'] = (
             _GW_SYSTEM_PROMPT + '\n'
             f'当前用户：{user.username}（ID={user.id}）。'
@@ -2714,7 +2563,8 @@ def ai_chat():
             f'然后用这个 token 操作 API（POST /api/quotes 创建、GET /export-excel 导出等）。'
             f'报价单会自动归属到当前用户 "{user.username}" 名下。'
         )
-        _initialized_convos.add(conversation)
+        db.session.add(AIChatSession(user_id=user.id))
+        db.session.commit()
 
     t1 = time.time()
 

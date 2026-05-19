@@ -1,5 +1,13 @@
 # 更新日志
 
+## v1.7.2 (2026-05-19)
+### 🔧 优化与架构改进
+- **多 worker 安全修复**：`_initialized_convos` 内存 set → `AIChatSession` 表，Gunicorn 多进程下不会重复注入 AI instructions
+- **批量删除 API**：新增 `DELETE /api/quotes/batch`，N 次请求 → 1 次，前端接入
+- **模块拆分**：提取 `models.py`（8 个模型类）+ `extensions.py`（db 独立模块），app.py 2898 → 2705 行
+- **模型配置化**：AI 模型从 `QUOTE_AI_MODEL` 环境变量读取，默认 `deepseek-v4-flash`
+- **分页边界简化**：`pageNumbers` 逻辑重写，去掉 `totalPages - 6` 歧义计算
+
 ## v1.7.1 (2026-05-19)
 ### 🤖 AI 对话升级 — Hermes Gateway Responses API
 - **Chat Completions → Responses API**：`POST /v1/chat/completions` → `POST /v1/responses`
