@@ -2417,21 +2417,19 @@ def _parse_reply_actions(reply_text):
             result['quick_replies'] = replies
             break
 
-    # 检测推荐了产品 → 提取产品名+价格（支持多种格式）
-    # 格式1: "1. 产品名 - ¥429" or "2. 产品名 ¥1,326"
-    # 格式2: "产品名：¥429"
+    # 检测推荐了产品 → 提取产品名+价格
+    # 格式: "绿米 Aqara 网关 M2 POE版 - ¥314"
+    # 关键：分隔符前后必须有空格，避免 "VS350-470M" 误匹配
     prod_pattern1 = re.findall(
-        r'(?:\\d+[.、．]\\s*)?([\\u4e00-\\u9fff\\w\\-\\+][\\u4e00-\\u9fff\\w\\-\\+\\s]{2,40}?)\\s*[-–—：:]\\s*(?:¥|￥|rmb)?\\s*([\\d,]+\\.?\\d*)',
-        reply_text, re.IGNORECASE
-    )
-    prod_pattern2 = re.findall(
-        r'([\\u4e00-\\u9fff\\w\\-\\+][\\u4e00-\\u9fff\\w\\-\\+\\s]{2,40}?)\\s*[：:]\\s*(?:¥|￥|rmb)?\\s*([\\d,]+\\.?\\d*)',
-        reply_text, re.IGNORECASE
+        r'(?:\d+[.、．]\s*)?([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-+\s]{3,50}?)\s+[-–—]\s+(?:¥|￥|[Rr][Mm][Bb])?\s*([\d,]+\.?\d*)',
+        reply_text
     )
     seen = set()
-    for name, price in (prod_pattern1 + prod_pattern2)[:6]:
+    for name, price in prod_pattern1[:6]:
         name = name.strip()
-        if name in seen or len(name) < 3:
+        if name in seen or len(name) < 4:
+            continue
+        if re.match(r'^[\d\s\-+.,]+$', name):
             continue
         seen.add(name)
         try:
