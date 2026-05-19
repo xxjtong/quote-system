@@ -5,12 +5,14 @@ Flask + SQLite + REST API + Web UI
 """
 
 import os
+import sys
 import json
 import io
 import random
 import hashlib
 import hmac
 import secrets
+import threading
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -2644,100 +2646,119 @@ def number_to_cn(num):
 
 # ─── AI Chat (直调 DeepSeek + 数据库产品搜索) ──────────────
 
-def _get_deepseek_key():
-    """从 Hermes .env 读取 DeepSeek API key。"""
-    # 优先环境变量，但必须是有效的 sk- 开头
-    key = os.environ.get('DEEPSEEK_API_KEY', '')
-    if key and key.startswith('sk-') and len(key) > 20:
-        return key
-    # 否则从文件读
+# ─── AI Chat (Hermes Agent 会话池) ──────────────────────────
+
+import yaml
+
+_hermes_config = None
+_hermes_api_key = ''
+_agent_pool = {}        # user_id → AIAgent
+_agent_lock = threading.Lock()
+
+def _load_hermes_config():
+    """加载 Hermes 配置（model / provider / api_key）。"""
+    global _hermes_config, _hermes_api_key
+    if _hermes_config is not None:
+        return
+    config_path = os.path.expanduser('~/.hermes/config.yaml')
     env_path = os.path.expanduser('~/.hermes/.env')
+    try:
+        with open(config_path) as f:
+            _hermes_config = yaml.safe_load(f) or {}
+    except Exception:
+        _hermes_config = {}
     try:
         with open(env_path) as f:
             for line in f:
                 if line.startswith('DEEPSEEK_API_KEY='):
-                    return line.strip().split('=', 1)[1]
+                    _hermes_api_key = line.strip().split('=', 1)[1]
     except Exception:
         pass
-    return ''
 
-DEEPSEEK_API_KEY = _get_deepseek_key()
-DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1'
-DEEPSEEK_MODEL = 'deepseek-chat'  # 快速模型，适合产品问答
+def _create_agent(user_id):
+    """创建 Hermes Agent 实例（注入报价系统上下文）。"""
+    _load_hermes_config()
+    model_cfg = _hermes_config.get('model', {})
+    model = model_cfg.get('default', 'deepseek-v4-pro')
+    provider = model_cfg.get('provider', 'deepseek')
+    base_url = model_cfg.get('base_url', 'https://api.deepseek.com/v1')
 
+    # 添加 Hermes 到 Python path
+    hermes_path = os.path.expanduser('~/.hermes/hermes-agent')
+    if hermes_path not in sys.path:
+        sys.path.insert(0, hermes_path)
+    from run_agent import AIAgent
 
-def _build_full_catalog():
-    """构建精简产品目录（全库），注入 prompt 让 AI 自己搜索。"""
-    products = Product.query.filter(Product.is_active == True).order_by(Product.price.asc()).all()
-    if not products:
-        return '（产品库为空）'
+    system_prompt = (
+        '你是报价管理系统（/opt/quote-system）的 AI 助手。'
+        '你可以用工具直接操作系统：\n'
+        '- 数据库：/opt/quote-system/quote.db (SQLite)\n'
+        '  产品表 products(id, name, sku, category, spec, unit, price, cost_price, supplier, function_desc, is_active)\n'
+        '  报价单 quotes(id, title, client, contact, phone, quote_date, valid_days, status, total_amount)\n'
+        '  报价明细 quote_items(id, quote_id, product_id, product_name, product_sku, quantity, unit_price, amount)\n'
+        '- API：127.0.0.1:5001，JWT token 从 DB 获取\n'
+        '  创建报价：POST /api/quotes  导出Excel：GET /api/quotes/<id>/export-excel\n'
+        '- 产品搜索：sqlite3 /opt/quote-system/quote.db "SELECT name,price FROM products WHERE name LIKE \'%关键词%\' ORDER BY price"\n\n'
+        '规则：推荐产品必须来自数据库，价格准确。可以帮用户创建报价单、导出 Excel。'
+    )
 
-    lines = []
-    for p in products:
-        # 精简：名称 + 价格 + 分类 + 描述（截断）
-        desc = (p.function_desc or '')[:80]
-        cat = f' [{p.category}]' if p.category else ''
-        sku = f' SKU:{p.sku}' if p.sku else ''
-        lines.append(f"{p.name}{sku}{cat} ¥{p.price:.2f} {desc}")
-    return '\n'.join(lines)
+    agent = AIAgent(
+        base_url=base_url,
+        api_key=_hermes_api_key,
+        provider=provider,
+        model=model,
+        api_mode='chat_completions',
+        max_iterations=30,
+        enabled_toolsets=['terminal', 'file', 'web'],
+        disabled_toolsets=['browser', 'image_gen', 'video_gen', 'tts', 'vision', 'x_search', 'spotify', 'homeassistant'],
+        quiet_mode=True,
+        save_trajectories=False,
+        platform='api',
+        session_id=f'quote-chat-{user_id}',
+        skip_context_files=True,
+        skip_memory=False,
+    )
+    # 首条消息用 run_conversation 注入 system prompt
+    agent._system_prompt = system_prompt
+    return agent
 
+def _get_agent(user_id):
+    """获取或创建用户的持久 Agent 会话。"""
+    with _agent_lock:
+        agent = _agent_pool.get(user_id)
+        if agent is None:
+            agent = _create_agent(user_id)
+            _agent_pool[user_id] = agent
+        return agent
 
 @app.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
-    """AI 产品助手 — 全库推给 DeepSeek，让 AI 自己搜索匹配。"""
+    """AI 对话 — 对接 Hermes Agent（持久会话池）。"""
     data = request.get_json(silent=True) or {}
-    user_messages = data.get('messages', [])
-
-    if not user_messages:
+    messages = data.get('messages', [])
+    if not messages:
         return jsonify({'error': '请输入问题'}), 400
 
-    recent = user_messages[-10:]
+    # 提取最后一条用户消息
+    user_msg = ''
+    for m in reversed(messages):
+        if m.get('role') == 'user':
+            user_msg = m.get('content', '')
+            break
+    if not user_msg:
+        return jsonify({'error': '请输入问题'}), 400
 
-    # 构建全库产品目录，让 AI 自己找
-    catalog = _build_full_catalog()
-
-    system_prompt = (
-        f'你是报价系统的 AI 产品助手。以下是完整的产品库（按价格升序）：\n\n'
-        f'{catalog}\n\n'
-        f'严格规则：\n'
-        f'1. **只从上面的产品库中推荐**，引用准确的名称和价格\n'
-        f'2. 根据用户需求，从产品库中找出最匹配的产品推荐\n'
-        f'3. 如果所有产品都不匹配用户需求，直接说"当前产品库没有匹配的产品"，不要编造\n'
-        f'4. **禁止使用互联网或产品库以外的任何资料**\n'
-        f'5. 回答简洁专业，按价格从低到高排列推荐'
-    )
-
-    if not DEEPSEEK_API_KEY:
-        return jsonify({'error': 'AI 服务未配置'}), 503
+    agent = _get_agent(g.current_user.id)
 
     try:
-        import requests as http_req
-        resp = http_req.post(
-            f'{DEEPSEEK_BASE_URL}/chat/completions',
-            json={
-                'model': DEEPSEEK_MODEL,
-                'messages': [
-                    {'role': 'system', 'content': system_prompt},
-                    *recent
-                ],
-                'max_tokens': 600,
-                'temperature': 0.7,
-            },
-            headers={'Authorization': f'Bearer {DEEPSEEK_API_KEY}'},
-            timeout=30
-        )
-        if resp.status_code != 200:
-            return jsonify({'error': f'AI 服务异常 ({resp.status_code})'}), 502
-
-        body = resp.json()
-        reply = body.get('choices', [{}])[0].get('message', {}).get('content', '')
+        result = agent.run_conversation(user_msg)
+        reply = result.get('final_response', '')
         if not reply:
             reply = '抱歉，AI 暂时无法回答，请稍后再试。'
-
-        return jsonify({'reply': reply, 'model': DEEPSEEK_MODEL})
+        return jsonify({'reply': reply, 'model': 'hermes-agent'})
     except Exception as e:
-        return jsonify({'error': f'AI 服务连接失败: {str(e)}'}), 503
+        return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503
 
 
 # ─── Frontend ────────────────────────────────────────────────
