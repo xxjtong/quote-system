@@ -50,6 +50,8 @@ const chatMessages = ref([])
 const chatInput = ref('')
 const chatLoading = ref(false)
 const chatBox = ref(null)
+const elapsedSeconds = ref(0)
+let timerInterval = null
 
 async function sendMessage() {
   const text = chatInput.value.trim()
@@ -58,6 +60,11 @@ async function sendMessage() {
   chatMessages.value.push({ role: 'user', content: text })
   chatInput.value = ''
   chatLoading.value = true
+
+  // Start timer
+  elapsedSeconds.value = 0
+  timerInterval = setInterval(() => { elapsedSeconds.value++ }, 1000)
+
   await nextTick()
   scrollChat()
 
@@ -65,13 +72,14 @@ async function sendMessage() {
     const messages = chatMessages.value.map(m => ({ role: m.role, content: m.content }))
     const data = await api('/api/chat', 'POST', { messages }, 120000)
     if (data.error) {
-      chatMessages.value.push({ role: 'assistant', content: `❌ ${data.error}` })
+      chatMessages.value.push({ role: 'assistant', content: `❌ ${data.error}\n\n⏱ 用时 ${elapsedSeconds.value} 秒` })
     } else {
-      chatMessages.value.push({ role: 'assistant', content: data.reply })
+      chatMessages.value.push({ role: 'assistant', content: `⏱ 用时 ${elapsedSeconds.value} 秒\n\n${data.reply}` })
     }
   } catch (e) {
-    chatMessages.value.push({ role: 'assistant', content: '❌ 网络错误，请重试' })
+    chatMessages.value.push({ role: 'assistant', content: `❌ 网络错误，请重试\n\n⏱ 用时 ${elapsedSeconds.value} 秒` })
   } finally {
+    clearInterval(timerInterval)
     chatLoading.value = false
     await nextTick()
     scrollChat()
@@ -215,7 +223,7 @@ onMounted(fetchDashboard)
         </div>
         <div v-if="chatLoading" class="chat-msg-ai">
           <div class="chat-bubble bg-light" style="padding:.5rem .75rem;border-radius:12px">
-            <span class="spinner-border spinner-border-sm text-primary me-2"></span>思考中...
+            <span class="spinner-border spinner-border-sm text-primary me-2"></span>思考中<small class="text-muted ms-2">⏱ {{ elapsedSeconds }}s</small>
           </div>
         </div>
       </div>
