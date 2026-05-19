@@ -2683,12 +2683,12 @@ def _extract_search_terms(query):
 
 
 def _search_products_for_chat(query, limit=10):
-    """从数据库搜索与用户问题相关的产品（n-gram 匹配）。"""
+    """搜索产品，按 n-gram 命中数评分排序，只返回真正相关的。"""
     terms = _extract_search_terms(query)
     if not terms:
         return []
 
-    # 对每个 term 构造 LIKE 条件
+    # 宽捞候选（评分在 Python 做）
     conditions = []
     for t in terms:
         like = f'%{t}%'
@@ -2699,11 +2699,22 @@ def _search_products_for_chat(query, limit=10):
             Product.spec.ilike(like),
             Product.supplier.ilike(like),
         ))
-    products = Product.query.filter(
+    candidates = Product.query.filter(
         db.or_(*conditions),
         Product.is_active == True
-    ).order_by(Product.price.asc()).limit(limit).all()
-    return products
+    ).all()
+
+    # 相关性评分：统计产品命中多少个 n-gram
+    scored = []
+    for p in candidates:
+        fields = ' '.join(filter(None, [p.name, p.category, p.spec, p.function_desc, p.supplier]))
+        score = sum(1 for t in terms if t in fields)
+        scored.append((score, p))
+    scored.sort(key=lambda x: (-x[0], x[1].price or 0))
+
+    # 只返回至少命中 2 个 n-gram 的产品
+    relevant = [(s, p) for s, p in scored if s >= 2]
+    return [p for _, p in relevant[:limit]]
 
 
 def _build_product_context(products):
