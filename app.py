@@ -2672,6 +2672,11 @@ _GW_SYSTEM_PROMPT = (
     '- 产品搜索：sqlite3 /opt/quote-system/quote.db \n'
     '    "SELECT name,price FROM products WHERE name LIKE \'%关键词%\' ORDER BY price"\n\n'
     '规则：推荐产品必须来自数据库，价格准确。可以帮用户创建报价单、导出 Excel。\n'
+    '生成报价单前，先检查对话上下文：如果之前已创建过报价单，\n'
+    '主动询问用户：\"上一份报价单是「{标题}」，客户「{客户}」，联系人「{联系人}」。\n'
+    '这次是沿用同一客户/联系人，还是新客户？\"  等用户确认后再创建。\n'
+    '导出后给用户这个下载链接：https://bwh.ddns.mobi/quote/api/quotes/{id}/export-excel\n'
+    '不要报服务器本地文件路径（如 /tmp/xxx.xlsx），用户看不到。'
     '重要：每个用户的对话完全独立，不要使用或查询任何全局记忆/历史中的用户信息。'
     '如果不知道用户信息，就说不知道，不要从记忆里猜测。'
 )
@@ -2694,6 +2699,7 @@ def ai_chat():
 
     # 构建请求体
     body = {
+        'model': 'deepseek-v4-flash',
         'input': user_input,
         'conversation': conversation,
         'max_output_tokens': 2000,

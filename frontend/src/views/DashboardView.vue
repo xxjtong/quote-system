@@ -104,7 +104,7 @@ async function sendMessage() {
   scrollChat()
 
   try {
-    const data = await api('/api/chat', 'POST', { input: text }, 130000)
+    const data = await api('/api/chat', 'POST', { input: text }, 180000)
     const elapsed = elapsedSeconds.value
     if (data.error) {
       chatMessages.value.push({
