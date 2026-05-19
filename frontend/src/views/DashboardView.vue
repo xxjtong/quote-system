@@ -37,10 +37,10 @@ const chatLoading = ref(false)
 const chatBox = ref(null)
 const elapsedSeconds = ref(0)
 const currentPhase = ref(-1)
-const estLabel = ref('')
 // SSE real progress tracking
 const lastPhase = ref('')
 const phases = ['连接', '分析问题', '查询数据', '生成回复']
+const phaseIcons = ['bi-plug', 'bi-search', 'bi-database', 'bi-pencil']
 let timerInterval = null
 
 // Chat history (localStorage)
@@ -83,29 +83,10 @@ function loadChat(id) {
 }
 
 // SSE stream
-function estimateTime(text) {
-  const hasQuote = /报价|创建|生成报价|导出|excel/i.test(text)
-  const hasSearch = /搜索|查询|查找|有哪些|推荐|哪个|什么|怎么|比较|最低|最高/i.test(text)
-  if (hasQuote) return { phases: 3, total: 75, label: '创建报价约 60-90s' }
-  if (hasSearch && text.length > 6) return { phases: 2, total: 40, label: '数据查询约 20-60s' }
-  return { phases: 1, total: 10, label: '快速问答约 5-15s' }
-}
 
-const currentPhaseName = computed(() => {
-  if (currentPhase.value < 0) return ''
-  return phases[currentPhase.value] || phases[phases.length - 1]
-})
-
-const progressPercent = computed(() => {
-  if (!chatLoading.value) return 0
-  // Real SSE phases: 0=connect→10%, 1=analyze→30%, 2=query→60%, 3=reply→90%
-  const stepMap = [10, 30, 60, 90]
-  return stepMap[currentPhase.value] || 0
-})
-
-const displayedPhases = computed(() => {
-  const est = estimateTime(chatMessages.value[chatMessages.value.length - 1]?.content || '')
-  return phases.slice(0, est.phases + 1)
+const currentPhaseIcon = computed(() => {
+  if (currentPhase.value < 0) return 'bi-hourglass-split'
+  return phaseIcons[currentPhase.value] || 'bi-pencil'
 })
 
 // Selected products for comparison
@@ -128,9 +109,6 @@ function isCompared(product) {
 async function sendMessage(textOverride) {
   const text = (textOverride || chatInput.value).trim()
   if (!text || chatLoading.value) return
-
-  const est = estimateTime(text)
-  estLabel.value = est.label
 
   chatMessages.value.push({ role: 'user', content: text })
   chatInput.value = ''
@@ -460,31 +438,15 @@ onMounted(() => { fetchDashboard(); loadHistory() })
           </div>
         </div>
 
-        <!-- Loading: Real SSE Progress -->
+        <!-- Loading: compact inline status (icon+text in place, timer on right) -->
         <div v-if="chatLoading" class="chat-msg-ai">
-          <div class="chat-bubble bg-light" style="padding:.6rem .8rem;border-radius:12px;min-width:260px">
-            <!-- Progress bar -->
-            <div class="progress mb-2" style="height:4px">
-              <div class="progress-bar progress-bar-striped progress-bar-animated"
-                :style="{width: progressPercent + '%'}"
-                :class="progressPercent < 30 ? 'bg-info' : progressPercent < 60 ? 'bg-primary' : 'bg-success'"></div>
-            </div>
-
-            <!-- Phase list -->
-            <div style="font-size:.78rem">
-              <div v-for="(p, idx) in displayedPhases" :key="idx"
-                class="d-flex align-items-center gap-2 mb-1"
-                :style="{opacity: idx <= currentPhase ? 1 : 0.4}">
-                <span v-if="idx < currentPhase" class="text-success"><i class="bi bi-check-circle-fill"></i></span>
-                <span v-else-if="idx === currentPhase" class="spinner-grow spinner-grow-sm text-primary" style="width:10px;height:10px"></span>
-                <span v-else style="width:10px;height:10px;display:inline-block;border-radius:50%;border:1.5px solid var(--gray-400)"></span>
-                {{ p }}
+          <div class="chat-bubble bg-light" style="padding:.4rem .75rem;border-radius:12px;min-width:180px">
+            <div class="d-flex align-items-center justify-content-between" style="font-size:.8rem">
+              <div class="d-flex align-items-center gap-2">
+                <span class="spinner-grow spinner-grow-sm text-primary" style="width:10px;height:10px"></span>
+                <span style="color:var(--gray-700)">{{ phases[currentPhase] || '处理中' }}</span>
               </div>
-            </div>
-
-            <div class="mt-1 d-flex justify-content-between" style="font-size:.68rem;color:var(--gray-500)">
-              <span>预估 {{ estLabel }}</span>
-              <span>已用 {{ elapsedSeconds }}s</span>
+              <span style="font-size:.7rem;color:var(--gray-500)">⏱ {{ elapsedSeconds }}s</span>
             </div>
           </div>
         </div>
