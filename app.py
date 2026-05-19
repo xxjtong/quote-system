@@ -155,6 +155,44 @@ def update_settings():
     db.session.commit()
     return jsonify({'settings': get_all_settings()})
 
+
+# ─── AI Prompt 管理 ──────────────────────────────
+
+@app.route('/api/admin/prompt', methods=['GET'])
+@require_admin
+def get_ai_prompt():
+    """获取当前 AI 系统提示词（定制或默认）"""
+    s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
+    current = s.value if s and s.value else _GW_SYSTEM_PROMPT
+    return jsonify({
+        'prompt': current,
+        'is_custom': bool(s and s.value),
+        'default': _GW_SYSTEM_PROMPT,
+    })
+
+
+@app.route('/api/admin/prompt', methods=['PUT'])
+@require_admin
+def update_ai_prompt():
+    """更新 AI 系统提示词"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '数据为空'}), 400
+    prompt = data.get('prompt', '')
+    s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
+    if s:
+        s.value = prompt
+    else:
+        db.session.add(SystemSetting(key='ai_system_prompt', value=prompt))
+    db.session.commit()
+    return jsonify({'prompt': prompt, 'message': 'Prompt 已保存'})
+
+
+def _get_ai_system_prompt():
+    """获取 AI 系统提示词（优先使用定制版，否则用默认）"""
+    s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
+    return s.value if s and s.value else _GW_SYSTEM_PROMPT
+
 @app.route('/api/admin/fields', methods=['GET'])
 @require_admin
 def get_field_settings():
@@ -2469,7 +2507,7 @@ def ai_chat():
 
     if not AIChatSession.query.filter_by(user_id=user.id).first():
         body['instructions'] = (
-            _GW_SYSTEM_PROMPT + '\n'
+            _get_ai_system_prompt() + '\n'
             f'当前用户：{user.username}（ID={user.id}）。'
             f'创建/查询报价单时，先调用 GET /api/ai/token 获取当前用户的 JWT token，'
             f'然后用这个 token 操作 API（POST /api/quotes 创建、GET /export-excel 导出等）。'

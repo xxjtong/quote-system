@@ -69,7 +69,6 @@ async function deleteUser(user) {
 }
 
 // ─── Field visibility ───
-// fieldNames: { 前端key: 后端field_name }
 const fieldNames = {
   show_cost_price: 'cost_price',
   show_supplier: 'supplier',
@@ -87,11 +86,8 @@ async function fetchFields() {
   try {
     const data = await api('/api/admin/fields')
     if (!data.error) {
-      // data.fields 是数组 [{field_name, user_visible}, ...]
-      // 转为 {前端key: boolean} 格式
       const obj = {}
       for (const f of (data.fields || [])) {
-        // 反向查找前端 key
         for (const [frontKey, backendKey] of Object.entries(fieldNames)) {
           if (backendKey === f.field_name) {
             obj[frontKey] = f.user_visible
@@ -108,7 +104,6 @@ async function fetchFields() {
 
 async function toggleField(frontKey) {
   fields.value[frontKey] = !fields.value[frontKey]
-  // 构建后端期望的格式：{ fields: { backend_name: bool } }
   const payload = {}
   for (const [fk, bk] of Object.entries(fieldNames)) {
     payload[bk] = fields.value[fk]
@@ -134,10 +129,53 @@ async function fetchSettings() {
   } catch (e) { /* ignore */ }
 }
 
+// ─── AI Prompt ───
+const aiPrompt = ref('')
+const aiPromptDefault = ref('')
+const aiPromptCustom = ref(false)
+const aiPromptLoading = ref(true)
+const aiPromptSaving = ref(false)
+
+async function fetchAiPrompt() {
+  aiPromptLoading.value = true
+  try {
+    const data = await api('/api/admin/prompt')
+    aiPrompt.value = data.prompt || ''
+    aiPromptDefault.value = data.default || ''
+    aiPromptCustom.value = data.is_custom
+  } catch (e) {
+    toast('加载 Prompt 失败', 'danger')
+  } finally {
+    aiPromptLoading.value = false
+  }
+}
+
+async function saveAiPrompt() {
+  aiPromptSaving.value = true
+  try {
+    const r = await api('/api/admin/prompt', 'PUT', { prompt: aiPrompt.value })
+    if (r.error) { toast(r.error, 'danger'); return }
+    aiPromptCustom.value = true
+    toast('Prompt 已保存')
+  } catch (e) {
+    toast('保存失败', 'danger')
+  } finally {
+    aiPromptSaving.value = false
+  }
+}
+
+async function resetAiPrompt() {
+  if (!confirm('确定恢复为默认 Prompt？当前定制内容将丢失。')) return
+  aiPrompt.value = aiPromptDefault.value
+  aiPromptCustom.value = false
+  await saveAiPrompt()
+}
+
 onMounted(() => {
   fetchUsers()
   fetchFields()
   fetchSettings()
+  fetchAiPrompt()
 })
 </script>
 
@@ -145,6 +183,39 @@ onMounted(() => {
   <div>
     <div class="page-header">
       <h5><i class="bi bi-gear"></i>系统管理</h5>
+    </div>
+
+    <!-- AI Prompt -->
+    <div class="card-modern mb-3">
+      <div class="card-title-modern d-flex align-items-center justify-content-between">
+        <div><i class="bi bi-robot text-primary"></i>AI 系统提示词</div>
+        <div class="d-flex gap-1">
+          <button v-if="aiPromptCustom" class="btn btn-sm btn-outline-secondary" @click="resetAiPrompt" :disabled="aiPromptSaving">
+            <i class="bi bi-arrow-counterclockwise"></i> 恢复默认
+          </button>
+        </div>
+      </div>
+      <div v-if="aiPromptLoading" class="text-center py-3">
+        <div class="spinner-border spinner-border-sm text-primary"></div>
+      </div>
+      <div v-else>
+        <div class="mb-2 d-flex align-items-center gap-2">
+          <span class="small text-muted">状态：</span>
+          <span v-if="aiPromptCustom" class="badge bg-primary">自定义</span>
+          <span v-else class="badge bg-light text-dark">使用默认</span>
+        </div>
+        <textarea v-model="aiPrompt" class="form-control"
+          style="font-family:monospace;font-size:.78rem;min-height:200px;line-height:1.4"
+          placeholder="输入 AI 系统提示词..."></textarea>
+        <div class="mt-2 d-flex justify-content-between align-items-center">
+          <small class="text-muted">{{ aiPrompt.length }} 字符</small>
+          <button class="btn btn-primary btn-sm" @click="saveAiPrompt" :disabled="aiPromptSaving">
+            <i v-if="aiPromptSaving" class="bi bi-hourglass-split me-1"></i>
+            <i v-else class="bi bi-check-lg me-1"></i>
+            {{ aiPromptSaving ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Registration -->

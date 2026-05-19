@@ -32,17 +32,16 @@ watch(() => route.name, () => { closeSidebar() })
 
 // ─── Tabs ───
 const tabs = [
-  { id: 'dashboard', label: '概览', icon: 'bi bi-speedometer2' },
-  { id: 'products', label: '产品管理', icon: 'bi bi-box-seam' },
-  { id: 'quotes', label: '报价单', icon: 'bi bi-file-earmark-text' },
-  { id: 'newquote', label: '新建报价', icon: 'bi bi-plus-circle', badge: '+' },
-  { id: 'import', label: '导入产品', icon: 'bi bi-upload', adminOnly: true },
+  { id: 'dashboard', label: '首页', icon: 'bi bi-speedometer2' },
+  { id: 'products', label: '产品', icon: 'bi bi-box-seam' },
+  { id: 'quotes', label: '报价', icon: 'bi bi-file-earmark-text', badge: '+' },
+  { id: 'import', label: '导入', icon: 'bi bi-upload', adminOnly: true },
   { id: 'admin', label: '管理', icon: 'bi bi-gear', adminOnly: true },
 ]
 
 const titles = {
-  dashboard: '概览', products: '产品管理', quotes: '报价单',
-  newquote: '新建报价单', import: '导入产品', admin: '管理',
+  dashboard: '首页', products: '产品', quotes: '报价',
+  newquote: '新建报价单', import: '导入', admin: '管理',
   login: '登录'
 }
 
@@ -142,7 +141,7 @@ onMounted(async () => {
            :style="tab.adminOnly && !isAdmin() ? {display:'none'} : {}"
            @click="router.push({name: tab.id})">
           <i :class="tab.icon"></i> {{ tab.label }}
-          <span v-if="tab.badge" class="badge">{{ tab.badge }}</span>
+          <span v-if="tab.badge" class="badge" @click.stop="router.push({name:'newquote'})">{{ tab.badge }}</span>
         </a>
         <hr style="border-color: rgba(255,255,255,.08); margin: .5rem 0;">
         <a class="nav-link" style="opacity:.6; font-size:.8rem; cursor:default">
