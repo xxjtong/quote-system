@@ -1,5 +1,15 @@
 # 更新日志
 
+## v1.7.3 (2026-05-19)
+### 🎨 7 项设计与架构优化
+- **AI 聊天高度**：400px → 60vh，自适应窗口
+- **表格斑马纹**：`.table-modern > tbody > tr:nth-child(even)` 交替背景色
+- **移动端侧边栏**：已有 hamburger toggle + overlay + 动画
+- **进度条说明**：当前前端模拟阶段进度，Gateway 需 SSE 支持才能实现真实进度
+- **邮件模态框**：`prompt()` → 专用 Modal（邮箱输入 + Enter 发送）
+- **下载错误反馈**：`<a>` 标签盲点 → `fetch` + blob + toast 错误提示
+- **auth 模块提取**：auth.py (Blueprint)，app.py 2898 → 2545 行
+
 ## v1.7.2 (2026-05-19)
 ### 🔧 优化与架构改进
 - **多 worker 安全修复**：`_initialized_convos` 内存 set → `AIChatSession` 表，Gunicorn 多进程下不会重复注入 AI instructions
