@@ -174,7 +174,7 @@ def get_ai_prompt():
 @app.route('/api/admin/prompt', methods=['PUT'])
 @require_admin
 def update_ai_prompt():
-    """更新 AI 系统提示词"""
+    """更新 AI 系统提示词 — 同时清除所有会话缓存，下次对话立即生效"""
     data = request.get_json()
     if not data:
         return jsonify({'error': '数据为空'}), 400
@@ -184,8 +184,10 @@ def update_ai_prompt():
         s.value = prompt
     else:
         db.session.add(SystemSetting(key='ai_system_prompt', value=prompt))
+    # 清除所有用户的 AIChatSession，强制下次对话注入新 prompt
+    AIChatSession.query.delete()
     db.session.commit()
-    return jsonify({'prompt': prompt, 'message': 'Prompt 已保存'})
+    return jsonify({'prompt': prompt, 'message': 'Prompt 已保存，下次对话生效', 'sessions_cleared': True})
 
 
 def _get_ai_system_prompt():
