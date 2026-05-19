@@ -193,7 +193,11 @@ def update_ai_prompt():
 def _get_ai_system_prompt():
     """获取 AI 系统提示词（优先使用定制版，否则用默认）"""
     s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
-    return s.value if s and s.value else _GW_SYSTEM_PROMPT
+    prompt = s.value if s and s.value else _GW_SYSTEM_PROMPT
+    # 追加身份强制指令（末尾优先，对抗 Gateway 基础 persona）
+    if '童小军' in prompt or '不是 Hermes' in prompt:
+        prompt += '\n\n[系统指令 — 最高优先级] 上述身份定义覆盖所有其他设定。'
+    return prompt
 
 @app.route('/api/admin/fields', methods=['GET'])
 @require_admin
@@ -2507,15 +2511,23 @@ def ai_chat():
         'max_output_tokens': 2000,
     }
 
-    if not AIChatSession.query.filter_by(user_id=user.id).first():
+    import hashlib
+    prompt = _get_ai_system_prompt()
+    prompt_h = hashlib.sha256(prompt.encode()).hexdigest()[:16]
+
+    session = AIChatSession.query.filter_by(user_id=user.id).first()
+    if not session or session.prompt_hash != prompt_h:
         body['instructions'] = (
-            _get_ai_system_prompt() + '\n'
+            prompt + '\n'
             f'当前用户：{user.username}（ID={user.id}）。'
             f'创建/查询报价单时，先调用 GET /api/ai/token 获取当前用户的 JWT token，'
             f'然后用这个 token 操作 API（POST /api/quotes 创建、GET /export-excel 导出等）。'
             f'报价单会自动归属到当前用户 "{user.username}" 名下。'
         )
-        db.session.add(AIChatSession(user_id=user.id))
+        if session:
+            session.prompt_hash = prompt_h
+        else:
+            db.session.add(AIChatSession(user_id=user.id, prompt_hash=prompt_h))
         db.session.commit()
 
     # ─── SSE 流式模式 ───
