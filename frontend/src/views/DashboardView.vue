@@ -55,6 +55,10 @@ function loadHistory() {
 
 function saveHistory() {
   if (chatMessages.value.length === 0) return
+  // Save full messages to localStorage keyed by session
+  try {
+    localStorage.setItem('ai_chat_msg_' + currentSessionId.value, JSON.stringify(chatMessages.value))
+  } catch {}
   const existing = chatHistory.value.find(h => h.id === currentSessionId.value)
   const preview = chatMessages.value[0]?.content?.slice(0, 30) || '新对话'
   const entry = { id: currentSessionId.value, preview, count: chatMessages.value.length, time: Date.now() }
@@ -67,18 +71,26 @@ function saveHistory() {
   try { localStorage.setItem('ai_chat_history', JSON.stringify(chatHistory.value)) } catch {}
 }
 
-const currentSessionId = ref(Date.now().toString(36))
-
-function newChat() {
-  chatMessages.value = []
-  currentSessionId.value = Date.now().toString(36)
+function loadChat(id) {
+  // Save current session before switching
+  saveHistory()
+  // Load messages from localStorage
+  try {
+    const stored = localStorage.getItem('ai_chat_msg_' + id)
+    chatMessages.value = stored ? JSON.parse(stored) : []
+  } catch {
+    chatMessages.value = []
+  }
+  currentSessionId.value = id
   historyOpen.value = false
 }
 
-function loadChat(id) {
-  // reloads start fresh — just set session id and clear
+const currentSessionId = ref(Date.now().toString(36))
+
+function newChat() {
+  saveHistory()
   chatMessages.value = []
-  currentSessionId.value = id
+  currentSessionId.value = Date.now().toString(36)
   historyOpen.value = false
 }
 
@@ -419,14 +431,22 @@ onMounted(() => { fetchDashboard(); loadHistory() })
               </button>
             </div>
 
-            <!-- Message Footer: time + actions -->
+            <!-- Message Footer: time/loading + actions -->
             <div v-if="msg.role === 'assistant'" class="d-flex align-items-center justify-content-between mt-2 pt-1"
               style="border-top:1px solid var(--gray-200)">
               <div style="font-size:.7rem;color:var(--gray-500)">
-                <span v-if="msg.elapsed">⏱ {{ msg.elapsed }}s</span>
-                <span v-if="msg.timings"> · {{ formatTimings(msg.timings) }}</span>
+                <!-- Loading status during streaming -->
+                <template v-if="chatLoading && i === chatMessages.length - 1">
+                  <span class="spinner-grow spinner-grow-sm text-primary" style="width:10px;height:10px;margin-right:4px"></span>
+                  {{ phases[currentPhase] || '处理中' }}
+                  <span class="ms-2">⏱ {{ elapsedSeconds }}s</span>
+                </template>
+                <template v-else>
+                  <span v-if="msg.elapsed">⏱ {{ msg.elapsed }}s</span>
+                  <span v-if="msg.timings"> · {{ formatTimings(msg.timings) }}</span>
+                </template>
               </div>
-              <div class="d-flex gap-1">
+              <div class="d-flex gap-1" v-if="!chatLoading || i !== chatMessages.length - 1">
                 <button class="msg-action-btn" @click="copyMessage(msg.content)" title="复制"><i class="bi bi-clipboard"></i></button>
                 <button class="msg-action-btn" @click="regenerateLast()" title="重新生成"><i class="bi bi-arrow-repeat"></i></button>
                 <button class="msg-action-btn" @click="rateMessage(i, 'up')"
@@ -434,19 +454,6 @@ onMounted(() => { fetchDashboard(); loadHistory() })
                 <button class="msg-action-btn" @click="rateMessage(i, 'down')"
                   :class="{ 'text-danger': msg.rating === 'down' }" title="没用"><i class="bi bi-hand-thumbs-down"></i></button>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Loading: compact inline status (icon+text in place, timer on right) -->
-        <div v-if="chatLoading" class="chat-msg-ai">
-          <div class="chat-bubble bg-light" style="padding:.4rem .75rem;border-radius:12px;min-width:180px">
-            <div class="d-flex align-items-center justify-content-between" style="font-size:.8rem">
-              <div class="d-flex align-items-center gap-2">
-                <span class="spinner-grow spinner-grow-sm text-primary" style="width:10px;height:10px"></span>
-                <span style="color:var(--gray-700)">{{ phases[currentPhase] || '处理中' }}</span>
-              </div>
-              <span style="font-size:.7rem;color:var(--gray-500)">⏱ {{ elapsedSeconds }}s</span>
             </div>
           </div>
         </div>
