@@ -2642,44 +2642,144 @@ def number_to_cn(num):
     return result + '圆整'
 
 
-# ─── AI Chat Proxy ──────────────────────────────────────────
+# ─── AI Chat (直调 DeepSeek + 数据库产品搜索) ──────────────
 
-HERMES_API = os.environ.get('HERMES_API_URL', 'http://127.0.0.1:8642/v1/chat/completions')
+def _get_deepseek_key():
+    """从 Hermes .env 读取 DeepSeek API key。"""
+    # 优先环境变量，但必须是有效的 sk- 开头
+    key = os.environ.get('DEEPSEEK_API_KEY', '')
+    if key and key.startswith('sk-') and len(key) > 20:
+        return key
+    # 否则从文件读
+    env_path = os.path.expanduser('~/.hermes/.env')
+    try:
+        with open(env_path) as f:
+            for line in f:
+                if line.startswith('DEEPSEEK_API_KEY='):
+                    return line.strip().split('=', 1)[1]
+    except Exception:
+        pass
+    return ''
 
-AI_SYSTEM_PROMPT = (
-    '你是报价系统的 AI 产品助手。你能帮用户：'
-    '1. 根据需求推荐合适的产品（如防水、门禁、传感器等）'
-    '2. 解答产品参数、功能、适用场景的问题'
-    '3. 给出报价建议和产品搭配方案'
-    '回答时简洁专业，直接给推荐，列出产品名称和关键参数。'
-)
+DEEPSEEK_API_KEY = _get_deepseek_key()
+DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1'
+DEEPSEEK_MODEL = 'deepseek-chat'  # 快速模型，适合产品问答
+
+
+def _extract_search_terms(query):
+    """从用户查询中提取搜索关键词（中文 n-gram）。"""
+    import re
+    # 去标点，只保留中文
+    text = re.sub(r'[^\u4e00-\u9fff]', '', query)
+    if not text:
+        return [query]
+    terms = set()
+    # 2-4 字 n-gram
+    for n in (2, 3, 4):
+        for i in range(len(text) - n + 1):
+            terms.add(text[i:i+n])
+    # 加原 query 单字（避免太宽泛，只取前 20 个）
+    return list(terms)[:30]
+
+
+def _search_products_for_chat(query, limit=10):
+    """从数据库搜索与用户问题相关的产品（n-gram 匹配）。"""
+    terms = _extract_search_terms(query)
+    if not terms:
+        return []
+
+    # 对每个 term 构造 LIKE 条件
+    conditions = []
+    for t in terms:
+        like = f'%{t}%'
+        conditions.append(db.or_(
+            Product.name.ilike(like),
+            Product.category.ilike(like),
+            Product.function_desc.ilike(like),
+            Product.spec.ilike(like),
+            Product.supplier.ilike(like),
+        ))
+    products = Product.query.filter(
+        db.or_(*conditions),
+        Product.is_active == True
+    ).order_by(Product.price.asc()).limit(limit).all()
+    return products
+
+
+def _build_product_context(products):
+    """将产品列表格式化为 AI prompt 上下文。"""
+    if not products:
+        return '（当前产品库未找到精确匹配的产品，请根据你的知识推荐通用方案）'
+
+    lines = []
+    for p in products:
+        parts = [f"- {p.name}  ¥{p.price:.2f}"]
+        if p.sku:
+            parts.append(f"  SKU: {p.sku}")
+        if p.category:
+            parts.append(f"  分类: {p.category}")
+        if p.spec:
+            parts.append(f"  规格: {p.spec}")
+        if p.function_desc:
+            parts.append(f"  功能: {p.function_desc}")
+        lines.append('\n'.join(parts))
+
+    return '\n'.join(lines)
+
 
 @app.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
-    """转发用户消息到 Hermes AI，返回智能回复"""
+    """AI 产品助手 — 搜索数据库产品 + 直调 DeepSeek。"""
     data = request.get_json(silent=True) or {}
     user_messages = data.get('messages', [])
 
     if not user_messages:
         return jsonify({'error': '请输入问题'}), 400
 
-    # 限制历史消息数量（防止 token 超限）
     recent = user_messages[-10:]
 
-    payload = {
-        'model': 'hermes-agent',
-        'messages': [
-            {'role': 'system', 'content': AI_SYSTEM_PROMPT},
-            *recent
-        ],
-        'max_tokens': 800,
-        'temperature': 0.7,
-    }
+    # 取最后一条用户消息用于产品搜索
+    latest_query = ''
+    for msg in reversed(recent):
+        if msg.get('role') == 'user':
+            latest_query = msg.get('content', '')
+            break
+
+    # 搜索匹配产品
+    products = _search_products_for_chat(latest_query) if latest_query else []
+    product_context = _build_product_context(products)
+
+    # 构建 system prompt
+    system_prompt = (
+        f'你是报价系统的 AI 产品助手。当前数据库中有以下相关产品：\n\n'
+        f'{product_context}\n\n'
+        f'规则：\n'
+        f'1. 优先推荐上面列出的产品，引用准确的名称和价格\n'
+        f'2. 如果产品不完全匹配，可以如实说，给出通用建议\n'
+        f'3. 回答简洁专业，列出产品名称、价格和关键参数\n'
+        f'4. 如果有多个适用产品，按价格从低到高排列'
+    )
+
+    if not DEEPSEEK_API_KEY:
+        return jsonify({'error': 'AI 服务未配置'}), 503
 
     try:
         import requests as http_req
-        resp = http_req.post(HERMES_API, json=payload, timeout=120)
+        resp = http_req.post(
+            f'{DEEPSEEK_BASE_URL}/chat/completions',
+            json={
+                'model': DEEPSEEK_MODEL,
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    *recent
+                ],
+                'max_tokens': 600,
+                'temperature': 0.7,
+            },
+            headers={'Authorization': f'Bearer {DEEPSEEK_API_KEY}'},
+            timeout=30
+        )
         if resp.status_code != 200:
             return jsonify({'error': f'AI 服务异常 ({resp.status_code})'}), 502
 
@@ -2688,7 +2788,15 @@ def ai_chat():
         if not reply:
             reply = '抱歉，AI 暂时无法回答，请稍后再试。'
 
-        return jsonify({'reply': reply, 'model': body.get('model', 'hermes-agent')})
+        # 显示搜索结果
+        search_info = ''
+        if products:
+            names = [p.name for p in products[:5]]
+            search_info = f'🔍 从产品库匹配到 {len(products)} 个产品：{", ".join(names)}\n\n'
+        else:
+            search_info = '🔍 产品库未找到精确匹配\n\n'
+
+        return jsonify({'reply': search_info + reply, 'model': DEEPSEEK_MODEL, 'products_found': len(products)})
     except Exception as e:
         return jsonify({'error': f'AI 服务连接失败: {str(e)}'}), 503
 
