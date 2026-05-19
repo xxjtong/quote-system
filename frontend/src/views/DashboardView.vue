@@ -43,9 +43,22 @@ const phases = ['连接', '分析问题', '查询数据', '生成回复']
 const phaseIcons = ['bi-plug', 'bi-search', 'bi-database', 'bi-pencil']
 let timerInterval = null
 
-// Chat history (localStorage)
+const historyBtn = ref(null)
 const historyOpen = ref(false)
 const chatHistory = ref([])
+const panelStyle = ref({ top: '0px', right: '0px' })
+
+function openHistory() {
+  if (historyOpen.value) { historyOpen.value = false; return }
+  if (historyBtn.value) {
+    const rect = historyBtn.value.getBoundingClientRect()
+    panelStyle.value = {
+      top: (rect.bottom + 4) + 'px',
+      right: (window.innerWidth - rect.right) + 'px',
+    }
+  }
+  historyOpen.value = true
+}
 
 function loadHistory() {
   try {
@@ -347,14 +360,14 @@ onMounted(() => { fetchDashboard(); loadHistory() })
         </div>
         <div class="d-flex gap-1">
           <button class="btn btn-sm btn-outline-secondary" @click="newChat" title="新对话"><i class="bi bi-plus-lg"></i></button>
-          <button class="btn btn-sm btn-outline-secondary" @click="historyOpen = !historyOpen" :class="{ active: historyOpen }" title="历史记录"><i class="bi bi-list"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" @click="openHistory" ref="historyBtn" :class="{ active: historyOpen }" title="历史记录"><i class="bi bi-list"></i></button>
         </div>
       </div>
 
       <!-- Chat History Sidebar (teleported to avoid clipping) -->
       <Teleport to="body">
         <div v-if="historyOpen" class="history-backdrop" @click="historyOpen = false"></div>
-        <div v-if="historyOpen" class="chat-history-panel">
+        <div v-if="historyOpen" class="chat-history-panel" :style="panelStyle">
           <div class="d-flex justify-content-between align-items-center mb-2">
             <span class="small fw-bold text-muted">对话历史</span>
             <button class="btn-close btn-close-sm" @click="historyOpen = false" style="font-size:.5rem"></button>
@@ -550,8 +563,6 @@ onMounted(() => { fetchDashboard(); loadHistory() })
 
 .chat-history-panel {
   position: fixed;
-  top: 56px;
-  right: 24px;
   width: 260px;
   max-height: 400px;
   overflow-y: auto;
