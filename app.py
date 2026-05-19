@@ -2642,6 +2642,57 @@ def number_to_cn(num):
     return result + '圆整'
 
 
+# ─── AI Chat Proxy ──────────────────────────────────────────
+
+HERMES_API = os.environ.get('HERMES_API_URL', 'http://127.0.0.1:8642/v1/chat/completions')
+
+AI_SYSTEM_PROMPT = (
+    '你是报价系统的 AI 产品助手。你能帮用户：'
+    '1. 根据需求推荐合适的产品（如防水、门禁、传感器等）'
+    '2. 解答产品参数、功能、适用场景的问题'
+    '3. 给出报价建议和产品搭配方案'
+    '回答时简洁专业，直接给推荐，列出产品名称和关键参数。'
+)
+
+@app.route('/api/chat', methods=['POST'])
+@require_auth
+def ai_chat():
+    """转发用户消息到 Hermes AI，返回智能回复"""
+    data = request.get_json(silent=True) or {}
+    user_messages = data.get('messages', [])
+
+    if not user_messages:
+        return jsonify({'error': '请输入问题'}), 400
+
+    # 限制历史消息数量（防止 token 超限）
+    recent = user_messages[-10:]
+
+    payload = {
+        'model': 'hermes-agent',
+        'messages': [
+            {'role': 'system', 'content': AI_SYSTEM_PROMPT},
+            *recent
+        ],
+        'max_tokens': 800,
+        'temperature': 0.7,
+    }
+
+    try:
+        import requests as http_req
+        resp = http_req.post(HERMES_API, json=payload, timeout=90)
+        if resp.status_code != 200:
+            return jsonify({'error': f'AI 服务异常 ({resp.status_code})'}), 502
+
+        body = resp.json()
+        reply = body.get('choices', [{}])[0].get('message', {}).get('content', '')
+        if not reply:
+            reply = '抱歉，AI 暂时无法回答，请稍后再试。'
+
+        return jsonify({'reply': reply, 'model': body.get('model', 'hermes-agent')})
+    except Exception as e:
+        return jsonify({'error': f'AI 服务连接失败: {str(e)}'}), 503
+
+
 # ─── Frontend ────────────────────────────────────────────────
 
 # Vue production build static files
