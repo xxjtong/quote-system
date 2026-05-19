@@ -2595,12 +2595,7 @@ def _ai_chat_sse(body, t0):
                 event_type = chunk.get('type', '')
                 if event_type == 'response.output_text.delta':
                     delta_text = chunk.get('delta', '')
-                elif event_type == 'response.output_item.done':
-                    item = chunk.get('item', {})
-                    if item.get('type') == 'message':
-                        for c in item.get('content', []):
-                            delta_text = c.get('text', '')
-                            break
+                # Skip response.output_item.done — carries full text, duplicates deltas
 
                 if delta_text:
                     accumulated += delta_text
