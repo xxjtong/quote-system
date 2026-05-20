@@ -846,6 +846,7 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
     失败返回 None。
     """
     api_key = os.environ.get('VOLCENGINE_API_KEY', '')
+    _debug_log(f'[doubao_vision] Called, key_present={bool(api_key)}, key_len={len(api_key)}')
     if not api_key:
         return None
 
@@ -891,15 +892,13 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
             timeout=60,
         )
         if r.status_code != 200:
-            import sys
-            print(f'[doubao_vision] API returned {r.status_code}: {r.text[:200]}', file=sys.stderr)
+            _debug_log(f'[doubao_vision] API returned {r.status_code}: {r.text[:200]}')
             return None
 
         result = r.json()
         raw_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
         if not raw_text:
-            import sys
-            print(f'[doubao_vision] Empty response content. Full: {str(result)[:300]}', file=sys.stderr)
+            _debug_log(f'[doubao_vision] Empty response content. Full: {str(result)[:300]}')
             return None
 
         # 豆包直出 JSON，直接解析
@@ -946,13 +945,21 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
             }
             if product['name']:
                 return product
-        import sys
-        print(f'[doubao_vision] Parsed OK but name empty. raw_text[:200]: {raw_text[:200]}', file=sys.stderr)
+        _debug_log(f'[doubao_vision] Parsed but name empty. raw_text[:200]: {raw_text[:200]}')
         return None
     except Exception as e:
-        import sys
-        print(f'[doubao_vision] Error: {e}', file=sys.stderr)
+        _debug_log(f'[doubao_vision] Exception: {e}')
         return None
+
+
+def _debug_log(msg):
+    """写调试日志到 gunicorn error log 文件"""
+    try:
+        with open('/opt/quote-system/gunicorn-error.log', 'a') as f:
+            from datetime import datetime
+            f.write(f'[{datetime.now().isoformat()}] {msg}\n')
+    except Exception:
+        pass
 
 
 def _safe_number(val):
@@ -1032,11 +1039,9 @@ def deepseek_parse_product(text):
                 'category': str(parsed.get('category', '')).strip()[:50],
                 'remark': str(parsed.get('remark', '')).strip()[:500],
             }
-        import sys
-        print(f'[deepseek_parse] Failed. reply[:200]: {reply[:200]}', file=sys.stderr)
+        _debug_log(f'[deepseek_parse] Failed. reply[:200]: {reply[:200]}')
     except Exception as e:
-        import sys
-        print(f'[deepseek_parse] Error: {e}', file=sys.stderr)
+        _debug_log(f'[deepseek_parse] Exception: {e}')
         pass
     return None
 
