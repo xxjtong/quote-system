@@ -35,7 +35,7 @@ const tabs = [
   { id: 'dashboard', label: '首页', icon: 'bi bi-speedometer2' },
   { id: 'products', label: '产品管理', icon: 'bi bi-box-seam' },
   { id: 'quotes', label: '报价管理', icon: 'bi bi-file-earmark-text', badge: '+' },
-  { id: 'import', label: '导入导出', icon: 'bi bi-upload', adminOnly: true },
+  { id: 'import', label: '导入导出', icon: 'bi bi-upload' },
   { id: 'admin', label: '管理', icon: 'bi bi-gear', adminOnly: true },
 ]
 
