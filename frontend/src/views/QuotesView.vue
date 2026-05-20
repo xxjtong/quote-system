@@ -238,6 +238,13 @@ function closePreview() {
               <i class="bi bi-x-lg"></i>
             </button>
           </div>
+          <span v-if="!loading" class="text-muted" style="font-size:.82rem">共 {{ totalQuotes }} 条</span>
+          <select class="per-page-select" v-model.number="perPage" @change="currentPage = 1; fetchQuotes()">
+            <option :value="10">10条/页</option>
+            <option :value="20">20条/页</option>
+            <option :value="50">50条/页</option>
+            <option :value="100">100条/页</option>
+          </select>
         </div>
         <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 bg-warning bg-opacity-10 rounded">
           <span class="small fw-medium">已选 {{ selectedIds.size }} 条</span>
@@ -320,28 +327,25 @@ function closePreview() {
     </div>
 
     <!-- Pagination -->
-    <div v-if="totalPages > 1" class="d-flex justify-content-between align-items-center mt-3">
-      <small class="text-muted">共 {{ totalQuotes }} 条，第 {{ currentPage }}/{{ totalPages }} 页</small>
-      <nav>
-        <ul class="pagination pagination-sm mb-0">
-          <li class="page-item" :class="{ disabled: currentPage === 1 }">
-            <a class="page-link" href="#" @click.prevent="goPage(1)"><i class="bi bi-chevron-double-left"></i></a>
-          </li>
-          <li class="page-item" :class="{ disabled: currentPage === 1 }">
-            <a class="page-link" href="#" @click.prevent="goPage(currentPage - 1)"><i class="bi bi-chevron-left"></i></a>
-          </li>
-          <li v-for="p in pageNumbers" :key="p" class="page-item" :class="{ active: p === currentPage }">
-            <a class="page-link" href="#" @click.prevent="goPage(p)">{{ p }}</a>
-          </li>
-          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
-            <a class="page-link" href="#" @click.prevent="goPage(currentPage + 1)"><i class="bi bi-chevron-right"></i></a>
-          </li>
-          <li class="page-item" :class="{ disabled: currentPage === totalPages }">
-            <a class="page-link" href="#" @click.prevent="goPage(totalPages)"><i class="bi bi-chevron-double-right"></i></a>
-          </li>
-        </ul>
-      </nav>
-    </div>
+    <nav v-if="totalPages > 1" class="mt-3">
+      <ul class="pagination pagination-modern justify-content-center mb-0">
+        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+          <a class="page-link" @click="goPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+          <a class="page-link" @click="goPage(currentPage - 1)">上一页</a>
+        </li>
+        <li v-for="p in pageNumbers" :key="p" class="page-item" :class="{ active: p === currentPage }">
+          <a class="page-link" @click="goPage(p)">{{ p }}</a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+          <a class="page-link" @click="goPage(currentPage + 1)">下一页</a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+          <a class="page-link" @click="goPage(totalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
+        </li>
+      </ul>
+    </nav>
 
     <!-- Preview Modal (shared component) -->
     <QuotePreviewModal v-model:show="showPreview" :quote-id="previewQuoteId" :quote-title="previewTitle" />

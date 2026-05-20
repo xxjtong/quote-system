@@ -23,20 +23,55 @@ async function toggleRegistration() {
 // ─── Users ───
 const users = ref([])
 const userSearch = ref('')
-const filteredUsers = computed(() => {
-  if (!userSearch.value) return users.value
-  const q = userSearch.value.toLowerCase()
-  return users.value.filter(u =>
-    u.username.toLowerCase().includes(q) ||
-    (u.email || '').toLowerCase().includes(q)
-  )
-})
+const userCurrentPage = ref(1)
+const userPerPage = ref(20)
+const userTotal = ref(0)
+const userTotalPages = computed(() => Math.max(1, Math.ceil(userTotal.value / userPerPage.value)))
 const loadingUsers = ref(true)
+
+// ─── User pagination pages ───
+const userPageNumbers = computed(() => {
+  const total = userTotalPages.value
+  if (total <= 1) return []
+  const half = 3
+  let start = Math.max(1, userCurrentPage.value - half)
+  let end = Math.min(total, userCurrentPage.value + half)
+  if (start === 1) end = Math.min(total, start + 6)
+  else if (end === total) start = Math.max(1, end - 6)
+  const pages = []
+  for (let p = start; p <= end; p++) pages.push(p)
+  return pages
+})
+
+function userGoPage(p) {
+  if (p < 1 || p > userTotalPages.value) return
+  userCurrentPage.value = p
+  fetchUsers()
+}
+
+// Debounced user search
+let userSearchTimer = null
+function onUserSearch(val) {
+  clearTimeout(userSearchTimer)
+  userSearchTimer = setTimeout(() => {
+    userSearch.value = val
+    userCurrentPage.value = 1
+    fetchUsers()
+  }, 400)
+}
 
 async function fetchUsers() {
   try {
-    const data = await api('/api/admin/users')
-    if (!data.error) users.value = data.users || []
+    const params = new URLSearchParams({
+      page: userCurrentPage.value,
+      per_page: userPerPage.value,
+    })
+    if (userSearch.value) params.set('search', userSearch.value)
+    const data = await api(`/api/admin/users?${params}`)
+    if (!data.error) {
+      users.value = data.users || []
+      userTotal.value = data.total || 0
+    }
   } catch (e) {
     toast('加载用户失败', 'danger')
   } finally {
@@ -243,7 +278,18 @@ onMounted(() => {
         <div class="spinner-border spinner-border-sm text-primary"></div>
       </div>
       <div v-else class="table-responsive">
-        <div class="mb-2"><input v-model="userSearch" class="form-control form-control-sm" placeholder="搜索用户名或邮箱..." style="max-width:260px"></div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="d-flex align-items-center gap-2">
+            <input :value="userSearch" @input="onUserSearch($event.target.value)" class="form-control form-control-sm" placeholder="搜索用户名或邮箱..." style="max-width:260px">
+            <span v-if="!loadingUsers" class="text-muted flex-shrink-0" style="font-size:.82rem;white-space:nowrap">共 {{ userTotal }} 个用户</span>
+          </div>
+          <select class="per-page-select" v-model.number="userPerPage" @change="userCurrentPage = 1; fetchUsers()">
+            <option :value="10">10条/页</option>
+            <option :value="20">20条/页</option>
+            <option :value="50">50条/页</option>
+            <option :value="100">100条/页</option>
+          </select>
+        </div>
         <table class="table table-modern">
           <thead>
             <tr>
@@ -251,11 +297,12 @@ onMounted(() => {
               <th>邮箱</th>
               <th>角色</th>
               <th>创建时间</th>
+              <th>上次登录</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in filteredUsers" :key="u.id">
+            <tr v-for="u in users" :key="u.id">
               <td class="fw-medium">{{ u.username }}</td>
               <td class="text-muted small">{{ u.email || '—' }}</td>
               <td>
@@ -264,6 +311,7 @@ onMounted(() => {
                 </span>
               </td>
               <td class="text-muted small">{{ u.created_at || '—' }}</td>
+              <td class="text-muted small">{{ u.last_login || '从未登录' }}</td>
               <td>
                 <div class="d-flex gap-1">
                   <button class="btn btn-sm btn-outline-warning btn-sm-icon" @click="toggleUserRole(u)"
@@ -281,6 +329,26 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+        <!-- User pagination -->
+        <nav v-if="userTotalPages > 1" class="mt-3">
+          <ul class="pagination pagination-modern justify-content-center mb-0">
+            <li class="page-item" :class="{ disabled: userCurrentPage <= 1 }">
+              <a class="page-link" @click="userGoPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
+            </li>
+            <li class="page-item" :class="{ disabled: userCurrentPage <= 1 }">
+              <a class="page-link" @click="userGoPage(userCurrentPage - 1)">上一页</a>
+            </li>
+            <li v-for="p in userPageNumbers" :key="p" class="page-item" :class="{ active: p === userCurrentPage }">
+              <a class="page-link" @click="userGoPage(p)">{{ p }}</a>
+            </li>
+            <li class="page-item" :class="{ disabled: userCurrentPage >= userTotalPages }">
+              <a class="page-link" @click="userGoPage(userCurrentPage + 1)">下一页</a>
+            </li>
+            <li class="page-item" :class="{ disabled: userCurrentPage >= userTotalPages }">
+              <a class="page-link" @click="userGoPage(userTotalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
+            </li>
+          </ul>
+        </nav>
       </div>
     </div>
 

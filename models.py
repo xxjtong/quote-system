@@ -162,6 +162,7 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     email = db.Column(db.String(200), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
+    last_login = db.Column(db.DateTime, nullable=True)
 
     def to_dict(self):
         return {
@@ -169,6 +170,7 @@ class User(db.Model):
             'role': self.role, 'is_active': self.is_active,
             'email': self.email or '',
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+            'last_login': self.last_login.strftime('%Y-%m-%d %H:%M') if self.last_login else '',
         }
 
 

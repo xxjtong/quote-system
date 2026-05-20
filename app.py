@@ -241,8 +241,22 @@ def set_field_settings():
 @app.route('/api/admin/users', methods=['GET'])
 @require_admin
 def list_users():
-    users = User.query.order_by(User.created_at.desc()).all()
-    return jsonify({'users': [u.to_dict() for u in users]})
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    search = request.args.get('search', '').strip()
+    query = User.query
+    if search:
+        query = query.filter(
+            db.or_(User.username.contains(search), User.email.contains(search))
+        )
+    query = query.order_by(User.created_at.desc())
+    paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify({
+        'users': [u.to_dict() for u in paginated.items],
+        'total': paginated.total,
+        'page': page,
+        'pages': paginated.pages
+    })
 
 @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
 @require_admin

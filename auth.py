@@ -113,6 +113,8 @@ def auth_register():
     )
     db.session.add(user)
     db.session.commit()
+    user.last_login = datetime.now()
+    db.session.commit()
     token = create_token(user, current_app)
     return jsonify({'token': token, 'user': user.to_dict()}), 201
 
@@ -128,6 +130,8 @@ def auth_login():
         return jsonify({'error': '用户名或密码错误'}), 401
     if not user.is_active:
         return jsonify({'error': '账号已被停用'}), 403
+    user.last_login = datetime.now()
+    db.session.commit()
     token = create_token(user, current_app)
     return jsonify({'token': token, 'user': user.to_dict()})
 

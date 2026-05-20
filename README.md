@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.7.6-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.7.7-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
