@@ -870,10 +870,6 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
         '- function_desc 放主要功能特性，remark 放次要备注信息'
     )
 
-    # 构建 API URL 和 model：有 endpoint 则作为 model 名
-    endpoint_id = os.environ.get('VOLCENGINE_ENDPOINT', '')
-    model_name = endpoint_id if endpoint_id else 'doubao-seed-2-0-lite-260215'
-
     try:
         import requests as http_req
         r = http_req.post(
@@ -883,7 +879,7 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
                 'Content-Type': 'application/json',
             },
             json={
-                'model': model_name,
+                'model': 'doubao-seed-2-0-lite-260215',
                 'messages': [{
                     'role': 'user',
                     'content': [
