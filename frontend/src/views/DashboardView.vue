@@ -319,45 +319,45 @@ function cleanContent(msg) {
 
 // Pipe table → HTML + #N clickable links (防止溢出)
 function renderContent(msg) {
-  let text = cleanContent(msg)
-  // Step 1: Convert pipe tables to HTML
+  const text = cleanContent(msg)
   const lines = text.split('\n')
-  const result = []
+  const parts = []  // [{html: true/false, value: str}]
   let tableRows = []
+  let textBuf = []
+
+  function flushText() {
+    if (textBuf.length) {
+      let t = textBuf.join('\n')
+      // Escape HTML entities (except #N links we handle later)
+      t = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      // #N / 报价单 N → clickable links
+      t = t.replace(/(?:#|报价单\s*)(\d+)/g, '<a href="#" class="chat-ref-link" data-qid="$1">#$1</a>')
+      parts.push({ html: true, value: t })
+      textBuf = []
+    }
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
     const isDataRow = line.startsWith('|') && line.endsWith('|') && !/^\|[\s\-:]+\|$/.test(line)
     const isSepRow = /^\|[\s\-:]+\|$/.test(line)
     if (isDataRow) {
+      flushText()
       tableRows.push(line)
     } else if (isSepRow && tableRows.length === 1) {
-      tableRows.push(line)  // separator after header
+      tableRows.push(line)
     } else {
       if (tableRows.length >= 2) {
-        result.push(renderTable(tableRows))
+        parts.push({ html: true, value: renderTable(tableRows) })
         tableRows = []
       }
-      result.push(line)
+      textBuf.push(line)
     }
   }
-  if (tableRows.length >= 2) result.push(renderTable(tableRows))
-  text = result.join('\n')
+  if (tableRows.length >= 2) parts.push({ html: true, value: renderTable(tableRows) })
+  flushText()
 
-  // Step 2: Escape HTML in non-table text, convert #N to clickable links
-  text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  // But we need to un-escape the table HTML we just generated
-  text = text.replace(/&lt;table /g, '<table ').replace(/&lt;\/table&gt;/g, '</table>')
-  text = text.replace(/&lt;thead&gt;/g, '<thead>').replace(/&lt;\/thead&gt;/g, '</thead>')
-  text = text.replace(/&lt;tbody&gt;/g, '<tbody>').replace(/&lt;\/tbody&gt;/g, '</tbody>')
-  text = text.replace(/&lt;tr&gt;/g, '<tr>').replace(/&lt;\/tr&gt;/g, '</tr>')
-  text = text.replace(/&lt;th /g, '<th ').replace(/&lt;\/th&gt;/g, '</th>')
-  text = text.replace(/&lt;td /g, '<td ').replace(/&lt;\/td&gt;/g, '</td>')
-  text = text.replace(/&lt;span /g, '<span ').replace(/&lt;\/span&gt;/g, '</span>')
-
-  // Step 3: #N / 报价单 N → clickable links
-  text = text.replace(/(?:#|报价单\s*)(\d+)/g, '<a href="#" class="chat-ref-link" data-qid="$1">#$1</a>')
-
-  return text
+  return parts.map(p => p.value).join('\n')
 }
 
 function renderTable(rows) {
