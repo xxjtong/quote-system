@@ -517,7 +517,7 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
           :class="msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-ai'">
           <div class="chat-bubble"
             :class="msg.role === 'user' ? 'bg-primary text-white' : 'bg-light'"
-            style="max-width:88%;padding:.5rem .75rem;border-radius:12px;font-size:.85rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word">
+            style="max-width:88%;padding:.5rem .75rem;border-radius:12px;font-size:.9rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word">
 
             <!-- AI message: render with pipe tables + clickable #N references -->
             <template v-if="msg.role === 'assistant' && msg.content">
