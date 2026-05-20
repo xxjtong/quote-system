@@ -2414,14 +2414,21 @@ def ai_token():
 
 # ─── AI Chat (通过 Hermes Gateway Responses API + SSE 流式) ─────
 
-_ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
-_gateway_url = 'http://127.0.0.1:8643'
+_ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-pro')
+
+# 两个 DeepSeek API Server：8643=v4-pro（推理/对话），8644=v4-flash（快速提取）
+_GATEWAYS = {
+    'deepseek-v4-pro': 'http://127.0.0.1:8643',
+    'deepseek-v4-flash': 'http://127.0.0.1:8644',
+}
+
+def _get_gateway_url(model):
+    """根据模型名返回对应端口，默认 8643"""
+    return _GATEWAYS.get(model, 'http://127.0.0.1:8643')
 
 _AVAILABLE_MODELS = [
-    {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash', 'desc': '快速响应，适合日常问答'},
     {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
-    {'id': 'gemini-2.5-flash', 'name': 'Gemini 2.5 Flash', 'desc': 'Google 快速模型'},
-    {'id': 'gemini-3.1-flash-lite', 'name': 'Gemini 3.1 Flash Lite', 'desc': 'Google 轻量模型，配额高'},
+    {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash', 'desc': '快速响应，适合日常问答'},
 ]
 
 
@@ -2480,7 +2487,7 @@ def _extract_choices_via_llm(text):
             'max_output_tokens': 100,
         })
         req = urllib.request.Request(
-            f'{_gateway_url}/v1/responses',
+            f'{_GATEWAYS["deepseek-v4-flash"]}/v1/responses',
             data=body.encode('utf-8'),
             headers={'Content-Type': 'application/json'},
             method='POST'
@@ -2620,7 +2627,7 @@ def ai_chat():
     t1 = time.time()
     try:
         req = urllib.request.Request(
-            f'{_gateway_url}/v1/responses',
+            f'{_get_gateway_url(body["model"])}/v1/responses',
             data=_json.dumps(body).encode('utf-8'),
             headers={'Content-Type': 'application/json'},
             method='POST'
@@ -2663,7 +2670,7 @@ def _ai_chat_sse(body, t0):
         accumulated = ''
         try:
             req = urllib.request.Request(
-                f'{_gateway_url}/v1/responses',
+                f'{_get_gateway_url(body["model"])}/v1/responses',
                 data=_json.dumps(body).encode('utf-8'),
                 headers={'Content-Type': 'application/json'},
                 method='POST'
