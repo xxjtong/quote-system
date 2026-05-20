@@ -293,6 +293,15 @@ function jumpToQuote(id) {
   router.push({ name: 'quotes', query: { highlight: id } })
 }
 
+// Event delegation for v-html links
+function onChatLinkClick(e) {
+  const link = e.target.closest('.chat-ref-link')
+  if (!link) return
+  e.preventDefault()
+  const qid = parseInt(link.dataset.qid)
+  if (qid) jumpToQuote(qid)
+}
+
 // Create quote from product
 async function createQuoteFromProduct(productName) {
   router.push({ name: 'newquote', query: { product: productName } })
@@ -306,6 +315,69 @@ function quickReply(text) {
 function cleanContent(msg) {
   if (!msg.parsed?.created_quote) return msg.content
   return msg.content.replace(/https:\/\/bwh\.ddns\.mobi\/quote\/api\/quotes\/\d+\/export-excel\s*/g, '').trim()
+}
+
+// Pipe table → HTML + #N clickable links (防止溢出)
+function renderContent(msg) {
+  let text = cleanContent(msg)
+  // Step 1: Convert pipe tables to HTML
+  const lines = text.split('\n')
+  const result = []
+  let tableRows = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    const isDataRow = line.startsWith('|') && line.endsWith('|') && !/^\|[\s\-:]+\|$/.test(line)
+    const isSepRow = /^\|[\s\-:]+\|$/.test(line)
+    if (isDataRow) {
+      tableRows.push(line)
+    } else if (isSepRow && tableRows.length === 1) {
+      tableRows.push(line)  // separator after header
+    } else {
+      if (tableRows.length >= 2) {
+        result.push(renderTable(tableRows))
+        tableRows = []
+      }
+      result.push(line)
+    }
+  }
+  if (tableRows.length >= 2) result.push(renderTable(tableRows))
+  text = result.join('\n')
+
+  // Step 2: Escape HTML in non-table text, convert #N to clickable links
+  text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  // But we need to un-escape the table HTML we just generated
+  text = text.replace(/&lt;table /g, '<table ').replace(/&lt;\/table&gt;/g, '</table>')
+  text = text.replace(/&lt;thead&gt;/g, '<thead>').replace(/&lt;\/thead&gt;/g, '</thead>')
+  text = text.replace(/&lt;tbody&gt;/g, '<tbody>').replace(/&lt;\/tbody&gt;/g, '</tbody>')
+  text = text.replace(/&lt;tr&gt;/g, '<tr>').replace(/&lt;\/tr&gt;/g, '</tr>')
+  text = text.replace(/&lt;th /g, '<th ').replace(/&lt;\/th&gt;/g, '</th>')
+  text = text.replace(/&lt;td /g, '<td ').replace(/&lt;\/td&gt;/g, '</td>')
+  text = text.replace(/&lt;span /g, '<span ').replace(/&lt;\/span&gt;/g, '</span>')
+
+  // Step 3: #N / 报价单 N → clickable links
+  text = text.replace(/(?:#|报价单\s*)(\d+)/g, '<a href="#" class="chat-ref-link" data-qid="$1">#$1</a>')
+
+  return text
+}
+
+function renderTable(rows) {
+  const header = rows[0].split('|').filter(c => c.trim()).map(c => c.trim())
+  const dataRows = rows.slice(2)
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:.78rem;margin:.5rem 0"><thead><tr>'
+  for (const h of header) {
+    html += `<th style="border-bottom:2px solid #dee2e6;padding:4px 6px;text-align:left;white-space:nowrap">${h}</th>`
+  }
+  html += '</tr></thead><tbody>'
+  for (const row of dataRows) {
+    const cells = row.split('|').filter(c => c.trim()).map(c => c.trim())
+    html += '<tr>'
+    for (const c of cells) {
+      html += `<td style="border-bottom:1px solid #e9ecef;padding:3px 6px;white-space:nowrap">${c}</td>`
+    }
+    html += '</tr>'
+  }
+  html += '</tbody></table>'
+  return html
 }
 
 function previewCreatedQuote(id) {
@@ -439,16 +511,11 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
           :class="msg.role === 'user' ? 'chat-msg-user' : 'chat-msg-ai'">
           <div class="chat-bubble"
             :class="msg.role === 'user' ? 'bg-primary text-white' : 'bg-light'"
-            style="max-width:88%;padding:.5rem .75rem;border-radius:12px;font-size:.85rem;line-height:1.5;white-space:pre-wrap">
+            style="max-width:88%;padding:.5rem .75rem;border-radius:12px;font-size:.85rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word">
 
-            <!-- AI message: render with clickable #N references, strip download URLs -->
+            <!-- AI message: render with pipe tables + clickable #N references -->
             <template v-if="msg.role === 'assistant' && msg.content">
-              <span v-for="(part, pi) in cleanContent(msg).split(/(#\d+|报价单\s*\d+)/g)" :key="pi">
-                <template v-if="/^(?:#|报价单)\s*\d+$/.test(part)">
-                  <a href="#" class="chat-ref-link" @click.prevent="jumpToQuote(parseInt(part.replace(/\D/g,'')))">{{ part }}</a>
-                </template>
-                <template v-else>{{ part }}</template>
-              </span>
+              <div v-html="renderContent(msg)" @click="onChatLinkClick"></div>
             </template>
             <template v-else>{{ msg.content }}</template>
 
