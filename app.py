@@ -2453,6 +2453,60 @@ _GW_SYSTEM_PROMPT = (
 )
 
 
+def _extract_choices_via_llm(text):
+    """用 LLM 从「是A还是B」问句中提取两个选项。返回 [a, b] 或 []。"""
+    import urllib.request, json as _json
+    # 快速预检：必须包含「还是」
+    if '还是' not in text:
+        return []
+    # 截取最后一句问句（约200字）
+    sentences = re.split(r'[。！\n]', text)
+    question = sentences[-1] if sentences[-1].strip() else (sentences[-2] if len(sentences) > 1 else text)
+    question = question.strip()[-300:]
+    if '还是' not in question:
+        question = text.strip()[-300:]
+
+    prompt = (
+        '从这句话中提取「还是」前后的两个选项，返回纯JSON数组，不要markdown包裹，不要解释。\n'
+        '规则：每个选项5-20字，去除冗余前缀（如"是/用/选/要"），只保留核心含义。\n'
+        f'例句：「继续用威发西安还是新建客户？」→ ["继续用威发西安","新建客户"]\n'
+        f'例句：「要改方案还是新项目？」→ ["改方案","新项目"]\n'
+        f'现在提取："{question}"'
+    )
+    try:
+        body = _json.dumps({
+            'model': 'deepseek-v4-flash',
+            'input': prompt,
+            'max_output_tokens': 100,
+        })
+        req = urllib.request.Request(
+            f'{_gateway_url}/v1/responses',
+            data=body.encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        resp = urllib.request.urlopen(req, timeout=5)
+        result = _json.loads(resp.read())
+        reply = ''
+        for o in result.get('output', []):
+            if o.get('type') == 'message':
+                content = o.get('content', [])
+                if content:
+                    reply = content[0].get('text', '')
+                break
+        # 尝试解析 JSON
+        reply = reply.strip()
+        if reply.startswith('['):
+            arr = _json.loads(reply)
+            if isinstance(arr, list) and len(arr) == 2:
+                a, b = str(arr[0]).strip(), str(arr[1]).strip()
+                if 1 <= len(a) <= 30 and 1 <= len(b) <= 30:
+                    return [a, b]
+    except Exception:
+        pass
+    return []
+
+
 def _parse_reply_actions(reply_text):
     """解析 AI 回复，提取结构化数据：产品、报价引用、快捷操作"""
     result = {'products': [], 'quote_refs': [], 'quick_replies': []}
@@ -2468,22 +2522,11 @@ def _parse_reply_actions(reply_text):
         (r'需要我(?:帮[您你])?.*吗[？?]', ['好的，开始吧', '先不用']),
         (r'哪个[？?]', []),  # 不生成快捷回复的产品选择题
     ]
-    # 「是A还是B」→ 按标题/子句/短语三级提取实际选项
-    is_or_pat = re.search(
-        r'(?:是|用|选|要)\s*(.+?)\s*还是\s*(.+?)[？?\s]*$',
-        reply_text
-    )
-    if is_or_pat:
-        a_raw, b_raw = is_or_pat.group(1), is_or_pat.group(2)
-        def _clean_choice(s):
-            s = s.strip()
-            s = re.sub(r'^[给用选要]', '', s).strip()  # 去「给/用/选/要」前缀
-            s = re.sub(r'[呢啊吧的了么吗]$', '', s)
-            s = re.sub(r'^["\']|["\']$', '', s)
-            return s.strip() or s
-        a, b = _clean_choice(a_raw), _clean_choice(b_raw)
-        if len(a) >= 1 and len(b) >= 1:
-            result['quick_replies'] = [a, b]
+    # 「是A还是B」→ LLM 提取实际选项
+    if '还是' in reply_text:
+        choices = _extract_choices_via_llm(reply_text)
+        if choices:
+            result['quick_replies'] = choices
 
     # 回退到固定模式
     if not result['quick_replies']:
