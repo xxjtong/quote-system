@@ -9,7 +9,7 @@ const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_UR
 const router = useRouter()
 const route = useRoute()
 const toast = inject('toast')
-const { api, isAdmin } = useApi()
+const { api, isAdmin, currentUser } = useApi()
 
 // ─── State ───
 const products = ref([])
@@ -471,7 +471,7 @@ onMounted(() => {
         <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="exportTemplate">
           <i class="bi bi-download"></i> 下载模板
         </button>
-        <button v-if="isAdmin()" class="btn btn-primary btn-modern" @click="showAddProduct">
+        <button class="btn btn-primary btn-modern" @click="showAddProduct">
           <i class="bi bi-plus-lg"></i> 新增产品
         </button>
       </div>
@@ -545,7 +545,7 @@ onMounted(() => {
               <th>分类</th>
               <th>厂商</th>
               <th>销售单价</th>
-              <th v-if="isAdmin()">操作</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -554,7 +554,7 @@ onMounted(() => {
                 <div class="empty-state">
                   <i class="bi bi-inbox"></i>
                   <p>暂无产品</p>
-                  <button v-if="isAdmin()" class="btn btn-primary btn-modern mt-2" @click="showAddProduct">新增第一个产品</button>
+                  <button class="btn btn-primary btn-modern mt-2" @click="showAddProduct">新增第一个产品</button>
                 </div>
               </td>
             </tr>
@@ -587,7 +587,7 @@ onMounted(() => {
               </td>
               <td class="td-name" style="max-width:100px">{{ p.supplier || '—' }}</td>
               <td class="text-end fw-medium">{{ formatMoney(p.price) }}</td>
-              <td v-if="isAdmin()">
+              <td>
                 <div class="d-flex gap-1">
                   <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="showEditProduct(p)" title="编辑">
                     <i class="bi bi-pencil"></i>
@@ -798,7 +798,7 @@ onMounted(() => {
               </table>
             </div>
             <div class="modal-footer">
-              <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern btn-sm" @click="showEditProduct(detailProduct); closeDetail()">
+              <button class="btn btn-outline-primary btn-modern btn-sm" @click="showEditProduct(detailProduct); closeDetail()">
                 <i class="bi bi-pencil"></i> 编辑
               </button>
               <button class="btn btn-secondary btn-modern btn-sm" @click="closeDetail()">关闭</button>
