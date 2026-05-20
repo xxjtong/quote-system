@@ -2661,13 +2661,16 @@ def ai_chat():
         body['instructions'] = (
             prompt + '\n'
             f'当前用户：{user.username}（ID={user.id}，角色：{user.role}）。\n'
-            f'查询/列出报价单必须用 curl 调用 API（API 会自动按用户过滤，非管理员只能看到自己的）：\n'
-            f'  TOKEN=$(curl -s -X POST http://127.0.0.1:5001/api/auth/login -H "Content-Type: application/json" -d \'{{"username":"{user.username}","password":"<需从DB查hash>"}}\' | python3 -c "import sys,json;print(json.load(sys.stdin)[\'token\'])" 2>/dev/null)\n'
+            f'查询/列出报价单：用 curl 调 API 或 sqlite3 直查均可。\n'
             f'  curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:5001/api/quotes?per_page=50\n'
-            f'或者直接 sqlite3 查：SELECT ... FROM quotes WHERE created_by={user.id} ORDER BY id DESC LIMIT 50;\n'
+            f'  sqlite3: SELECT id,title,client,status,total_amount,quote_date FROM quotes WHERE created_by={user.id} ORDER BY id DESC LIMIT 30;\n'
             f'创建报价：curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d \'...\' http://127.0.0.1:5001/api/quotes\n'
-            f'报价单会自动归属到当前用户 ID={user.id}（{user.username}）名下。\n'
-            f'列出报价单时务必排除测试数据：标题含「测试」「test」「sdf」或客户名含「pro报价测试」「qhk」「qwe」的要跳过。'
+            f'报价单自动归属到当前用户 ID={user.id}（{user.username}）。\n'
+            f'列出报价单时：\n'
+            f'  1) 排除测试数据：标题含「测试」「test」「sdf」或客户名含「pro报价测试」「qhk」「qwe」的要跳过\n'
+            f'  2) 用 pipe table 格式列出，必须包含这6列：ID | 标题 | 客户 | 状态 | 金额 | 日期\n'
+            f'  3) 金额格式：¥12,345，日期格式：MM-DD\n'
+            f'  4) 先统计总数再列出表格，最后给用户一段可选操作提示'
         )
         if session:
             session.prompt_hash = prompt_h

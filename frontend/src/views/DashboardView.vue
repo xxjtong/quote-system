@@ -361,13 +361,19 @@ function renderContent(msg) {
 }
 
 function renderTable(rows) {
+  // Check if rows[1] is a separator (|---|...)
+  const isSep = rows.length > 1 && /^\|[\s\-:]+\|$/.test(rows[1])
   const header = rows[0].split('|').filter(c => c.trim()).map(c => c.trim())
-  const dataRows = rows.slice(2)
-  let html = '<table style="width:100%;border-collapse:collapse;font-size:.78rem;margin:.5rem 0"><thead><tr>'
-  for (const h of header) {
-    html += `<th style="border-bottom:2px solid #dee2e6;padding:4px 6px;text-align:left;white-space:nowrap">${h}</th>`
+  const dataRows = isSep ? rows.slice(2) : rows.slice(1)
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:.78rem;margin:.5rem 0">'
+  if (isSep) {
+    html += '<thead><tr>'
+    for (const h of header) {
+      html += `<th style="border-bottom:2px solid #dee2e6;padding:4px 6px;text-align:left;white-space:nowrap">${h}</th>`
+    }
+    html += '</tr></thead>'
   }
-  html += '</tr></thead><tbody>'
+  html += '<tbody>'
   for (const row of dataRows) {
     const cells = row.split('|').filter(c => c.trim()).map(c => c.trim())
     html += '<tr>'
