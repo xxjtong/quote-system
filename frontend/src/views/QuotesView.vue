@@ -3,6 +3,7 @@ import { ref, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
+import QuotePreviewModal from '../components/QuotePreviewModal.vue'
 
 const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
@@ -97,36 +98,13 @@ async function fetchQuotes() {
 
 // ─── Preview modal ───
 const showPreview = ref(false)
-const previewHtml = ref('')
-const previewTitle = ref('')
-const previewLoading = ref(false)
 const previewQuoteId = ref(null)
+const previewTitle = ref('')
 
-async function viewQuote(id, title) {
+function viewQuote(id, title) {
   previewQuoteId.value = id
   previewTitle.value = title || '报价单预览'
   showPreview.value = true
-  previewHtml.value = ''
-  previewLoading.value = true
-  try {
-    const r = await fetch(BASE_URL + `/api/quotes/${id}/preview`, {
-      headers: {
-        Authorization: 'Bearer ' + localStorage.getItem('quote_token'),
-        Accept: 'text/html',
-      }
-    })
-    if (r.status === 401) {
-      previewHtml.value = '<p class="text-danger text-center py-4">会话已过期，请重新登录</p>'
-    } else if (!r.ok) {
-      previewHtml.value = `<p class="text-danger text-center py-4">加载失败 (${r.status})</p>`
-    } else {
-      previewHtml.value = await r.text()
-    }
-  } catch (e) {
-    previewHtml.value = '<p class="text-danger text-center py-4">网络错误，请重试</p>'
-  } finally {
-    previewLoading.value = false
-  }
 }
 
 // ─── Status toggle ───
@@ -143,50 +121,6 @@ async function updateStatus(quote, newStatus) {
   if (r.error) { toast(r.error, 'danger'); return }
   quote.status = newStatus
   toast('状态已更新')
-}
-
-// ─── Download Excel ───
-async function downloadQuote(q) {
-  const token = localStorage.getItem('quote_token')
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const url = BASE_URL + `/api/quotes/${q.id}/export-excel?token=${encodeURIComponent(token)}&download_date=${dateStr}`
-  try {
-    const r = await fetch(url)
-    if (!r.ok) { toast(`下载失败 (${r.status})`, 'danger'); return }
-    const blob = await r.blob()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = ''
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(a.href)
-  } catch (e) {
-    toast('网络错误，下载失败', 'danger')
-  }
-}
-
-// ─── Send email ───
-const showEmailModal = ref(false)
-const emailRecipient = ref('')
-const emailQuoteId = ref(null)
-const emailSending = ref(false)
-
-function openEmailModal(id) {
-  emailQuoteId.value = id
-  emailRecipient.value = ''
-  showEmailModal.value = true
-}
-
-async function sendEmail() {
-  const email = emailRecipient.value.trim()
-  if (!email) { toast('请输入收件人邮箱', 'warning'); return }
-  emailSending.value = true
-  const r = await api(`/api/quotes/${emailQuoteId.value}/send-email`, 'POST', { email })
-  if (r.error) { toast(r.error, 'danger') }
-  else toast(r.message || '邮件已发送')
-  emailSending.value = false
-  showEmailModal.value = false
 }
 
 // ─── Edit quote ───
@@ -261,6 +195,11 @@ watch(() => route.params.id, async (id) => {
   const title = q?.title || '报价单详情'
   viewQuote(id, title)
 }, { immediate: true })
+
+// Sync route when preview closes
+watch(showPreview, (val) => {
+  if (!val && route.params.id) router.push({ name: 'quotes', params: {} })
+})
 
 function closePreview() {
   showPreview.value = false
@@ -404,57 +343,7 @@ function closePreview() {
       </nav>
     </div>
 
-    <!-- Preview Modal -->
-    <Teleport to="body">
-      <div v-if="showPreview" class="modal-backdrop show" @click="closePreview()"></div>
-      <div v-if="showPreview" class="modal d-block modern-modal" tabindex="-1">
-        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title fw-semibold">📄 {{ previewTitle }}</h5>
-            </div>
-            <div class="modal-body" style="background:#f8f9fa">
-              <div v-if="previewLoading" class="text-center py-5">
-                <div class="spinner-border text-primary" role="status"></div>
-                <p class="text-muted mt-2 small">加载预览...</p>
-              </div>
-              <div v-else class="preview-wrapper" v-html="previewHtml"></div>
-            </div>
-            <div class="modal-footer" style="gap:8px">
-              <button class="btn btn-primary btn-modern" @click="showPreview = false; router.push({ name: 'newquote', query: { edit: previewQuoteId } })">编辑</button>
-              <button class="btn btn-outline-success btn-modern" @click="downloadQuote({ id: previewQuoteId }); showPreview = false">下载</button>
-              <button class="btn btn-outline-info btn-modern" @click="openEmailModal(previewQuoteId); showPreview = false">邮件</button>
-              <button class="btn btn-secondary btn-modern" @click="closePreview()">关闭</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Email Modal -->
-    <Teleport to="body">
-      <div v-if="showEmailModal" class="modal-backdrop show" @click="showEmailModal = false"></div>
-      <div v-if="showEmailModal" class="modal d-block modern-modal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h5 class="modal-title fw-semibold">📧 发送邮件</h5>
-              <button type="button" class="btn-close" @click="showEmailModal = false"></button>
-            </div>
-            <div class="modal-body">
-              <label class="form-label-modern">收件人邮箱</label>
-              <input class="form-control" v-model="emailRecipient" type="email" placeholder="example@domain.com" @keydown.enter="sendEmail">
-            </div>
-            <div class="modal-footer">
-              <button class="btn btn-primary btn-modern" @click="sendEmail" :disabled="emailSending || !emailRecipient.trim()">
-                <span v-if="emailSending" class="spinner-border spinner-border-sm me-1"></span>
-                发送
-              </button>
-              <button class="btn btn-secondary btn-modern" @click="showEmailModal = false">取消</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- Preview Modal (shared component) -->
+    <QuotePreviewModal v-model:show="showPreview" :quote-id="previewQuoteId" :quote-title="previewTitle" />
   </div>
 </template>
