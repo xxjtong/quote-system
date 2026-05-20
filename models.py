@@ -20,10 +20,15 @@ class Product(db.Model):
     image_data = db.Column(db.LargeBinary, nullable=True)
     image_mime = db.Column(db.String(30), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     def to_dict(self):
+        creator_name = None
+        if self.created_by:
+            creator = db.session.get(User, self.created_by)
+            creator_name = creator.username if creator else None
         return {
             'id': self.id,
             'name': self.name,
@@ -39,6 +44,8 @@ class Product(db.Model):
             'image_url': self.image_url or '',
             'has_image': bool(self.image_data),
             'is_active': self.is_active if self.is_active is not None else True,
+            'created_by': self.created_by,
+            'created_by_name': creator_name,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
         }

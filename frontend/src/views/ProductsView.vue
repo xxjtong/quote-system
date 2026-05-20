@@ -587,12 +587,12 @@ onMounted(() => {
               </td>
               <td class="td-name" style="max-width:100px">{{ p.supplier || '—' }}</td>
               <td class="text-end fw-medium">{{ formatMoney(p.price) }}</td>
-              <td>
+              <td v-if="isAdmin() || p.created_by === currentUser?.id">
                 <div class="d-flex gap-1">
                   <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="showEditProduct(p)" title="编辑">
                     <i class="bi bi-pencil"></i>
                   </button>
-                  <button class="btn btn-sm btn-outline-warning btn-sm-icon"
+                  <button v-if="isAdmin()" class="btn btn-sm btn-outline-warning btn-sm-icon"
                     @click="toggleActive(p.id)" :title="p.is_active ? '停用' : '恢复'">
                     <i :class="p.is_active ? 'bi bi-eye-slash' : 'bi bi-eye'"></i>
                   </button>
@@ -600,6 +600,9 @@ onMounted(() => {
                     <i class="bi bi-trash"></i>
                   </button>
                 </div>
+              </td>
+              <td v-else>
+                <span class="text-muted small">—</span>
               </td>
             </tr>
           </tbody>
@@ -798,7 +801,7 @@ onMounted(() => {
               </table>
             </div>
             <div class="modal-footer">
-              <button class="btn btn-outline-primary btn-modern btn-sm" @click="showEditProduct(detailProduct); closeDetail()">
+              <button v-if="isAdmin() || detailProduct.created_by === currentUser?.id" class="btn btn-outline-primary btn-modern btn-sm" @click="showEditProduct(detailProduct); closeDetail()">
                 <i class="bi bi-pencil"></i> 编辑
               </button>
               <button class="btn btn-secondary btn-modern btn-sm" @click="closeDetail()">关闭</button>

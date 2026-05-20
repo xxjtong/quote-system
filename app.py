@@ -396,8 +396,13 @@ def list_products():
         col = Product.id
 
     query = Product.query
-    if hasattr(g, 'current_user') and g.current_user and g.current_user.role != 'admin':
-        query = query.filter(Product.is_active == True)
+    is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
+    if not is_admin:
+        # 普通用户：只看管理员创建的(None) + 自己创建的
+        uid = g.current_user.id if hasattr(g, 'current_user') and g.current_user else None
+        query = query.filter(
+            db.or_(Product.created_by.is_(None), Product.created_by == uid)
+        )
     if category:
         query = query.filter(Product.category.ilike(f'%{category}%'))
     if supplier:
@@ -501,6 +506,7 @@ def create_product():
         function_desc=data.get('function_desc', ''),
         remark=data.get('remark', ''),
         image_url=data.get('image_url', ''),
+        created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
     )
     _store_image_blob(product, data)
     db.session.add(product)
@@ -530,6 +536,10 @@ def update_product(product_id):
     product = db.session.get(Product, product_id)
     if not product:
         return jsonify({'error': '产品不存在'}), 404
+    # 权限检查：管理员可编辑全部，普通用户只能编辑自己创建的
+    is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
+    if not is_admin and product.created_by != g.current_user.id:
+        return jsonify({'error': '只能编辑自己创建的产品'}), 403
     data = request.get_json()
     for field in ['name', 'sku', 'category', 'spec', 'unit', 'supplier', 'function_desc', 'remark', 'image_url']:
         if field in data:
@@ -563,6 +573,10 @@ def delete_product(product_id):
     product = db.session.get(Product, product_id)
     if not product:
         return jsonify({'error': '产品不存在'}), 404
+    # 权限检查：管理员可删除全部，普通用户只能删除自己创建的
+    is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
+    if not is_admin and product.created_by != g.current_user.id:
+        return jsonify({'error': '只能删除自己创建的产品'}), 403
     db.session.delete(product)
     db.session.commit()
     return jsonify({'message': '已删除'})
@@ -574,6 +588,10 @@ def batch_delete_products():
     ids = data.get('ids', [])
     if not ids:
         return jsonify({'error': '请选择要删除的产品'}), 400
+    # 权限：仅管理员可批量删除
+    is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
+    if not is_admin:
+        return jsonify({'error': '需要管理员权限'}), 403
     Product.query.filter(Product.id.in_(ids)).delete(synchronize_session=False)
     db.session.commit()
     return jsonify({'message': f'已删除 {len(ids)} 个产品'})
@@ -1489,6 +1507,7 @@ def import_products():
                         supplier=sup_val,
                         function_desc=str(row[col_idx['function_desc']]).strip() if col_idx.get('function_desc', -1) >= 0 and col_idx['function_desc'] < len(row) and row[col_idx['function_desc']] else '',
                         remark=str(row[col_idx['remark']]).strip() if col_idx.get('remark', -1) >= 0 and col_idx['remark'] < len(row) and row[col_idx['remark']] else '',
+                        created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
                     )
 
                     # ── 提取图片：嵌入图片优先，URL 文本次之 ──
