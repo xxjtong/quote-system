@@ -29,6 +29,43 @@ async function fetchDashboard() {
 
 function goTo(name) { router.push({ name }) }
 
+// ─── Quote Preview Modal ──────────────────────────────────
+const showQuotePreview = ref(false)
+const previewQuoteHtml = ref('')
+const previewQuoteTitle = ref('')
+const previewQuoteLoading = ref(false)
+const previewQuoteId = ref(null)
+
+async function viewQuote(id, title) {
+  previewQuoteId.value = id
+  previewQuoteTitle.value = title || '报价单预览'
+  showQuotePreview.value = true
+  previewQuoteHtml.value = ''
+  previewQuoteLoading.value = true
+  try {
+    const token = localStorage.getItem('quote_token')
+    const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+    const r = await fetch(BASE_URL + `/api/quotes/${id}/preview`, {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'text/html' }
+    })
+    if (r.status === 401) {
+      previewQuoteHtml.value = '<p class="text-danger text-center py-4">会话已过期，请重新登录</p>'
+    } else if (!r.ok) {
+      previewQuoteHtml.value = `<p class="text-danger text-center py-4">加载失败 (${r.status})</p>`
+    } else {
+      previewQuoteHtml.value = await r.text()
+    }
+  } catch (e) {
+    previewQuoteHtml.value = '<p class="text-danger text-center py-4">网络错误，请重试</p>'
+  } finally {
+    previewQuoteLoading.value = false
+  }
+}
+
+function closeQuotePreview() {
+  showQuotePreview.value = false
+}
+
 // ─── AI Chat ────────────────────────────────────────────────
 
 const chatMessages = ref([])
@@ -513,7 +550,7 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
       <div class="card-title-modern"><i class="bi bi-clock-history text-primary"></i>最近报价</div>
       <template v-if="recentQuotes.length">
         <div v-for="qq in recentQuotes" :key="qq.id" class="d-flex justify-content-between align-items-center py-2"
-          style="border-bottom:1px solid var(--gray-100);cursor:pointer" @click="goTo('quotes')">
+          style="border-bottom:1px solid var(--gray-100);cursor:pointer" @click="viewQuote(qq.id, qq.title)">
           <span><i class="bi bi-file-text me-2 text-muted"></i>{{ qq.title || '未命名' }}</span>
           <span class="text-muted small fw-medium">{{ formatMoney(qq.total_amount) }}</span>
         </div>
@@ -555,9 +592,7 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
           </div>
         </div>
       </div>
-    </div>
-  </template>
-</template>
+    </div>\n\n    <!-- Quote Preview Modal -->\n    <Teleport to=\"body\">\n      <div v-if=\"showQuotePreview\" class=\"modal-backdrop show\" @click=\"closeQuotePreview()\"></div>\n      <div v-if=\"showQuotePreview\" class=\"modal d-block modern-modal\" tabindex=\"-1\">\n        <div class=\"modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable\">\n          <div class=\"modal-content\">\n            <div class=\"modal-header\">\n              <h5 class=\"modal-title fw-semibold\">{{ previewQuoteTitle }}</h5>\n            </div>\n            <div class=\"modal-body\" style=\"background:#f8f9fa\">\n              <div v-if=\"previewQuoteLoading\" class=\"text-center py-5\">\n                <div class=\"spinner-border text-primary\" role=\"status\"></div>\n                <p class=\"text-muted mt-2 small\">加载预览...</p>\n              </div>\n              <div v-else class=\"preview-wrapper\" v-html=\"previewQuoteHtml\"></div>\n            </div>\n            <div class=\"modal-footer\" style=\"gap:8px\">\n              <button class=\"btn btn-primary btn-modern\" @click=\"showQuotePreview = false; router.push({ name: 'newquote', query: { edit: previewQuoteId } })\">编辑</button>\n              <button class=\"btn btn-secondary btn-modern\" @click=\"closeQuotePreview()\">关闭</button>\n            </div>\n          </div>\n        </div>\n      </div>\n    </Teleport>\n  </template>\n</template>
 
 <style scoped>
 .chat-msg-user { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
