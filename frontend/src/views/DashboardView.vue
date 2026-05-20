@@ -9,19 +9,20 @@ const router = useRouter()
 const toast = inject('toast')
 const { api, isAdmin } = useApi()
 
-const stats = ref({ prodCount: 0, quoteCount: 0, downloadTotal: 0, totalAmount: 0, catCount: 0 })
+const stats = ref({ prodCount: 0, quoteCount: 0, downloadTotal: 0, totalAmount: 0, catCount: 0, aiMyCount: 0, aiTotalCount: 0 })
 const recentQuotes = ref([])
 const loading = ref(true)
 
 async function fetchDashboard() {
   try {
-    const [p, q] = await Promise.all([api('/api/products?per_page=1'), api('/api/quotes')])
+    const [p, q, ai] = await Promise.all([api('/api/products?per_page=1'), api('/api/quotes'), api('/api/ai/my-usage').catch(() => ({my_count:0,total_count:0}))])
     const quotes = q.quotes || []
     stats.value = {
       prodCount: p.total || 0, quoteCount: quotes.length,
       totalAmount: quotes.reduce((s, qq) => s + (qq.total_amount || 0), 0),
       downloadTotal: quotes.reduce((s, qq) => s + (qq.download_count || 0), 0),
       catCount: p.categories?.length || 0,
+      aiMyCount: ai.my_count || 0, aiTotalCount: ai.total_count || 0,
     }
     recentQuotes.value = quotes.slice(0, 10)
   } catch (e) { toast('加载概览失败', 'danger') }
@@ -452,6 +453,15 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
             <div><div class="text-muted" style="font-size:.72rem">下载</div><div class="fw-bold fs-4">{{ stats.downloadTotal }}</div></div>
           </div>
           <div class="mt-2 small text-muted">共 {{ stats.downloadTotal }} 次</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="stat-card">
+          <div class="d-flex align-items-center gap-3">
+            <div class="stat-icon" style="background:#ede9fe;color:#7c3aed"><i class="bi bi-robot"></i></div>
+            <div><div class="text-muted" style="font-size:.72rem">AI 使用</div><div class="fw-bold fs-4">{{ stats.aiTotalCount }}</div></div>
+          </div>
+          <div class="mt-2 small text-muted">我的 {{ stats.aiMyCount }} 次</div>
         </div>
       </div>
     </div>

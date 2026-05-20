@@ -2724,6 +2724,16 @@ def ai_usage_stats():
     })
 
 
+@app.route('/api/ai/my-usage', methods=['GET'])
+@require_auth
+def my_ai_usage():
+    """当前用户的AI使用次数（首页卡片用）"""
+    from sqlalchemy import func
+    my_count = AIUsageLog.query.filter_by(user_id=g.current_user.id).count()
+    total_count = AIUsageLog.query.count()
+    return jsonify({'my_count': my_count, 'total_count': total_count})
+
+
 _GW_SYSTEM_PROMPT = (
     '你是报价管理系统（/opt/quote-system）的 AI 助手。'
     '你可以用工具直接操作系统：\n'
