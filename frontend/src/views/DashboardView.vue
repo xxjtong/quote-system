@@ -303,6 +303,26 @@ function quickReply(text) {
   sendMessage(text)
 }
 
+function cleanContent(msg) {
+  if (!msg.parsed?.created_quote) return msg.content
+  return msg.content.replace(/https:\/\/bwh\.ddns\.mobi\/quote\/api\/quotes\/\d+\/export-excel\s*/g, '').trim()
+}
+
+function previewCreatedQuote(id) {
+  previewQuoteId.value = id
+  previewQuoteTitle.value = `报价单 #${id}`
+  showQuotePreview.value = true
+}
+
+function downloadCreatedQuote(url) {
+  const token = localStorage.getItem('quote_token')
+  const a = document.createElement('a')
+  a.href = url + '?token=' + token
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
 function formatTimings(t) {
   if (!t) return ''
   const lines = []
@@ -428,9 +448,9 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
             :class="msg.role === 'user' ? 'bg-primary text-white' : 'bg-light'"
             style="max-width:88%;padding:.5rem .75rem;border-radius:12px;font-size:.85rem;line-height:1.5;white-space:pre-wrap">
 
-            <!-- AI message: render with clickable #N references -->
+            <!-- AI message: render with clickable #N references, strip download URLs -->
             <template v-if="msg.role === 'assistant' && msg.content">
-              <span v-for="(part, pi) in msg.content.split(/(#\d+|报价单\s*\d+)/g)" :key="pi">
+              <span v-for="(part, pi) in cleanContent(msg).split(/(#\d+|报价单\s*\d+)/g)" :key="pi">
                 <template v-if="/^(?:#|报价单)\s*\d+$/.test(part)">
                   <a href="#" class="chat-ref-link" @click.prevent="jumpToQuote(parseInt(part.replace(/\D/g,'')))">{{ part }}</a>
                 </template>
@@ -476,6 +496,18 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
               <button class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
                 @click="createQuoteFromProduct('')">
                 <i class="bi bi-plus-circle me-1"></i>一键创建报价单
+              </button>
+            </div>
+
+            <!-- Created Quote: Preview + Download buttons -->
+            <div v-if="msg.role === 'assistant' && msg.parsed?.created_quote && !chatLoading" class="mt-2 d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
+                @click="previewCreatedQuote(msg.parsed.created_quote.id)">
+                <i class="bi bi-eye me-1"></i>预览报价单
+              </button>
+              <button class="btn btn-sm btn-primary" style="font-size:.78rem"
+                @click="downloadCreatedQuote(msg.parsed.created_quote.download_url)">
+                <i class="bi bi-download me-1"></i>下载Excel
               </button>
             </div>
 

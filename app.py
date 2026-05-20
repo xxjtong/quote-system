@@ -2570,6 +2570,11 @@ def _parse_reply_actions(reply_text):
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
             result['quick_replies'] = [p['name'] for p in result['products'][:6]]
 
+    # 提取已创建报价单 → 前端渲染预览/下载按钮
+    dl_match = re.search(r'(https://bwh\.ddns\.mobi/quote/api/quotes/(\d+)/export-excel)', reply_text)
+    if dl_match:
+        result['created_quote'] = {'id': int(dl_match.group(2)), 'download_url': dl_match.group(1)}
+
     return result
 
 
