@@ -891,11 +891,15 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
             timeout=60,
         )
         if r.status_code != 200:
+            import sys
+            print(f'[doubao_vision] API returned {r.status_code}: {r.text[:200]}', file=sys.stderr)
             return None
 
         result = r.json()
         raw_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
         if not raw_text:
+            import sys
+            print(f'[doubao_vision] Empty response content. Full: {str(result)[:300]}', file=sys.stderr)
             return None
 
         # 豆包直出 JSON，直接解析
@@ -942,8 +946,12 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
             }
             if product['name']:
                 return product
+        import sys
+        print(f'[doubao_vision] Parsed OK but name empty. raw_text[:200]: {raw_text[:200]}', file=sys.stderr)
         return None
-    except Exception:
+    except Exception as e:
+        import sys
+        print(f'[doubao_vision] Error: {e}', file=sys.stderr)
         return None
 
 
@@ -1024,7 +1032,11 @@ def deepseek_parse_product(text):
                 'category': str(parsed.get('category', '')).strip()[:50],
                 'remark': str(parsed.get('remark', '')).strip()[:500],
             }
-    except Exception:
+        import sys
+        print(f'[deepseek_parse] Failed. reply[:200]: {reply[:200]}', file=sys.stderr)
+    except Exception as e:
+        import sys
+        print(f'[deepseek_parse] Error: {e}', file=sys.stderr)
         pass
     return None
 
