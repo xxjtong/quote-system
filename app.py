@@ -870,10 +870,17 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
         '- function_desc 放主要功能特性，remark 放次要备注信息'
     )
 
+    # 构建 API URL：有 endpoint 则用 endpoint 模式
+    endpoint_id = os.environ.get('VOLCENGINE_ENDPOINT', '')
+    if endpoint_id:
+        api_url = f'https://ark.cn-beijing.volces.com/api/v3/endpoints/{endpoint_id}/chat/completions'
+    else:
+        api_url = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+
     try:
         import requests as http_req
         r = http_req.post(
-            'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+            api_url,
             headers={
                 'Authorization': f'Bearer {api_key}',
                 'Content-Type': 'application/json',
@@ -997,7 +1004,7 @@ def deepseek_parse_product(text):
             headers={'Content-Type': 'application/json'},
             method='POST'
         )
-        resp = urllib.request.urlopen(req, timeout=15)
+        resp = urllib.request.urlopen(req, timeout=30)
         result = _json.loads(resp.read())
         reply = ''
         for o in result.get('output', []):
