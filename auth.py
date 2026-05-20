@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 import bcrypt
+import hashlib
 import jwt
 from flask import Blueprint, request, jsonify, g
 
@@ -21,11 +22,27 @@ def hash_password(password):
 
 
 def verify_password(password, password_hash):
-    """验证 bcrypt 哈希"""
+    """验证密码 — 兼容旧SHA256哈希，登录成功后自动升级为bcrypt"""
+    # 先尝试 bcrypt
     try:
-        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+        if password_hash.startswith('$2b$') or password_hash.startswith('$2a$'):
+            return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
     except Exception:
-        return False
+        pass
+    # 旧 SHA256 兼容：格式 salt$hash
+    try:
+        if '$' in password_hash:
+            salt, h = password_hash.split('$', 1)
+            if hashlib.sha256((salt + password).encode()).hexdigest() == h:
+                return True  # 调用方负责升级哈希
+    except Exception:
+        pass
+    return False
+
+
+def is_legacy_hash(password_hash):
+    """判断是否为旧SHA256哈希（需要升级）"""
+    return bool(password_hash and '$' in password_hash and not password_hash.startswith('$2'))
 
 
 def create_token(user, app):
@@ -129,6 +146,9 @@ def auth_login():
         return jsonify({'error': '用户名或密码错误'}), 401
     if not user.is_active:
         return jsonify({'error': '账号已被停用'}), 403
+    # 自动升级旧SHA256哈希为bcrypt
+    if is_legacy_hash(user.password_hash):
+        user.password_hash = hash_password(data['password'].strip())
     user.last_login = datetime.now()
     db.session.commit()
     token = create_token(user, current_app)
