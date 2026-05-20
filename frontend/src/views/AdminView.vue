@@ -190,6 +190,11 @@ onMounted(() => {
       <div class="card-title-modern d-flex align-items-center justify-content-between">
         <div><i class="bi bi-robot text-primary"></i>AI 系统提示词</div>
         <div class="d-flex gap-1">
+          <button class="btn btn-primary btn-sm" @click="saveAiPrompt" :disabled="aiPromptSaving">
+            <i v-if="aiPromptSaving" class="bi bi-hourglass-split me-1"></i>
+            <i v-else class="bi bi-check-lg me-1"></i>
+            {{ aiPromptSaving ? '保存中...' : '保存' }}
+          </button>
           <button v-if="aiPromptCustom" class="btn btn-sm btn-outline-secondary" @click="resetAiPrompt" :disabled="aiPromptSaving">
             <i class="bi bi-arrow-counterclockwise"></i> 恢复默认
           </button>
@@ -221,12 +226,13 @@ onMounted(() => {
     <!-- Registration -->
     <div class="card-modern mb-3">
       <div class="card-title-modern"><i class="bi bi-people text-primary"></i>注册控制</div>
-      <div class="d-flex align-items-center gap-3">
+      <div class="d-flex align-items-center gap-3 py-1">
         <label class="switch">
           <input type="checkbox" v-model="registrationOpen" @change="toggleRegistration">
           <span class="slider"></span>
         </label>
-        <span>{{ registrationOpen ? '允许新用户注册' : '已关闭注册' }}</span>
+        <span class="fw-medium">{{ registrationOpen ? '允许新用户注册' : '已关闭注册' }}</span>
+        <small class="text-muted ms-auto">{{ registrationOpen ? '任何人可注册账号' : '仅管理员可创建用户' }}</small>
       </div>
     </div>
 
