@@ -242,8 +242,25 @@ async function autoAddProduct() {
     }
   }
 
+  // 4. Fallback: Chinese bigram search (for pure-Chinese solution names like 灯光联动控制方案)
+  if (found.length === 0 && /^[\u4e00-\u9fff]+$/.test(name) && name.length >= 4) {
+    const bigrams = []
+    for (let i = 0; i < name.length - 1; i++) {
+      bigrams.push(name.slice(i, i + 2))
+    }
+    const uniqBigrams = [...new Set(bigrams)]
+    const seen = new Set()
+    for (const bg of uniqBigrams.slice(0, 8)) {
+      try {
+        const data = await api(`/api/products?search=${encodeURIComponent(bg)}&per_page=5`)
+        const hits = (data.products || []).filter(p => p.is_active !== false && !seen.has(p.id))
+        for (const p of hits) { seen.add(p.id); found.push(p) }
+      } catch {}
+    }
+  }
+
   if (found.length === 0) {
-    toast(`未找到产品「${name}」`, 'warning')
+    toast(`未找到产品「${name}」，请手动添加`, 'warning')
     return
   }
   for (const p of found) {
@@ -255,6 +272,8 @@ async function autoAddProduct() {
   }
   if (found.length === 1) {
     form.title = form.title || `${found[0].name} 报价`
+  } else {
+    form.title = form.title || `${name} 报价`
   }
   toast(`已添加 ${found.length} 个产品`)
 }
