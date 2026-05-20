@@ -1,9 +1,9 @@
 """认证模块 — JWT + 登录/注册/会话（Flask Blueprint）"""
-import hashlib
 import secrets
 from datetime import datetime, timedelta
 from functools import wraps
 
+import bcrypt
 import jwt
 from flask import Blueprint, request, jsonify, g
 
@@ -16,15 +16,14 @@ auth_bp = Blueprint('auth', __name__)
 # ─── Helpers ─────────────────────────────────
 
 def hash_password(password):
-    salt = secrets.token_hex(16)
-    h = hashlib.sha256((salt + password).encode()).hexdigest()
-    return f'{salt}${h}'
+    """使用 bcrypt 哈希密码（自动加盐，work factor=12）"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
 
 
 def verify_password(password, password_hash):
+    """验证 bcrypt 哈希"""
     try:
-        salt, h = password_hash.split('$', 1)
-        return hashlib.sha256((salt + password).encode()).hexdigest() == h
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
     except Exception:
         return False
 
@@ -158,8 +157,8 @@ def update_profile():
         current_pw = (data.get('current_password') or '').strip()
         if not verify_password(current_pw, user.password_hash):
             return jsonify({'error': '当前密码错误'}), 400
-        if len(new_pw) < 3:
-            return jsonify({'error': '新密码至少3位'}), 400
+        if len(new_pw) < 8:
+            return jsonify({'error': '新密码至少8位'}), 400
         user.password_hash = hash_password(new_pw)
         changed = True
 

@@ -31,7 +31,18 @@ from models import Product, Quote, QuoteItem, User, DownloadLog, FieldSetting, S
 from auth import auth_bp, hash_password, verify_password, create_token, require_auth, require_admin, _is_registration_open
 
 app = Flask(__name__)
-CORS(app)
+# CORS 限制：仅允许同源和已知域名
+_cors_origins = os.environ.get('QUOTE_CORS_ORIGINS', '').strip()
+cors_kwargs = {}
+if _cors_origins:
+    cors_kwargs['origins'] = [o.strip() for o in _cors_origins.split(',') if o.strip()]
+else:
+    # 默认仅允许同源（生产环境应设置 QUOTE_CORS_ORIGINS）
+    cors_kwargs['origins'] = [
+        'https://bwh.ddns.mobi',
+        'http://localhost:5173',  # Vite dev
+    ]
+CORS(app, **cors_kwargs)
 
 # Register auth blueprint
 app.register_blueprint(auth_bp)
@@ -45,7 +56,15 @@ EXPORT_DIR.mkdir(exist_ok=True)
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{BASE_DIR}/quote.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
-app.config['JWT_SECRET'] = os.environ.get('QUOTE_JWT_SECRET', secrets.token_hex(32))
+app.config['JWT_SECRET'] = os.environ.get('QUOTE_JWT_SECRET', '')
+if not app.config['JWT_SECRET']:
+    # 尝试从文件加载（多worker共享同一secret）
+    _secret_file = BASE_DIR / '.jwt_secret'
+    if _secret_file.exists():
+        app.config['JWT_SECRET'] = _secret_file.read_text().strip()
+    if not app.config['JWT_SECRET']:
+        app.config['JWT_SECRET'] = secrets.token_hex(32)
+        _secret_file.write_text(app.config['JWT_SECRET'])
 app.config['JWT_EXPIRY_HOURS'] = 72
 app.config['DEFAULT_ADMIN_PASSWORD'] = os.environ.get('QUOTE_ADMIN_PASSWORD', 'admin123')
 app.config['REGISTRATION_OPEN'] = os.environ.get('QUOTE_REGISTRATION', 'true').lower() == 'true'
@@ -282,8 +301,8 @@ def reset_user_password(user_id):
         return jsonify({'error': '用户不存在'}), 404
     data = request.get_json()
     new_pw = (data.get('password') or '').strip()
-    if len(new_pw) < 3:
-        return jsonify({'error': '密码至少3位'}), 400
+    if len(new_pw) < 8:
+        return jsonify({'error': '密码至少8位'}), 400
     user.password_hash = hash_password(new_pw)
     db.session.commit()
     return jsonify({'success': True, 'username': user.username})
@@ -306,6 +325,36 @@ def delete_user(user_id):
 
 # ─── API Routes ──────────────────────────────────────────────
 
+# ─── 下载 Ticket 机制（替代 URL token，防泄露/CSRF） ───
+_download_tickets = {}  # {ticket_str: {'user_id': int, 'exp': float}}
+_TICKET_TTL = 120  # 秒
+
+@app.route('/api/download-ticket', methods=['POST'])
+def create_download_ticket():
+    """已认证用户获取短期下载ticket（2分钟有效）"""
+    # 复用已有的认证逻辑：g.current_user 必须已设置
+    if not hasattr(g, 'current_user') or not g.current_user:
+        return jsonify({'error': '请先登录'}), 401
+    ticket = secrets.token_urlsafe(32)
+    _download_tickets[ticket] = {
+        'user_id': g.current_user.id,
+        'exp': datetime.utcnow().timestamp() + _TICKET_TTL,
+    }
+    # 清理过期ticket
+    now = datetime.utcnow().timestamp()
+    expired = [k for k, v in _download_tickets.items() if v['exp'] < now]
+    for k in expired: del _download_tickets[k]
+    return jsonify({'ticket': ticket})
+
+def _validate_download_ticket(ticket_str):
+    """验证下载ticket，返回 user_id 或 None"""
+    entry = _download_tickets.get(ticket_str)
+    if not entry: return None
+    if datetime.utcnow().timestamp() > entry['exp']:
+        _download_tickets.pop(ticket_str, None)
+        return None
+    return entry['user_id']
+
 # 公开路由（无需登录）
 PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'index', 'serve_upload', 'export_product_template', 'get_product_image'}
 
@@ -317,22 +366,31 @@ def check_auth():
     endpoint = request.endpoint
     if endpoint in PUBLIC_ROUTES or (endpoint and endpoint.startswith('static')):
         return None
-    # 鉴权
+    # 鉴权：优先 Bearer Token，其次 download_ticket（短期一次性）
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    if not token:
-        token = request.args.get('token', '')  # URL 参数兜底（用于 <a> 标签下载等场景）
-    if not token:
-        return jsonify({'error': '请先登录'}), 401
-    try:
-        data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
-        user = db.session.get(User, data['user_id'])
-        if not user or not user.is_active:
-            return jsonify({'error': '账号无效或已停用'}), 403
-        g.current_user = user
-    except jwt.ExpiredSignatureError:
-        return jsonify({'error': '登录已过期，请重新登录'}), 401
-    except:
-        return jsonify({'error': '认证失败'}), 401
+    if token:
+        try:
+            data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
+            user = db.session.get(User, data['user_id'])
+            if not user or not user.is_active:
+                return jsonify({'error': '账号无效或已停用'}), 403
+            g.current_user = user
+            return None
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': '登录已过期，请重新登录'}), 401
+        except Exception:
+            return jsonify({'error': '认证失败'}), 401
+    # 下载 ticket 兜底（仅用于文件下载场景，短期2分钟有效）
+    dlt = request.args.get('download_ticket', '')
+    if dlt:
+        uid = _validate_download_ticket(dlt)
+        if uid:
+            user = db.session.get(User, uid)
+            if user and user.is_active:
+                g.current_user = user
+                return None
+        return jsonify({'error': '下载凭证无效或已过期'}), 401
+    return jsonify({'error': '请先登录'}), 401
 
 # 字段可见性缓存
 _field_cache = None
@@ -704,7 +762,12 @@ def upload_image():
 
 @app.route('/api/download-image', methods=['POST'])
 def download_image():
-    """从URL下载图片并保存到本地"""
+    """从URL下载图片并保存到本地（防SSRF）"""
+    import ipaddress
+    import socket
+    import urllib.request
+    import base64
+
     data = request.get_json()
     url = (data.get('url') or '').strip()
     if not url:
@@ -713,7 +776,22 @@ def download_image():
     if not url.startswith(('http://', 'https://')):
         return jsonify({'error': '仅支持 http/https 链接'}), 400
 
-    import urllib.request
+    # ── SSRF 防护：解析域名，拒绝内网/保留IP ──
+    try:
+        from urllib.parse import urlparse
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return jsonify({'error': 'URL格式无效'}), 400
+        resolved_ip = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, _, _, _, sockaddr in resolved_ip:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return jsonify({'error': '不允许访问内网或保留地址'}), 400
+    except socket.gaierror:
+        return jsonify({'error': '域名解析失败'}), 400
+    except Exception:
+        return jsonify({'error': 'URL校验失败'}), 400
+
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -2373,6 +2451,8 @@ def download_logs_stats():
 @app.route('/api/quotes/<int:quote_id>/preview', methods=['GET'])
 def preview_quote_html(quote_id):
     """返回报价单的HTML预览（17列格式匹配原模板）"""
+    import html as _html  # 用于转义用户输入防XSS
+
     quote, err, status = check_quote_owner(quote_id)
     if not quote:
         return err, status
@@ -2388,13 +2468,17 @@ def preview_quote_html(quote_id):
         try: return f'{int(float(n))}'
         except: return str(n)
 
+    def e(s):
+        """html.escape shorthand — 防止用户输入中的HTML/JS注入"""
+        return _html.escape(str(s)) if s else ''
+
     info_parts = []
     company = get_setting('company_name', '').strip()
-    if company: info_parts.append(f'公司：{company}')
-    if quote.client: info_parts.append(f'客户：{quote.client}')
-    if quote.contact: info_parts.append(f'联系人：{quote.contact}')
-    if quote.phone: info_parts.append(f'电话：{quote.phone}')
-    if quote.quote_date: info_parts.append(f'日期：{quote.quote_date}')
+    if company: info_parts.append(f'公司：{e(company)}')
+    if quote.client: info_parts.append(f'客户：{e(quote.client)}')
+    if quote.contact: info_parts.append(f'联系人：{e(quote.contact)}')
+    if quote.phone: info_parts.append(f'电话：{e(quote.phone)}')
+    if quote.quote_date: info_parts.append(f'日期：{e(quote.quote_date)}')
     if quote.valid_days: info_parts.append(f'有效期：{quote.valid_days}天')
     if quote.tax_rate and quote.tax_rate > 0: info_parts.append(f'税率：{quote.tax_rate}%')
     info_line = '  |  '.join(info_parts) if info_parts else ''
@@ -2429,16 +2513,16 @@ def preview_quote_html(quote_id):
         items_html += f'''
         <tr>
             <td>{i}</td>
-            <td><strong>{item.product_name}</strong></td>
-            <td>{item.product_spec or ''}</td>
-            <td>{item.product_sku or supplier_sku}</td>
-            <td>{prod_function_desc or ''}</td>
+            <td><strong>{e(item.product_name)}</strong></td>
+            <td>{e(item.product_spec or '')}</td>
+            <td>{e(item.product_sku or supplier_sku)}</td>
+            <td>{e(prod_function_desc or '')}</td>
             <td>{fmt(up)}</td>
             <td>{fmt_int(qty)}</td>
             <td>{fmt(subtotal)}</td>
             <td>0%</td>
             <td>{fmt(deal_price)}</td>
-            <td>{item.remark or ''}</td>
+            <td>{e(item.remark or '')}</td>
             <td style="text-align:center;vertical-align:middle">{img_cell}</td>
         </tr>'''
 
@@ -2462,7 +2546,7 @@ def preview_quote_html(quote_id):
       <td colspan="12" style="font-size:9pt;color:#666;padding:4px 8px;text-align:left;font-weight:normal">{info_line}</td>
     </tr>
     <tr>
-      <th colspan="12" style="background:#FFFF00;font-size:10pt;font-weight:bold;text-align:center;padding:4px">{quote.title or '报价单'}</th>
+      <th colspan="12" style="background:#FFFF00;font-size:10pt;font-weight:bold;text-align:center;padding:4px">{e(quote.title or '报价单')}</th>
     </tr>
     <tr>
       <th style="width:50px">序号</th>
@@ -2490,7 +2574,7 @@ def preview_quote_html(quote_id):
   </tfoot>
 </table>
 </div>
-<div class="pv-note">{quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。'}</div>'''
+<div class="pv-note">{e(quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。')}</div>'''
     return html
 
 

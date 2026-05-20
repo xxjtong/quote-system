@@ -1,7 +1,8 @@
 <script setup>
-import { ref, watch, inject } from 'vue'
+import { ref, watch, inject, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
+import DOMPurify from 'dompurify'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -16,6 +17,10 @@ const { api } = useApi()
 const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
 const previewHtml = ref('')
+const safeHtml = computed(() => DOMPurify.sanitize(previewHtml.value, {
+  ALLOWED_TAGS: ['table','thead','tbody','tfoot','tr','th','td','strong','em','b','i','span','div','p','br','img','style'],
+  ALLOWED_ATTR: ['class','style','colspan','rowspan','src'],
+}))
 const previewLoading = ref(false)
 const title = ref('')
 
@@ -56,8 +61,15 @@ async function loadPreview() {
 async function downloadQuote() {
   const token = localStorage.getItem('quote_token')
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const url = BASE_URL + `/api/quotes/${props.quoteId}/export-excel?token=${encodeURIComponent(token)}&download_date=${dateStr}`
   try {
+    // 先获取短期下载ticket（避免JWT暴露在URL中）
+    const tr = await fetch(BASE_URL + '/api/download-ticket', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token }
+    })
+    if (!tr.ok) { toast(`获取下载凭证失败 (${tr.status})`, 'danger'); return }
+    const { ticket } = await tr.json()
+    const url = BASE_URL + `/api/quotes/${props.quoteId}/export-excel?download_ticket=${encodeURIComponent(ticket)}&download_date=${dateStr}`
     const r = await fetch(url)
     if (!r.ok) { toast(`下载失败 (${r.status})`, 'danger'); return }
     const blob = await r.blob()
@@ -117,7 +129,7 @@ function editQuote() {
               <div class="spinner-border text-primary" role="status"></div>
               <p class="text-muted mt-2 small">加载预览...</p>
             </div>
-            <div v-else class="preview-wrapper" v-html="previewHtml"></div>
+            <div v-else class="preview-wrapper" v-html="safeHtml"></div>
           </div>
           <div class="modal-footer" style="gap:8px">
             <button class="btn btn-primary btn-modern" @click="editQuote()">编辑</button>
