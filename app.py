@@ -941,7 +941,7 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
                 'category': str(parsed.get('category', '')).strip()[:50],
                 'function_desc': str(parsed.get('function_desc', '')).strip()[:500],
                 'remark': str(parsed.get('remark', '')).strip()[:500],
-                '_raw': raw_text,
+                '_raw': json.dumps(result, ensure_ascii=False),
             }
             if product['name']:
                 return product

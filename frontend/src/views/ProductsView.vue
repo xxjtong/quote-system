@@ -811,12 +811,12 @@ onMounted(() => {
                           <input class="form-control form-control-sm" v-model="smartEdit.unit" style="font-size:.78rem">
                         </div>
                         <div class="col-12 mb-1">
-                          <label class="form-label-modern mb-0" style="font-size:.7rem">备注</label>
-                          <input class="form-control form-control-sm" v-model="smartEdit.remark" style="font-size:.78rem">
-                        </div>
-                        <div class="col-12 mb-1">
                           <label class="form-label-modern mb-0" style="font-size:.7rem">功能描述</label>
                           <textarea class="form-control form-control-sm" v-model="smartEdit.function_desc" rows="2" style="font-size:.78rem;resize:vertical"></textarea>
+                        </div>
+                        <div class="col-12 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">备注</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.remark" style="font-size:.78rem">
                         </div>
                       </div>
                       <!-- 原始识别数据 -->
