@@ -2565,6 +2565,11 @@ def _parse_reply_actions(reply_text):
         except ValueError:
             pass
 
+    # 多产品选型场景 → 每个产品一个快捷按钮
+    if not result['quick_replies'] and len(result['products']) >= 2:
+        if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
+            result['quick_replies'] = [p['name'] for p in result['products'][:6]]
+
     return result
 
 
