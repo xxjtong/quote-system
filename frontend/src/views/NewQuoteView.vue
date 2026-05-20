@@ -320,7 +320,7 @@ async function autoAddProduct() {
         </div>
         <div class="col-md-9">
           <label class="form-label-modern">备注</label>
-          <input class="form-control" v-model="form.notes" placeholder="备注">
+          <textarea class="form-control" v-model="form.notes" placeholder="备注" rows="2"></textarea>
         </div>
       </div>
     </div>
@@ -381,6 +381,14 @@ async function autoAddProduct() {
           </tfoot>
         </table>
       </div>
+    </div>
+
+    <!-- Bottom save button -->
+    <div class="d-flex justify-content-end mt-3">
+      <button class="btn btn-primary btn-modern btn-lg" @click="saveQuote" :disabled="saving">
+        <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
+        <i v-else class="bi bi-check-lg me-1"></i>保存报价单
+      </button>
     </div>
 
     <!-- Product Picker Modal -->

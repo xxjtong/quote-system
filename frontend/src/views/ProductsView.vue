@@ -539,7 +539,7 @@ onMounted(() => {
                   :checked="allSelected"
                   @change="toggleAll">
               </th>
-              <th>产品信息</th>
+              <th>产品名称</th>
               <th>规格型号</th>
               <th>图片</th>
               <th>分类</th>
@@ -569,7 +569,7 @@ onMounted(() => {
                 <div v-if="p.function_desc" class="text-truncate small text-muted" style="max-width:200px">{{ p.function_desc }}</div>
               </td>
               <td>
-                <span class="text-truncate d-inline-block" style="max-width:120px">{{ p.spec || '—' }}</span>
+                <span class="text-truncate d-inline-block" style="max-width:120px" :title="p.spec || ''">{{ p.spec || '—' }}</span>
               </td>
               <td>
                 <div class="img-cell" style="position:relative;display:inline-block">

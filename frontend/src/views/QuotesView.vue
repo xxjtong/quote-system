@@ -302,7 +302,7 @@ function closePreview() {
               <td class="fw-medium">{{ formatMoney(q.total_amount) }}</td>
               <td>{{ q.created_by_name || '—' }}</td>
               <td class="text-muted small">{{ q.quote_date || '—' }}</td>
-              <td>{{ q.download_count || 0 }}</td>
+              <td>{{ q.download_count || 0 }}次</td>
               <td>
                 <div class="d-flex flex-wrap gap-1">
                   <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="viewQuote(q.id, q.title)" title="预览">
