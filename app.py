@@ -2417,6 +2417,19 @@ def ai_token():
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
 _gateway_url = 'http://127.0.0.1:8643'
 
+_AVAILABLE_MODELS = [
+    {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash', 'desc': '快速响应，适合日常问答'},
+    {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
+    {'id': 'gemini-2.5-flash', 'name': 'Gemini 2.5 Flash', 'desc': 'Google 快速模型'},
+    {'id': 'gemini-3.1-flash-lite', 'name': 'Gemini 3.1 Flash Lite', 'desc': 'Google 轻量模型，配额高'},
+]
+
+
+@app.route('/api/chat/models', methods=['GET'])
+def get_chat_models():
+    """返回可用 AI 模型列表"""
+    return jsonify({'models': _AVAILABLE_MODELS, 'default': _ai_model})
+
 
 _GW_SYSTEM_PROMPT = (
     '你是报价管理系统（/opt/quote-system）的 AI 助手。'
@@ -2452,14 +2465,32 @@ def _parse_reply_actions(reply_text):
     question_patterns = [
         (r'沿用.*还是.*新.*', ['沿用上一份', '新建报价单']),
         (r'新建.*还是.*合并', ['新建报价单', '合并到已有']),
-        (r'是.*还是.*', ['第一个选项', '第二个选项']),
         (r'需要我(?:帮[您你])?.*吗[？?]', ['好的，开始吧', '先不用']),
         (r'哪个[？?]', []),  # 不生成快捷回复的产品选择题
     ]
-    for pat, replies in question_patterns:
-        if re.search(pat, reply_text) and replies:
-            result['quick_replies'] = replies
-            break
+    # 「是A还是B」→ 按标题/子句/短语三级提取实际选项
+    is_or_pat = re.search(
+        r'(?:是|用|选|要)\s*(.+?)\s*还是\s*(.+?)[？?\s]*$',
+        reply_text
+    )
+    if is_or_pat:
+        a_raw, b_raw = is_or_pat.group(1), is_or_pat.group(2)
+        def _clean_choice(s):
+            s = s.strip()
+            s = re.sub(r'^[给用选要]', '', s).strip()  # 去「给/用/选/要」前缀
+            s = re.sub(r'[呢啊吧的了么吗]$', '', s)
+            s = re.sub(r'^["\']|["\']$', '', s)
+            return s.strip() or s
+        a, b = _clean_choice(a_raw), _clean_choice(b_raw)
+        if len(a) >= 1 and len(b) >= 1:
+            result['quick_replies'] = [a, b]
+
+    # 回退到固定模式
+    if not result['quick_replies']:
+        for pat, replies in question_patterns:
+            if re.search(pat, reply_text) and replies:
+                result['quick_replies'] = replies
+                break
 
     # 检测推荐了产品 → 提取产品名+价格
     # 格式: "AI热电堆人数统计传感器 - ¥429"
@@ -2512,7 +2543,7 @@ def ai_chat():
     conversation = f'quote-user-{user.id}'
 
     body = {
-        'model': _ai_model,
+        'model': data.get('model') or _ai_model,
         'input': user_input,
         'conversation': conversation,
         'max_output_tokens': 2000,

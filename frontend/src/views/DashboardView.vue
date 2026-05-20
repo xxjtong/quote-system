@@ -43,6 +43,32 @@ const phases = ['连接', '思考', '生成回复']
 const phaseIcons = ['bi-plug', 'bi-cpu', 'bi-pencil']
 let timerInterval = null
 
+// Model selector
+const availableModels = ref([])
+const selectedModel = ref(localStorage.getItem('ai_model') || '')
+const defaultModel = ref('')
+
+async function fetchModels() {
+  try {
+    const token = localStorage.getItem('quote_token')
+    const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+    const resp = await fetch(BASE_URL + '/api/chat/models', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (resp.ok) {
+      const data = await resp.json()
+      availableModels.value = data.models || []
+      defaultModel.value = data.default || 'deepseek-v4-flash'
+      if (!selectedModel.value) selectedModel.value = defaultModel.value
+    }
+  } catch (e) { /* silent */ }
+}
+
+function onModelChange(e) {
+  selectedModel.value = e.target.value
+  localStorage.setItem('ai_model', selectedModel.value)
+}
+
 const historyBtn = ref(null)
 const historyOpen = ref(false)
 const chatHistory = ref([])
@@ -154,7 +180,7 @@ async function sendMessage(textOverride) {
     const resp = await fetch(BASE_URL + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ input: text, stream: true }),
+      body: JSON.stringify({ input: text, stream: true, model: selectedModel.value }),
     })
 
     if (!resp.ok) {
@@ -265,7 +291,6 @@ async function createQuoteFromProduct(productName) {
 
 // Handle quick reply button
 function quickReply(text) {
-  chatMessages.value.push({ role: 'user', content: text })
   sendMessage(text)
 }
 
@@ -277,7 +302,7 @@ function formatTimings(t) {
   return lines.join(' · ')
 }
 
-onMounted(() => { fetchDashboard(); loadHistory() })
+onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
 </script>
 
 <template>
@@ -348,7 +373,12 @@ onMounted(() => { fetchDashboard(); loadHistory() })
           <i class="bi bi-robot text-primary"></i>AI 产品助手
           <small class="text-muted ms-2" style="font-weight:400">问产品、推方案、查参数</small>
         </div>
-        <div class="d-flex gap-1">
+        <div class="d-flex align-items-center gap-2">
+          <select v-if="availableModels.length" class="form-select form-select-sm" style="width:auto;font-size:.75rem"
+            :value="selectedModel" @change="onModelChange" title="选择 AI 模型">
+            <option v-for="m in availableModels" :key="m.id" :value="m.id"
+              :selected="m.id === (selectedModel || defaultModel)">{{ m.name }}</option>
+          </select>
           <button class="btn btn-sm btn-outline-secondary" @click="newChat" title="新对话"><i class="bi bi-plus-lg"></i></button>
           <button class="btn btn-sm btn-outline-secondary" @click="openHistory" ref="historyBtn" :class="{ active: historyOpen }" title="历史记录"><i class="bi bi-list"></i></button>
         </div>
