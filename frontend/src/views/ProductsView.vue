@@ -471,7 +471,7 @@ onMounted(() => {
     <div class="page-header justify-content-between">
       <h5><i class="bi bi-box"></i>产品管理</h5>
       <div class="d-flex gap-2">
-        <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="exportTemplate">
+        <button class="btn btn-outline-primary btn-modern" @click="exportTemplate">
           <i class="bi bi-download"></i> 下载模板
         </button>
         <button class="btn btn-primary btn-modern" @click="showAddProduct">

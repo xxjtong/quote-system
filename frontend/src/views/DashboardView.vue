@@ -382,9 +382,9 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
     <div class="card-modern anim-in">
       <div class="card-title-modern"><i class="bi bi-lightning text-primary"></i>快速操作</div>
       <div class="d-flex flex-wrap gap-2">
-        <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="goTo('import')"><i class="bi bi-upload me-1"></i>从Excel导入产品</button>
+        <button class="btn btn-outline-primary btn-modern" @click="goTo('import')"><i class="bi bi-upload me-1"></i>从Excel导入产品</button>
         <button class="btn btn-outline-primary btn-modern" @click="goTo('newquote')"><i class="bi bi-plus-circle me-1"></i>新建报价单</button>
-        <button v-if="isAdmin()" class="btn btn-outline-primary btn-modern" @click="goTo('products')"><i class="bi bi-box-seam me-1"></i>管理产品库</button>
+        <button class="btn btn-outline-primary btn-modern" @click="goTo('products')"><i class="bi bi-box-seam me-1"></i>管理产品库</button>
       </div>
     </div>
 
