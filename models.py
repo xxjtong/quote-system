@@ -204,3 +204,28 @@ class AIChatSession(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
     initialized_at = db.Column(db.DateTime, default=datetime.now)
     prompt_hash = db.Column(db.String(64), nullable=True)
+
+
+class AIUsageLog(db.Model):
+    """AI 调用统计 — 记录每次chat/recognize调用"""
+    __tablename__ = 'ai_usage_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    action = db.Column(db.String(30), nullable=False, index=True)  # 'chat' / 'recognize'
+    model = db.Column(db.String(50), nullable=True)
+    elapsed = db.Column(db.Float, default=0)  # 秒
+    success = db.Column(db.Boolean, default=True)
+    error = db.Column(db.String(200), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'action': self.action,
+            'model': self.model or '',
+            'elapsed': self.elapsed,
+            'success': self.success,
+            'error': self.error or '',
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
+        }

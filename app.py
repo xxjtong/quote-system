@@ -27,7 +27,7 @@ from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
 from openpyxl.utils import get_column_letter
 
 from extensions import db
-from models import Product, Quote, QuoteItem, User, DownloadLog, FieldSetting, SystemSetting, AIChatSession
+from models import Product, Quote, QuoteItem, User, DownloadLog, FieldSetting, SystemSetting, AIChatSession, AIUsageLog
 from auth import auth_bp, hash_password, verify_password, create_token, require_auth, require_admin, _is_registration_open
 
 app = Flask(__name__)
@@ -855,13 +855,12 @@ def ocr_image():
     if not file:
         return jsonify({'error': '请上传图片文件'}), 400
 
+    tmp_path = UPLOAD_DIR / f'_ocr_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
     try:
         # 保存临时文件
-        tmp_path = UPLOAD_DIR / f'_ocr_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
         file.save(str(tmp_path))
         size = os.path.getsize(tmp_path)
         if size > 5 * 1024 * 1024:
-            os.remove(tmp_path)
             return jsonify({'error': '图片不能超过5MB'}), 400
 
         # 调用OCR.space免费API
@@ -875,11 +874,10 @@ def ocr_image():
                     'isOverlayRequired': False,
                     'detectOrientation': True,
                     'scale': True,
-                    'apikey': 'helloworld',
+                    'apikey': os.environ.get('OCR_SPACE_API_KEY', 'helloworld'),
                 },
                 timeout=30,
             )
-        os.remove(tmp_path)
 
         if r.status_code != 200:
             return jsonify({'error': 'OCR服务暂时不可用'}), 502
@@ -893,6 +891,9 @@ def ocr_image():
             return jsonify({'error': f'OCR识别失败: {err}'}), 400
     except Exception as e:
         return jsonify({'error': f'OCR处理失败: {str(e)}'}), 500
+    finally:
+        try: os.remove(tmp_path)
+        except: pass
 
 
 def _ocr_fallback(image_path):
@@ -905,7 +906,7 @@ def _ocr_fallback(image_path):
                 files={'file': fp},
                 data={'language': 'chs', 'isOverlayRequired': False,
                       'detectOrientation': True, 'scale': True,
-                      'apikey': 'helloworld'},
+                      'apikey': os.environ.get('OCR_SPACE_API_KEY', 'helloworld')},
                 timeout=30,
             )
         if r.status_code != 200:
@@ -978,50 +979,12 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
             _debug_log(f'[doubao_vision] Empty response content. Full: {str(result)[:300]}')
             return None
 
-        # 豆包直出 JSON，直接解析
-        import re, json
-        parsed = None
-
-        # 策略1: 直接解析整个文本
-        try:
-            parsed = json.loads(raw_text.strip())
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-        # 策略2: 提取 ```json ... ``` 代码块
-        if not parsed:
-            m = re.search(r'```(?:json)?\s*\n?(\{.+\})\s*```', raw_text, re.DOTALL)
-            if m:
-                try:
-                    parsed = json.loads(m.group(1))
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-        # 策略3: 提取包含 "name" 字段的 JSON 对象
-        if not parsed:
-            m = re.search(r'\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}', raw_text, re.DOTALL)
-            if not m:
-                m = re.search(r'\{.+\}', raw_text, re.DOTALL)
-            if m:
-                try:
-                    parsed = json.loads(m.group(0))
-                except (json.JSONDecodeError, ValueError):
-                    pass
+        # 解析 JSON（公共3层兜底）
+        parsed = _parse_json_reply(raw_text)
 
         if parsed:
-            product = {
-                'name': str(parsed.get('name', '')).strip()[:20],
-                'spec': str(parsed.get('spec', '')).strip()[:100],
-                'supplier': str(parsed.get('supplier', '')).strip()[:50],
-                'price': _safe_number(parsed.get('price', 0)),
-                'cost_price': _safe_number(parsed.get('cost_price', 0)),
-                'unit': str(parsed.get('unit', '')).strip()[:10],
-                'category': str(parsed.get('category', '')).strip()[:50],
-                'function_desc': str(parsed.get('function_desc', '')).strip()[:500],
-                'remark': str(parsed.get('remark', '')).strip()[:500],
-                '_raw': json.dumps(result, ensure_ascii=False),
-            }
-            if product['name']:
+            product = _product_from_parsed(parsed, json.dumps(result, ensure_ascii=False))
+            if product:
                 return product
         _debug_log(f'[doubao_vision] Parsed but name empty. raw_text[:200]: {raw_text[:200]}')
         return None
@@ -1031,13 +994,26 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
 
 
 def _debug_log(msg):
-    """写调试日志到 gunicorn error log 文件"""
+    """写调试日志到 gunicorn error log 文件（相对于项目BASE_DIR）"""
     try:
-        with open('/opt/quote-system/gunicorn-error.log', 'a') as f:
+        with open(BASE_DIR / 'gunicorn-error.log', 'a') as f:
             from datetime import datetime
             f.write(f'[{datetime.now().isoformat()}] {msg}\n')
     except Exception:
         pass
+
+
+def _log_ai_usage(user_id, action, model='', elapsed=0, success=True, error=''):
+    """记录AI调用到数据库（静默失败，不影响主流程）"""
+    try:
+        db.session.add(AIUsageLog(
+            user_id=user_id, action=action, model=model[:50],
+            elapsed=round(elapsed, 2), success=success, error=(error or '')[:200]
+        ))
+        db.session.commit()
+    except Exception:
+        try: db.session.rollback()
+        except: pass
 
 
 def _safe_number(val):
@@ -1050,6 +1026,62 @@ def _safe_number(val):
         return round(float(val), 2)
     except (ValueError, TypeError):
         return 0
+
+
+def _parse_json_reply(text):
+    """从LLM回复中提取JSON dict — 3层兜底：直接解析→代码块→正则。
+    返回 dict 或 None。doubao_vision 和 deepseek_parse 共用。
+    """
+    import re, json
+    parsed = None
+    text = text.strip()
+
+    # 策略1: 直接解析
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 策略2: ```json ... ``` 代码块
+    if not parsed:
+        m = re.search(r'```(?:json)?\s*\n?(\{.+\})\s*```', text, re.DOTALL)
+        if m:
+            try:
+                parsed = json.loads(m.group(1))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    # 策略3: 包含 "name" 字段的 JSON 对象（或任意 {...}）
+    if not parsed:
+        m = re.search(r'\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}', text, re.DOTALL)
+        if not m:
+            m = re.search(r'\{.+\}', text, re.DOTALL)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    return parsed
+
+
+def _product_from_parsed(parsed, raw=''):
+    """从解析出的dict构建标准化产品dict，截断字段长度"""
+    if not parsed:
+        return None
+    product = {
+        'name': str(parsed.get('name', '')).strip()[:20],
+        'spec': str(parsed.get('spec', '')).strip()[:100],
+        'supplier': str(parsed.get('supplier', '')).strip()[:50],
+        'price': _safe_number(parsed.get('price', 0)),
+        'cost_price': _safe_number(parsed.get('cost_price', 0)),
+        'unit': str(parsed.get('unit', '')).strip()[:10],
+        'category': str(parsed.get('category', '')).strip()[:50],
+        'function_desc': str(parsed.get('function_desc', '')).strip()[:500],
+        'remark': str(parsed.get('remark', '')).strip()[:500],
+        '_raw': raw,
+    }
+    return product if product['name'] else None
 
 
 def deepseek_parse_product(text):
@@ -1085,40 +1117,12 @@ def deepseek_parse_product(text):
                     reply = content[0].get('text', '')
                 break
         reply = reply.strip()
-        # 解析 JSON（3 层兜底）
-        import re
-        parsed = None
-        try:
-            parsed = _json.loads(reply)
-        except (_json.JSONDecodeError, ValueError):
-            m = re.search(r'```(?:json)?\s*\n?(\{.+\})\s*```', reply, re.DOTALL)
-            if m:
-                try:
-                    parsed = _json.loads(m.group(1))
-                except (_json.JSONDecodeError, ValueError):
-                    pass
-        if not parsed:
-            m = re.search(r'\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}', reply, re.DOTALL)
-            if not m:
-                m = re.search(r'\{.+\}', reply, re.DOTALL)
-            if m:
-                try:
-                    parsed = _json.loads(m.group(0))
-                except (_json.JSONDecodeError, ValueError):
-                    pass
-        if parsed and parsed.get('name', '').strip():
-            return {
-                'name': str(parsed.get('name', '')).strip()[:20],
-                'spec': str(parsed.get('spec', '')).strip()[:100],
-                'supplier': str(parsed.get('supplier', '')).strip()[:50],
-                'price': _safe_number(parsed.get('price', 0)),
-                'cost_price': _safe_number(parsed.get('cost_price', 0)),
-                'unit': str(parsed.get('unit', '')).strip()[:10],
-                'category': str(parsed.get('category', '')).strip()[:50],
-                'function_desc': str(parsed.get('function_desc', '')).strip()[:500],
-                'remark': str(parsed.get('remark', '')).strip()[:500],
-                '_raw': reply,
-            }
+        # 解析 JSON（公共3层兜底）
+        parsed = _parse_json_reply(reply)
+        if parsed:
+            product = _product_from_parsed(parsed, reply)
+            if product:
+                return product
         _debug_log(f'[deepseek_parse] Failed. reply[:200]: {reply[:200]}')
     except Exception as e:
         _debug_log(f'[deepseek_parse] Exception: {e}')
@@ -1134,23 +1138,29 @@ def recognize_product():
     请求体：{"text": "..."} 或上传 file 字段的图片
     返回：{"products": [...], "source": "...", "raw_text": "..."}
     """
+    import time as _time
+    _t0 = _time.time()
+    _user_id = getattr(g, 'current_user', None)
+    _user_id = _user_id.id if _user_id else 0
+
     data = request.get_json(silent=True) or {}
     uploaded_file = request.files.get('file')
 
-    text = None
-
     def _respond(product, source):
         raw = product.pop('_raw', '') if product else ''
+        elapsed = _time.time() - _t0
+        _log_ai_usage(user_id=_user_id, action='recognize', model=source, elapsed=elapsed, success=bool(product))
         return jsonify({'products': [product] if product else [], 'source': source, 'raw_text': raw[:3000]})
+
+    text = None
 
     # 模式1: 图片文件上传 → 豆包 Vision
     if uploaded_file:
+        tmp_path = UPLOAD_DIR / f'_smart_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
         try:
-            tmp_path = UPLOAD_DIR / f'_smart_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
             uploaded_file.save(str(tmp_path))
             size = os.path.getsize(tmp_path)
             if size > 5 * 1024 * 1024:
-                os.remove(tmp_path)
                 return jsonify({'error': '图片不能超过5MB'}), 400
 
             import base64
@@ -1159,12 +1169,10 @@ def recognize_product():
 
             product = doubao_vision_recognize(image_b64)
             if product:
-                os.remove(tmp_path)
                 return _respond(product, 'doubao-vision')
 
             # 降级：OCR.space → DeepSeek 解析
             text = _ocr_fallback(str(tmp_path))
-            os.remove(tmp_path)
             if text:
                 product = deepseek_parse_product(text)
                 if product:
@@ -1176,6 +1184,9 @@ def recognize_product():
             return jsonify({'products': [], 'error': '未能从图片中识别出产品信息，请检查图片清晰度'})
         except Exception as e:
             return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
+        finally:
+            try: os.remove(tmp_path)
+            except: pass
 
     # 模式2: base64图片 → 豆包 Vision
     elif data.get('image'):
@@ -1434,11 +1445,10 @@ def ocr_costs():
     if not file:
         return jsonify({'error': '请上传发票图片'}), 400
 
+    tmp_path = UPLOAD_DIR / f'_ocr_cost_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
     try:
-        tmp_path = UPLOAD_DIR / f'_ocr_cost_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
         file.save(str(tmp_path))
         if os.path.getsize(tmp_path) > 5 * 1024 * 1024:
-            os.remove(tmp_path)
             return jsonify({'error': '图片不能超过5MB'}), 400
 
         import requests as http_req
@@ -1446,10 +1456,9 @@ def ocr_costs():
             r = http_req.post(
                 'https://api.ocr.space/parse/image',
                 files={'file': fp},
-                data={'language': 'chs', 'isOverlayRequired': False, 'detectOrientation': True, 'scale': True, 'apikey': 'helloworld'},
+                data={'language': 'chs', 'isOverlayRequired': False, 'detectOrientation': True, 'scale': True, 'apikey': os.environ.get('OCR_SPACE_API_KEY', 'helloworld')},
                 timeout=30,
             )
-        os.remove(tmp_path)
         if r.status_code != 200:
             return jsonify({'error': 'OCR服务暂时不可用'}), 502
 
@@ -1513,6 +1522,9 @@ def ocr_costs():
 
     except Exception as e:
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
+    finally:
+        try: os.remove(tmp_path)
+        except: pass
 
 
 @app.route('/api/products/batch-costs', methods=['POST'])
@@ -2649,7 +2661,7 @@ def ai_token():
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-pro')
 
 # Hermes Gateway API Server（一个端口，通过 model 字段区分模型）
-_gateway_url = 'http://127.0.0.1:8643'
+_gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8643')
 
 _AVAILABLE_MODELS = [
     {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
@@ -2661,6 +2673,55 @@ _AVAILABLE_MODELS = [
 def get_chat_models():
     """返回可用 AI 模型列表"""
     return jsonify({'models': _AVAILABLE_MODELS, 'default': _ai_model})
+
+
+@app.route('/api/admin/ai-usage', methods=['GET'])
+@require_admin
+def ai_usage_stats():
+    """AI 使用统计 — 管理员查看"""
+    from sqlalchemy import func
+    days = min(int(request.args.get('days', 7)), 90)
+    since = datetime.now() - __import__('datetime').timedelta(days=days)
+
+    # 总览
+    total = AIUsageLog.query.filter(AIUsageLog.created_at >= since).count()
+    success = AIUsageLog.query.filter(AIUsageLog.created_at >= since, AIUsageLog.success == True).count()
+    avg_elapsed = db.session.query(func.avg(AIUsageLog.elapsed)).filter(
+        AIUsageLog.created_at >= since, AIUsageLog.success == True
+    ).scalar() or 0
+
+    # 按 action 分组
+    by_action = db.session.query(
+        AIUsageLog.action, func.count(), func.avg(AIUsageLog.elapsed)
+    ).filter(AIUsageLog.created_at >= since).group_by(AIUsageLog.action).all()
+
+    # 按用户分组 (Top 10)
+    by_user = db.session.query(
+        AIUsageLog.user_id, User.username, func.count()
+    ).join(User, AIUsageLog.user_id == User.id).filter(
+        AIUsageLog.created_at >= since
+    ).group_by(AIUsageLog.user_id, User.username).order_by(func.count().desc()).limit(10).all()
+
+    # 按日期分组
+    by_date = db.session.query(
+        func.date(AIUsageLog.created_at), func.count(),
+        func.avg(AIUsageLog.elapsed)
+    ).filter(AIUsageLog.created_at >= since).group_by(
+        func.date(AIUsageLog.created_at)
+    ).order_by(func.date(AIUsageLog.created_at).desc()).limit(days).all()
+
+    # 最近50条明细
+    recent = AIUsageLog.query.filter(AIUsageLog.created_at >= since).order_by(
+        AIUsageLog.created_at.desc()
+    ).limit(50).all()
+
+    return jsonify({
+        'summary': {'total': total, 'success': success, 'fail': total - success, 'avg_elapsed': round(avg_elapsed, 2), 'days': days},
+        'by_action': [{'action': a, 'count': c, 'avg_elapsed': round(e, 2)} for a, c, e in by_action],
+        'by_user': [{'user_id': uid, 'username': u, 'count': c} for uid, u, c in by_user],
+        'by_date': [{'date': str(d), 'count': c, 'avg_elapsed': round(e, 2)} for d, c, e in by_date],
+        'recent': [r.to_dict() for r in recent],
+    })
 
 
 _GW_SYSTEM_PROMPT = (
@@ -2868,7 +2929,7 @@ def ai_chat():
     # ─── SSE 流式模式 ───
     if stream:
         body['stream'] = True
-        return _ai_chat_sse(body, t0)
+        return _ai_chat_sse(body, t0, user_id=user.id)
 
     # ─── 非流式模式 ───
     t1 = time.time()
@@ -2879,7 +2940,7 @@ def ai_chat():
             headers={'Content-Type': 'application/json'},
             method='POST'
         )
-        resp = urllib.request.urlopen(req, timeout=180)
+        resp = urllib.request.urlopen(req, timeout=60)
         t2 = time.time()
 
         result = _json.loads(resp.read())
@@ -2895,6 +2956,9 @@ def ai_chat():
 
         parsed = _parse_reply_actions(reply)
 
+        # 记录AI使用
+        _log_ai_usage(user_id=user.id, action='chat', model=body.get('model', ''), elapsed=t2-t0)
+
         return jsonify({
             'reply': reply,
             'parsed': parsed,
@@ -2902,13 +2966,14 @@ def ai_chat():
             'timings': {'Gateway': f'{t2 - t1:.1f}s', '总耗时': f'{t2 - t0:.1f}s'}
         })
     except Exception as e:
+        _log_ai_usage(user_id=user.id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0, success=False, error=str(e)[:200])
         return jsonify({
             'error': f'AI 服务异常: {str(e)}',
             'timings': {'总耗时': f'{time.time() - t0:.1f}s'}
         }), 503
 
 
-def _ai_chat_sse(body, t0):
+def _ai_chat_sse(body, t0, user_id=None):
     """SSE 流式 — 透传 Gateway stream，前端 EventSource 接收"""
     import time, urllib.request, json as _json
 
@@ -2922,7 +2987,7 @@ def _ai_chat_sse(body, t0):
                 headers={'Content-Type': 'application/json'},
                 method='POST'
             )
-            resp = urllib.request.urlopen(req, timeout=180)
+            resp = urllib.request.urlopen(req, timeout=60)
             t_connected = time.time()
 
             # 先发连接时间（Flask→Gateway 网络 + Gateway 内部处理）
@@ -2961,9 +3026,11 @@ def _ai_chat_sse(body, t0):
 
             # 完成 — 发送解析结果
             parsed = _parse_reply_actions(accumulated)
+            _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0)
             yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
 
         except Exception as e:
+            _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0, success=False, error=str(e)[:200])
             yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
 
         yield f'data: [DONE]\n\n'
