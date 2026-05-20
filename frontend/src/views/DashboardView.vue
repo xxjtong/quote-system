@@ -200,6 +200,7 @@ async function sendMessage(textOverride) {
     let accumulated = ''
     const msgIndex = chatMessages.value.length
     chatMessages.value.push({ role: 'assistant', content: '', parsed: null, elapsed: 0 })
+    await nextTick(); scrollChat()
 
     while (true) {
       const { done, value } = await reader.read()
@@ -219,9 +220,11 @@ async function sendMessage(textOverride) {
           if (data.type === 'connect') {
             currentPhase.value = 0
             lastPhase.value = 'connect'
+            await nextTick(); scrollChat()
           } else if (data.type === 'first_token') {
             currentPhase.value = 1  // model thinking done, generating
             lastPhase.value = 'first_token'
+            await nextTick(); scrollChat()
           } else if (data.type === 'tool') {
             currentPhase.value = Math.min(currentPhase.value + 1, phases.length - 1)
             lastPhase.value = 'tool'
