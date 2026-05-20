@@ -2416,15 +2416,8 @@ def ai_token():
 
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-pro')
 
-# 两个 DeepSeek API Server：8643=v4-pro（推理/对话），8644=v4-flash（快速提取）
-_GATEWAYS = {
-    'deepseek-v4-pro': 'http://127.0.0.1:8643',
-    'deepseek-v4-flash': 'http://127.0.0.1:8644',
-}
-
-def _get_gateway_url(model):
-    """根据模型名返回对应端口，默认 8643"""
-    return _GATEWAYS.get(model, 'http://127.0.0.1:8643')
+# Hermes Gateway API Server（一个端口，通过 model 字段区分模型）
+_gateway_url = 'http://127.0.0.1:8642'
 
 _AVAILABLE_MODELS = [
     {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
@@ -2487,7 +2480,7 @@ def _extract_choices_via_llm(text):
             'max_output_tokens': 100,
         })
         req = urllib.request.Request(
-            f'{_GATEWAYS["deepseek-v4-flash"]}/v1/responses',
+            f'{_gateway_url}/v1/responses',
             data=body.encode('utf-8'),
             headers={'Content-Type': 'application/json'},
             method='POST'
@@ -2637,7 +2630,7 @@ def ai_chat():
     t1 = time.time()
     try:
         req = urllib.request.Request(
-            f'{_get_gateway_url(body["model"])}/v1/responses',
+            f'{_gateway_url}/v1/responses',
             data=_json.dumps(body).encode('utf-8'),
             headers={'Content-Type': 'application/json'},
             method='POST'
@@ -2680,7 +2673,7 @@ def _ai_chat_sse(body, t0):
         accumulated = ''
         try:
             req = urllib.request.Request(
-                f'{_get_gateway_url(body["model"])}/v1/responses',
+                f'{_gateway_url}/v1/responses',
                 data=_json.dumps(body).encode('utf-8'),
                 headers={'Content-Type': 'application/json'},
                 method='POST'
