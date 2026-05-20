@@ -2417,7 +2417,7 @@ def ai_token():
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-pro')
 
 # Hermes Gateway API Server（一个端口，通过 model 字段区分模型）
-_gateway_url = 'http://127.0.0.1:8642'
+_gateway_url = 'http://127.0.0.1:8643'
 
 _AVAILABLE_MODELS = [
     {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
