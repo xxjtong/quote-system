@@ -846,7 +846,6 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
     失败返回 None。
     """
     api_key = os.environ.get('VOLCENGINE_API_KEY', '')
-    _debug_log(f'[doubao_vision] Called, key_present={bool(api_key)}, key_len={len(api_key)}')
     if not api_key:
         return None
 
