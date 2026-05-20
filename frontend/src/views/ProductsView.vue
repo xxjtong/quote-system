@@ -658,8 +658,8 @@ onMounted(() => {
 
     <!-- Product Form Modal -->
     <Teleport to="body">
-      <div v-if="showForm" class="modal-backdrop show" @click="closeForm"></div>
-      <div v-if="showForm" class="modal d-block modern-modal" tabindex="-1" @click.self="closeForm">
+      <div v-if="showForm" class="modal-backdrop show"></div>
+      <div v-if="showForm" class="modal d-block modern-modal" tabindex="-1">
         <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
           <div class="modal-content">
             <div class="modal-header">
