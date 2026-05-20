@@ -870,23 +870,20 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
         '- function_desc 放主要功能特性，remark 放次要备注信息'
     )
 
-    # 构建 API URL：有 endpoint 则用 endpoint 模式
+    # 构建 API URL 和 model：有 endpoint 则作为 model 名
     endpoint_id = os.environ.get('VOLCENGINE_ENDPOINT', '')
-    if endpoint_id:
-        api_url = f'https://ark.cn-beijing.volces.com/api/v3/endpoints/{endpoint_id}/chat/completions'
-    else:
-        api_url = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+    model_name = endpoint_id if endpoint_id else 'doubao-seed-2-0-lite-260215'
 
     try:
         import requests as http_req
         r = http_req.post(
-            api_url,
+            'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
             headers={
                 'Authorization': f'Bearer {api_key}',
                 'Content-Type': 'application/json',
             },
             json={
-                'model': 'doubao-seed-2-0-lite-260215',
+                'model': model_name,
                 'messages': [{
                     'role': 'user',
                     'content': [
