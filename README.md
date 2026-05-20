@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.7.7-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.7.8-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -541,38 +541,60 @@ frontend/src/
 
 ---
 
-## 智能识别（豆包 Vision + OCR）
+## 智能识别（豆包 Vision + DeepSeek 解析）
 
-### 火山引擎豆包视觉识别（v1.6.0 主力）
+### 三层识别管道
 
-`POST /api/products/recognize` — 上传图片 → 火山引擎豆包 Seed Lite 视觉模型直出结构化 JSON。
+`POST /api/products/recognize` — 支持粘贴图片或文字，自动提取产品信息。
 
-- **模型**: `doubao-seed-1-6-lite-250815`（可切换至 `doubao-seed-2-0-lite-260215` / `doubao-seed-2-0-mini-260215`）
-- **输出**: `{name, spec, supplier, price, cost_price, category, unit, function_desc, remark}`
-- **降级**: 豆包失败 → OCR.space → smart_parse_product
+```
+图片 ──→ 豆包 Vision ──────────→ source: doubao-vision
+              │ 失败
+              ▼
+        OCR.space ──→ DeepSeek V4 Flash ──→ source: deepseek-parse
+                          │ 失败
+                          ▼
+                    正则解析 ──→ source: regex-parse
 
-### 文本解析
+文字 ──→ DeepSeek V4 Flash ──→ source: deepseek-parse
+              │ 失败
+              ▼
+        正则解析 ──→ source: regex-parse
+```
 
-`POST /api/products/recognize` — 输入纯文本，输出结构化产品信息。
+| 层级 | 组件 | 说明 |
+|------|------|------|
+| 1 | **豆包 Vision** (`doubao-seed-2-0-lite-260215`) | 火山引擎视觉模型，图片直出结构化 JSON，准确率最高 |
+| 2 | **DeepSeek V4 Flash** (via Hermes Gateway :8643) | LLM 文本解析，支持 OCR 后文本和直接粘贴文字 |
+| 3 | **正则解析** (`smart_parse_product`) | 规则兜底，7 步流水线提取价格/型号/厂商/分类/单位/名称/备注 |
 
-**分割策略（优先级）：**
-1. Tab 字符 (`\t`)
-2. ≥2 个连续空格
-3. 单个空格
-4. 换行（每行一个产品）
+### 识别结果（可编辑修正 + 来源标签）
 
-**字段映射（5 字段格式，从右向左提取）：**
-1. **价格** — 最后一个可识别数值（支持 `¥123`、`123元`、`123.45`）
-2. **功能描述** — 倒数第 2 个字段
-3. **厂商** — 倒数第 3 个字段
-4. **产品名称** — 第 1 个字段
-5. **规格型号** — 剩余中间字段合并
+- 识别结果以 **8 个可编辑输入框** 呈现在红框区域（产品名称、规格型号、厂商、分类、销售单价、成本价、单位、功能描述、备注）
+- 标题右侧显示 **识别来源标签**：`豆包 Vision` / `DeepSeek V4 Flash` / `正则解析`
+- 可折叠 **"模型返回原始数据"** 区域，显示视觉模型/LLM 返回的原始 JSON 文本，用户可手动复制粘贴
+- 修正后点击「确认填入上方表单」写入表单
 
-### 图片 OCR（降级兜底）
+### API 响应格式
 
-`POST /api/products/ocr` — 上传图片 → OCR.space API → 返回文字。
+```json
+{
+  "products": [{ "name": "办公称重柜", "spec": "W60-30", "function_desc": "...", ... }],
+  "source": "doubao-vision",
+  "raw_text": "{...模型原始返回...}"
+}
+```
 
-依赖：OCR.space 免费 API（apikey: `helloworld`）
+### 正则解析（降级兜底）
+
+7 步流水线：价格正则（6 种写法）→ 成本价 → 型号（大写+数字+横杠）→ 厂商白名单（20+）→ 分类白名单 → 单位 → 剩余文字 → 名称+备注
+
+### 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `VOLCENGINE_API_KEY` | 火山引擎豆包 API Key |
+| (Gateway :8643) | Hermes Gateway 提供 DeepSeek V4 Flash 推理
 
 ---
 
