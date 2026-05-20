@@ -459,9 +459,9 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
         <div class="stat-card">
           <div class="d-flex align-items-center gap-3">
             <div class="stat-icon" style="background:#ede9fe;color:#7c3aed"><i class="bi bi-robot"></i></div>
-            <div><div class="text-muted" style="font-size:.72rem">AI 使用</div><div class="fw-bold fs-4">{{ stats.aiTotalCount }}</div></div>
+            <div><div class="text-muted" style="font-size:.72rem">AI 使用</div><div class="fw-bold fs-4">{{ stats.aiMyCount }}</div></div>
           </div>
-          <div class="mt-2 small text-muted">我的 {{ stats.aiMyCount }} 次</div>
+          <div class="mt-2 small text-muted">全部 {{ stats.aiTotalCount }} 次</div>
         </div>
       </div>
     </div>
