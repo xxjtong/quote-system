@@ -375,14 +375,6 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
           </div>
         </div>
       </div>
-      <div class="col-6 col-md-3">
-        <div class="stat-card">
-          <div class="d-flex align-items-center gap-3">
-            <div class="stat-icon" style="background:#fee2e2;color:var(--danger)"><i class="bi bi-currency-yen"></i></div>
-            <div style="min-width:0"><div class="text-muted" style="font-size:.72rem">总金额</div><div class="fw-bold fs-4 text-truncate" style="color:var(--danger)">{{ formatMoney(stats.totalAmount) }}</div></div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Quick Actions -->
