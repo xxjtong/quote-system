@@ -959,13 +959,83 @@ def _safe_number(val):
         return 0
 
 
+def deepseek_parse_product(text):
+    """使用 DeepSeek v4 Flash（通过 Hermes Gateway）从非结构化文本中提取产品信息。
+    返回结构化 dict 或 None。
+    """
+    import urllib.request, json as _json
+    prompt = (
+        '从以下产品文本中提取信息，返回纯JSON（只返回JSON，不要markdown、不要解释）：\n'
+        '{"name":"产品名称（中文，不包括型号，截取前20字）","spec":"规格型号（大写字母+数字+横杠组合）","supplier":"厂商/品牌","price":售价数字,"cost_price":成本价数字,"category":"分类","unit":"单位","remark":"备注/功能描述"}\n'
+        '规则：型号是大写字母+数字+横杠组合。厂商从文字中直接提取，不要猜测。价格只取数字。没有的字段填空字符串或0。\n'
+        f'文本：\n{text[:3000]}'
+    )
+    try:
+        body = _json.dumps({
+            'model': 'deepseek-v4-flash',
+            'input': prompt,
+            'max_output_tokens': 500,
+        })
+        req = urllib.request.Request(
+            f'{_gateway_url}/v1/responses',
+            data=body.encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        resp = urllib.request.urlopen(req, timeout=15)
+        result = _json.loads(resp.read())
+        reply = ''
+        for o in result.get('output', []):
+            if o.get('type') == 'message':
+                content = o.get('content', [])
+                if content:
+                    reply = content[0].get('text', '')
+                break
+        reply = reply.strip()
+        # 解析 JSON（3 层兜底）
+        import re
+        parsed = None
+        try:
+            parsed = _json.loads(reply)
+        except (_json.JSONDecodeError, ValueError):
+            m = re.search(r'```(?:json)?\s*\n?(\{.+\})\s*```', reply, re.DOTALL)
+            if m:
+                try:
+                    parsed = _json.loads(m.group(1))
+                except (_json.JSONDecodeError, ValueError):
+                    pass
+        if not parsed:
+            m = re.search(r'\{[^{}]*"name"\s*:\s*"[^"]*"[^{}]*\}', reply, re.DOTALL)
+            if not m:
+                m = re.search(r'\{.+\}', reply, re.DOTALL)
+            if m:
+                try:
+                    parsed = _json.loads(m.group(0))
+                except (_json.JSONDecodeError, ValueError):
+                    pass
+        if parsed and parsed.get('name', '').strip():
+            return {
+                'name': str(parsed.get('name', '')).strip()[:20],
+                'spec': str(parsed.get('spec', '')).strip()[:100],
+                'supplier': str(parsed.get('supplier', '')).strip()[:50],
+                'price': _safe_number(parsed.get('price', 0)),
+                'cost_price': _safe_number(parsed.get('cost_price', 0)),
+                'unit': str(parsed.get('unit', '')).strip()[:10],
+                'category': str(parsed.get('category', '')).strip()[:50],
+                'remark': str(parsed.get('remark', '')).strip()[:500],
+            }
+    except Exception:
+        pass
+    return None
+
+
 @app.route('/api/products/recognize', methods=['POST'])
 def recognize_product():
     """智能识别粘贴内容（文字或图片），提取产品信息。
     每次只识别1个产品。
-    图片使用 Gemini Vision 识别；文字使用 smart_parse_product 解析。
+    图片用豆包 Vision；OCR/文字用 DeepSeek v4 Flash 解析（regex 降级）。
     请求体：{"text": "..."} 或上传 file 字段的图片
-    返回：{"products": [{name,spec,supplier,price,...}]}
+    返回：{"products": [...], "source": "doubao-vision|deepseek-parse|regex-parse"}
     """
     data = request.get_json(silent=True) or {}
     uploaded_file = request.files.get('file')
@@ -989,15 +1059,19 @@ def recognize_product():
             product = doubao_vision_recognize(image_b64)
             if product:
                 os.remove(tmp_path)
-                return jsonify({'products': [product]})
+                return jsonify({'products': [product], 'source': 'doubao-vision'})
 
-            # 降级：OCR.space → smart_parse_product
+            # 降级：OCR.space → DeepSeek 解析
             text = _ocr_fallback(str(tmp_path))
             os.remove(tmp_path)
             if text:
+                product = deepseek_parse_product(text)
+                if product:
+                    return jsonify({'products': [product], 'source': 'deepseek-parse'})
+                # DeepSeek 失败 → regex 兜底
                 product = smart_parse_product(text)
                 if product:
-                    return jsonify({'products': [product]})
+                    return jsonify({'products': [product], 'source': 'regex-parse'})
             return jsonify({'products': [], 'error': '未能从图片中识别出产品信息，请检查图片清晰度'})
         except Exception as e:
             return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
@@ -1012,12 +1086,12 @@ def recognize_product():
 
             product = doubao_vision_recognize(img_data, mime_type=data.get('mime_type', 'image/png'))
             if product:
-                return jsonify({'products': [product]})
+                return jsonify({'products': [product], 'source': 'doubao-vision'})
             return jsonify({'products': [], 'error': '未能从图片中识别出产品信息，请检查图片清晰度'})
         except Exception as e:
             return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
 
-    # 模式3: 纯文本 → smart_parse_product
+    # 模式3: 纯文本 → DeepSeek 解析（regex 降级）
     elif data.get('text', '').strip():
         text = data['text'].strip()
     else:
@@ -1026,9 +1100,15 @@ def recognize_product():
     if not text:
         return jsonify({'products': [], 'error': '未能识别出文字内容'})
 
+    # DeepSeek v4 Flash 优先
+    product = deepseek_parse_product(text)
+    if product:
+        return jsonify({'products': [product], 'source': 'deepseek-parse'})
+
+    # regex 降级
     product = smart_parse_product(text)
     if product:
-        return jsonify({'products': [product]})
+        return jsonify({'products': [product], 'source': 'regex-parse'})
     return jsonify({'products': [], 'error': '未能从内容中识别出产品信息，请检查粘贴内容'})
 
 

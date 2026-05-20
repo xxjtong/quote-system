@@ -214,6 +214,7 @@ function showAddProduct() {
   formData.function_desc = ''; formData.remark = ''; formData.image_url = ''
   existingImageUrl.value = ''
   smartResult.value = null
+  smartSource.value = ''
   resetSmartEdit()
   smartError.value = ''
   imageDownloading.value = false
@@ -236,6 +237,7 @@ function showEditProduct(p) {
   formData.image_url = ''  // 不预填已有URL，保留在预览区
   existingImageUrl.value = p.image_url || ''
   smartResult.value = null
+  smartSource.value = ''
   resetSmartEdit()
   smartError.value = ''
   smartRecognizing.value = false
@@ -275,8 +277,15 @@ function onImageUrlKeydown(e) {
 // ─── Smart Paste Handler ───
 const smartRecognizing = ref(false)
 const smartResult = ref(null)
+const smartSource = ref('')
 const smartEdit = reactive({ name: '', spec: '', supplier: '', category: '', price: '', cost_price: '', unit: '', remark: '' })
 const smartError = ref('')
+
+const SOURCE_LABELS = {
+  'doubao-vision': '豆包 Vision',
+  'deepseek-parse': 'DeepSeek V4 Flash',
+  'regex-parse': '正则解析',
+}
 
 function populateSmartEdit(result) {
   smartEdit.name = result.name || ''
@@ -313,6 +322,7 @@ async function onSmartPaste(e) {
         const r = await api('/api/products/recognize', 'POST', form)
         if (r.products && r.products.length > 0) {
           smartResult.value = r.products[0]
+          smartSource.value = r.source || ''
           populateSmartEdit(r.products[0])
         } else {
           smartError.value = r.error || '未能识别出产品信息'
@@ -338,6 +348,7 @@ async function onSmartPaste(e) {
           const r = await api('/api/products/recognize', 'POST', { text })
           if (r.products && r.products.length > 0) {
             smartResult.value = r.products[0]
+            smartSource.value = r.source || ''
             populateSmartEdit(r.products[0])
           } else {
             smartError.value = r.error || '未能识别出产品信息'
@@ -363,12 +374,14 @@ function fillFromSmartResult() {
   if (smartEdit.unit) formData.unit = smartEdit.unit
   if (smartEdit.remark) formData.remark = smartEdit.remark
   smartResult.value = null
+  smartSource.value = ''
   resetSmartEdit()
   toast('已填入识别结果')
 }
 
 function clearSmartResult() {
   smartResult.value = null
+  smartSource.value = ''
   smartError.value = ''
   resetSmartEdit()
 }
@@ -419,6 +432,7 @@ function deleteImage() {
 function closeForm() {
   showForm.value = false
   smartResult.value = null
+  smartSource.value = ''
   resetSmartEdit()
   smartError.value = ''
   smartRecognizing.value = false
@@ -752,7 +766,10 @@ onMounted(() => {
                     <div v-if="smartResult" class="mt-2 p-2 rounded-2" style="background:white;border:2px solid var(--bs-danger, #dc3545);font-size:.82rem">
                       <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="fw-semibold text-primary"><i class="bi bi-check-circle"></i> 识别结果（可编辑修正）</span>
-                        <button class="btn btn-sm btn-outline-secondary py-0 px-2" @click="clearSmartResult" style="font-size:.7rem">✕</button>
+                        <div class="d-flex align-items-center gap-2">
+                          <small v-if="smartSource" class="text-muted" style="font-size:.7rem;background:var(--gray-100);padding:1px 6px;border-radius:4px">{{ SOURCE_LABELS[smartSource] || smartSource }}</small>
+                          <button class="btn btn-sm btn-outline-secondary py-0 px-2" @click="clearSmartResult" style="font-size:.7rem">✕</button>
+                        </div>
                       </div>
                       <div class="row g-1">
                         <div class="col-6 mb-1">
