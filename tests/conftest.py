@@ -118,3 +118,31 @@ def test_quote(admin_token, test_product):
 @pytest.fixture(scope="session")
 def base_url():
     return BASE_URL
+
+
+def pytest_sessionfinish():
+    """测试会话结束后自动清理测试数据（用户、产品、报价单）"""
+    import sqlite3
+    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'quote.db')
+    if not os.path.exists(db_path):
+        return
+    try:
+        db = sqlite3.connect(db_path)
+        c = db.cursor()
+        # 删除测试报价明细 → 报价单
+        c.execute("DELETE FROM quote_items WHERE quote_id IN "
+                  "(SELECT id FROM quotes WHERE title LIKE '测试%' OR client LIKE '测试%')")
+        c.execute("DELETE FROM ai_chat_sessions WHERE user_id IN "
+                  "(SELECT id FROM users WHERE username LIKE 'test_%' "
+                  "OR username LIKE 'testpw_%' OR username LIKE 'disabletest_%')")
+        c.execute("DELETE FROM quotes WHERE title LIKE '测试%' OR client LIKE '测试%'")
+        # 删除测试产品
+        c.execute("DELETE FROM products WHERE name LIKE '测试%'")
+        # 删除测试用户
+        c.execute("DELETE FROM users WHERE username LIKE 'test_%' "
+                  "OR username LIKE 'testpw_%' OR username LIKE 'disabletest_%'")
+        db.commit()
+        db.close()
+        # print("[Cleanup] 测试数据已清理")
+    except Exception:
+        pass  # 清理失败不影响测试结果
