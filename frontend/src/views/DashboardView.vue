@@ -66,6 +66,51 @@ function closeQuotePreview() {
   showQuotePreview.value = false
 }
 
+// ─── Download Quote ───────────────────────────────────────
+async function downloadQuote(q) {
+  const token = localStorage.getItem('quote_token')
+  const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const url = BASE_URL + `/api/quotes/${q.id}/export-excel?token=${encodeURIComponent(token)}&download_date=${dateStr}`
+  try {
+    const r = await fetch(url)
+    if (!r.ok) { toast(`下载失败 (${r.status})`, 'danger'); return }
+    const blob = await r.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = ''
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(a.href)
+  } catch (e) {
+    toast('网络错误，下载失败', 'danger')
+  }
+}
+
+// ─── Send Email ──────────────────────────────────────────
+const showEmailModal = ref(false)
+const emailRecipient = ref('')
+const emailQuoteId = ref(null)
+const emailSending = ref(false)
+
+function openEmailModal(id) {
+  emailQuoteId.value = id
+  emailRecipient.value = ''
+  showEmailModal.value = true
+}
+
+async function sendEmail() {
+  const email = emailRecipient.value.trim()
+  if (!email) { toast('请输入收件人邮箱', 'warning'); return }
+  emailSending.value = true
+  const r = await api(`/api/quotes/${emailQuoteId.value}/send-email`, 'POST', { email })
+  if (r.error) { toast(r.error, 'danger') }
+  else toast(r.message || '邮件已发送')
+  emailSending.value = false
+  showEmailModal.value = false
+}
+
 // ─── AI Chat ────────────────────────────────────────────────
 
 const chatMessages = ref([])
@@ -612,7 +657,35 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
             </div>
             <div class="modal-footer" style="gap:8px">
               <button class="btn btn-primary btn-modern" @click="showQuotePreview = false; router.push({ name: 'newquote', query: { edit: previewQuoteId } })">编辑</button>
+              <button class="btn btn-outline-success btn-modern" @click="downloadQuote({ id: previewQuoteId }); closeQuotePreview()">下载</button>
+              <button class="btn btn-outline-info btn-modern" @click="openEmailModal(previewQuoteId); closeQuotePreview()">邮件</button>
               <button class="btn btn-secondary btn-modern" @click="closeQuotePreview()">关闭</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Email Modal -->
+    <Teleport to="body">
+      <div v-if="showEmailModal" class="modal-backdrop show" @click="showEmailModal = false"></div>
+      <div v-if="showEmailModal" class="modal d-block modern-modal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title fw-semibold">发送邮件</h5>
+              <button type="button" class="btn-close" @click="showEmailModal = false"></button>
+            </div>
+            <div class="modal-body">
+              <label class="form-label-modern">收件人邮箱</label>
+              <input class="form-control" v-model="emailRecipient" type="email" placeholder="example@domain.com" @keydown.enter="sendEmail">
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-primary btn-modern" @click="sendEmail" :disabled="emailSending || !emailRecipient.trim()">
+                <span v-if="emailSending" class="spinner-border spinner-border-sm me-1"></span>
+                发送
+              </button>
+              <button class="btn btn-secondary btn-modern" @click="showEmailModal = false">取消</button>
             </div>
           </div>
         </div>
