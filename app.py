@@ -588,10 +588,22 @@ def batch_delete_products():
     ids = data.get('ids', [])
     if not ids:
         return jsonify({'error': '请选择要删除的产品'}), 400
-    # 权限：仅管理员可批量删除
     is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
     if not is_admin:
-        return jsonify({'error': '需要管理员权限'}), 403
+        # 普通用户：只允许删除自己创建的产品，过滤掉非自己的
+        uid = g.current_user.id
+        own_ids = [p.id for p in Product.query.filter(
+            Product.id.in_(ids), Product.created_by == uid
+        ).all()]
+        if not own_ids:
+            return jsonify({'error': '没有可以删除的产品'}), 403
+        Product.query.filter(Product.id.in_(own_ids)).delete(synchronize_session=False)
+        db.session.commit()
+        skipped = len(ids) - len(own_ids)
+        msg = f'已删除 {len(own_ids)} 个产品'
+        if skipped > 0:
+            msg += f'（跳过 {skipped} 个非自己创建的产品）'
+        return jsonify({'message': msg})
     Product.query.filter(Product.id.in_(ids)).delete(synchronize_session=False)
     db.session.commit()
     return jsonify({'message': f'已删除 {len(ids)} 个产品'})

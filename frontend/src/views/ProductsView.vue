@@ -102,16 +102,19 @@ function imageSrc(p) {
   return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
 }
 
-// ─── Select all / single (admin only) ───
+// ─── Select all / single ───
+const selectableProducts = computed(() =>
+  isAdmin() ? products.value : products.value.filter(p => p.created_by === currentUser.value?.id)
+)
 const allSelected = computed(() =>
-  products.value.length > 0 && products.value.every(p => selectedIds.has(p.id))
+  selectableProducts.value.length > 0 && selectableProducts.value.every(p => selectedIds.has(p.id))
 )
 
 function toggleAll() {
   if (allSelected.value) {
-    products.value.forEach(p => selectedIds.delete(p.id))
+    selectableProducts.value.forEach(p => selectedIds.delete(p.id))
   } else {
-    products.value.forEach(p => selectedIds.add(p.id))
+    selectableProducts.value.forEach(p => selectedIds.add(p.id))
   }
 }
 
@@ -517,7 +520,7 @@ onMounted(() => {
             <option :value="100">100条/页</option>
             <option :value="500">全部</option>
           </select>
-          <button v-if="isAdmin() && selectedIds.size > 0" class="btn btn-sm btn-modern btn-outline-danger" @click="batchDelete">
+          <button v-if="selectedIds.size > 0" class="btn btn-sm btn-modern btn-outline-danger" @click="batchDelete">
             <i class="bi bi-trash"></i> 删除({{ selectedIds.size }})
           </button>
         </div>
@@ -534,7 +537,7 @@ onMounted(() => {
         <table class="table table-modern">
           <thead>
             <tr>
-              <th v-if="isAdmin()" style="width:36px">
+              <th style="width:36px">
                 <input type="checkbox" class="form-check-input"
                   :checked="allSelected"
                   @change="toggleAll">
@@ -550,7 +553,7 @@ onMounted(() => {
           </thead>
           <tbody>
             <tr v-if="products.length === 0">
-              <td :colspan="isAdmin() ? 8 : 7">
+              <td colspan="8">
                 <div class="empty-state">
                   <i class="bi bi-inbox"></i>
                   <p>暂无产品</p>
@@ -559,11 +562,12 @@ onMounted(() => {
               </td>
             </tr>
             <tr v-for="p in products" :key="p.id" :class="{ 'opacity-50': !p.is_active }">
-              <td v-if="isAdmin()">
+              <td v-if="isAdmin() || p.created_by === currentUser?.id">
                 <input type="checkbox" class="form-check-input product-check"
                   :checked="selectedIds.has(p.id)"
                   @change="toggleSelect(p.id)">
               </td>
+              <td v-else></td>
               <td style="cursor:pointer" @click="router.push({name:'products',params:{id:p.id}})">
                 <div class="text-truncate fw-medium" style="max-width:200px;color:var(--gray-800)">{{ p.name }}</div>
                 <div v-if="p.function_desc" class="text-truncate small text-muted" style="max-width:200px">{{ p.function_desc }}</div>
