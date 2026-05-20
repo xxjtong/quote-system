@@ -101,10 +101,18 @@ function loadHistory() {
 
 function saveHistory() {
   if (chatMessages.value.length === 0) return
-  // Save full messages to localStorage keyed by session
+  // 每个session只保留最近50条消息（防localStorage溢出）
+  const msgs = chatMessages.value.slice(-50)
   try {
-    localStorage.setItem('ai_chat_msg_' + currentSessionId.value, JSON.stringify(chatMessages.value))
-  } catch {}
+    localStorage.setItem('ai_chat_msg_' + currentSessionId.value, JSON.stringify(msgs))
+  } catch (e) {
+    // 存储满时清理最旧的session
+    if (e.name === 'QuotaExceededError' || e.code === 22) {
+      const oldest = chatHistory.value[chatHistory.value.length - 1]
+      if (oldest) { try { localStorage.removeItem('ai_chat_msg_' + oldest.id) } catch {} }
+      try { localStorage.setItem('ai_chat_msg_' + currentSessionId.value, JSON.stringify(msgs)) } catch {}
+    }
+  }
   const existing = chatHistory.value.find(h => h.id === currentSessionId.value)
   const preview = chatMessages.value[0]?.content?.slice(0, 30) || '新对话'
   const entry = { id: currentSessionId.value, preview, count: chatMessages.value.length, time: Date.now() }
@@ -113,7 +121,7 @@ function saveHistory() {
   } else {
     chatHistory.value.unshift(entry)
   }
-  chatHistory.value = chatHistory.value.slice(0, 50)
+  chatHistory.value = chatHistory.value.slice(0, 20)  // 最多20个session
   try { localStorage.setItem('ai_chat_history', JSON.stringify(chatHistory.value)) } catch {}
 }
 

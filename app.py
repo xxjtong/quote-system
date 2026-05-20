@@ -261,7 +261,7 @@ def set_field_settings():
 @require_admin
 def list_users():
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 200)
     search = request.args.get('search', '').strip()
     query = User.query
     if search:
@@ -356,7 +356,34 @@ def _validate_download_ticket(ticket_str):
     return entry['user_id']
 
 # 公开路由（无需登录）
-PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'index', 'serve_upload', 'export_product_template', 'get_product_image'}
+PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'health_check', 'index', 'serve_upload', 'export_product_template'}
+
+# ─── 全局错误处理 ───
+@app.errorhandler(400)
+@app.errorhandler(404)
+@app.errorhandler(405)
+@app.errorhandler(500)
+def _handle_error(e):
+    return jsonify({'error': e.description if hasattr(e, 'description') else str(e)}), e.code if hasattr(e, 'code') else 500
+
+# ─── 请求日志中间件 ───
+import time as _req_time
+
+@app.after_request
+def _log_request(response):
+    if request.path.startswith('/api/') and not request.path.startswith('/api/assets'):
+        elapsed = (int((_req_time.time() - g.get('_req_start', _req_time.time())) * 1000))
+        user = getattr(g, 'current_user', None)
+        username = user.username if user else '-'
+        method = request.method
+        status = response.status_code
+        if status >= 400 or elapsed > 3000:  # 只记慢请求和错误
+            _debug_log(f'{method} {request.path} {status} {elapsed}ms user={username}')
+    return response
+
+@app.before_request
+def _mark_req_start():
+    g._req_start = _req_time.time()
 
 @app.before_request
 def check_auth():
@@ -436,7 +463,7 @@ def list_products():
     """产品列表，支持搜索（含拼音）和分类筛选"""
     import re
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 50, type=int)
+    per_page = min(request.args.get('per_page', 50, type=int), 200)
     search = request.args.get('search', '').strip()
     category = request.args.get('category', '').strip()
     supplier = request.args.get('supplier', '').strip()
@@ -581,8 +608,9 @@ def get_product(product_id):
 
 
 @app.route('/api/products/<int:product_id>/image', methods=['GET'])
+@require_auth
 def get_product_image(product_id):
-    """返回产品图片二进制数据（公开路由，无需认证）"""
+    """返回产品图片二进制数据"""
     product = db.session.get(Product, product_id)
     if not product or not product.image_data:
         return '', 404
@@ -1790,7 +1818,7 @@ def list_quotes():
     """报价单列表，支持分页、状态筛选、关键词搜索（含拼音）"""
     import re
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 200)
     search = request.args.get('search', '').strip()
     status_filter = request.args.get('status', '').strip()
 
@@ -2817,6 +2845,11 @@ def _extract_choices_via_llm(text):
 
 def _parse_reply_actions(reply_text):
     """解析 AI 回复，提取结构化数据：产品、报价引用、快捷操作"""
+    # 过滤敏感路径，防止内部架构泄露
+    reply_text = reply_text.replace('/opt/quote-system', '[系统路径]')
+    reply_text = re.sub(r'127\.0\.0\.1:\d+', '[内部地址]', reply_text)
+    reply_text = reply_text.replace('quote.db', '[数据库]')
+
     result = {'products': [], 'quote_refs': [], 'quick_replies': []}
 
     # 提取报价单引用 #N
@@ -2879,12 +2912,25 @@ def _parse_reply_actions(reply_text):
     return result
 
 
+# ─── AI 速率限制 ───
+_ai_rate_limit = {}  # {user_id: [timestamp, ...]}
+_AI_RATE_LIMIT = 5  # 每分钟最多5次
+
 @app.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
     """AI 对话 — 通过 Hermes Gateway Responses API。支持 SSE 流式。"""
     import time, urllib.request, json as _json
     t0 = time.time()
+
+    # 速率限制
+    uid = g.current_user.id
+    now = time.time()
+    _ai_rate_limit.setdefault(uid, [])
+    _ai_rate_limit[uid] = [t for t in _ai_rate_limit[uid] if now - t < 60]
+    if len(_ai_rate_limit[uid]) >= _AI_RATE_LIMIT:
+        return jsonify({'error': f'请求过快，每分钟最多{_AI_RATE_LIMIT}次，请稍后再试'}), 429
+    _ai_rate_limit[uid].append(now)
 
     data = request.get_json(silent=True) or {}
     user_input = (data.get('input', '') or '').strip()
@@ -3086,6 +3132,17 @@ def get_version():
         ver = '0.1.1'
     return jsonify({'version': ver})
 
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """健康检查 — 验证DB连通性"""
+    try:
+        db.session.execute(text('SELECT 1'))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    status = 200 if db_ok else 503
+    return jsonify({'status': 'ok' if db_ok else 'db_error', 'db': db_ok}), status
+
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
     """提供上传的图片等静态文件"""
@@ -3104,6 +3161,14 @@ def spa_catch_all(path):
 # ─── Init DB ────────────────────────────────────────────────
 
 with app.app_context():
+    # 启用 SQLite WAL 模式（并发读写更安全）
+    from sqlalchemy import text
+    try:
+        db.session.execute(text('PRAGMA journal_mode=WAL'))
+        db.session.execute(text('PRAGMA busy_timeout=5000'))
+        db.session.commit()
+    except Exception:
+        pass
     db.create_all()
     # 预置管理员账号
     if not User.query.filter_by(username='admin').first():

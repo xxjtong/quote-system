@@ -112,6 +112,7 @@ class QuoteItem(db.Model):
     quantity = db.Column(db.Integer, default=1)
     unit_price = db.Column(db.Float, default=0)
     amount = db.Column(db.Float, default=0)
+    discount_rate = db.Column(db.Float, default=100)  # 折扣率(%), 100=原价
     remark = db.Column(db.String(500), nullable=True)
     sort_order = db.Column(db.Integer, default=0)
 
@@ -134,6 +135,7 @@ class QuoteItem(db.Model):
             'quantity': self.quantity,
             'unit_price': self.unit_price,
             'amount': self.amount,
+            'discount_rate': self.discount_rate if self.discount_rate else 100,
             'remark': self.remark or '',
             'sort_order': self.sort_order,
             'profit': profit,

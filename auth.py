@@ -119,6 +119,11 @@ def auth_register():
     if not data or not data.get('username', '').strip() or not data.get('password', '').strip():
         return jsonify({'error': '用户名和密码不能为空'}), 400
     username = data['username'].strip()
+    if len(username) < 2 or len(username) > 30:
+        return jsonify({'error': '用户名需2-30位'}), 400
+    import re
+    if not re.match(r'^[a-zA-Z0-9_\u4e00-\u9fff]+$', username):
+        return jsonify({'error': '用户名只能含字母、数字、下划线、中文'}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({'error': '用户名已存在'}), 409
     user = User(
