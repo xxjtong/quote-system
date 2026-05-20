@@ -214,6 +214,7 @@ function showAddProduct() {
   formData.function_desc = ''; formData.remark = ''; formData.image_url = ''
   existingImageUrl.value = ''
   smartResult.value = null
+  resetSmartEdit()
   smartError.value = ''
   imageDownloading.value = false
   smartRecognizing.value = false
@@ -235,6 +236,7 @@ function showEditProduct(p) {
   formData.image_url = ''  // 不预填已有URL，保留在预览区
   existingImageUrl.value = p.image_url || ''
   smartResult.value = null
+  resetSmartEdit()
   smartError.value = ''
   smartRecognizing.value = false
   showForm.value = true
@@ -273,7 +275,24 @@ function onImageUrlKeydown(e) {
 // ─── Smart Paste Handler ───
 const smartRecognizing = ref(false)
 const smartResult = ref(null)
+const smartEdit = reactive({ name: '', spec: '', supplier: '', category: '', price: '', cost_price: '', unit: '', remark: '' })
 const smartError = ref('')
+
+function populateSmartEdit(result) {
+  smartEdit.name = result.name || ''
+  smartEdit.spec = result.spec || ''
+  smartEdit.supplier = result.supplier || ''
+  smartEdit.category = result.category || ''
+  smartEdit.price = result.price || ''
+  smartEdit.cost_price = result.cost_price || ''
+  smartEdit.unit = result.unit || ''
+  smartEdit.remark = result.remark || ''
+}
+
+function resetSmartEdit() {
+  smartEdit.name = ''; smartEdit.spec = ''; smartEdit.supplier = ''; smartEdit.category = ''
+  smartEdit.price = ''; smartEdit.cost_price = ''; smartEdit.unit = ''; smartEdit.remark = ''
+}
 
 async function onSmartPaste(e) {
   const items = e.clipboardData?.items
@@ -294,6 +313,7 @@ async function onSmartPaste(e) {
         const r = await api('/api/products/recognize', 'POST', form)
         if (r.products && r.products.length > 0) {
           smartResult.value = r.products[0]
+          populateSmartEdit(r.products[0])
         } else {
           smartError.value = r.error || '未能识别出产品信息'
         }
@@ -318,6 +338,7 @@ async function onSmartPaste(e) {
           const r = await api('/api/products/recognize', 'POST', { text })
           if (r.products && r.products.length > 0) {
             smartResult.value = r.products[0]
+            populateSmartEdit(r.products[0])
           } else {
             smartError.value = r.error || '未能识别出产品信息'
           }
@@ -333,24 +354,23 @@ async function onSmartPaste(e) {
 }
 
 function fillFromSmartResult() {
-  if (!smartResult.value) return
-  const s = smartResult.value
-  if (s.name) formData.name = s.name
-  if (s.spec) formData.spec = s.spec
-  if (s.supplier) formData.supplier = s.supplier
-  if (s.price) formData.price = s.price
-  if (s.cost_price) formData.cost_price = s.cost_price
-  if (s.function_desc) formData.function_desc = s.function_desc
-  if (s.remark) formData.remark = s.remark
-  if (s.unit) formData.unit = s.unit
-  if (s.category) formData.category = s.category
+  if (smartEdit.name) formData.name = smartEdit.name
+  if (smartEdit.spec) formData.spec = smartEdit.spec
+  if (smartEdit.supplier) formData.supplier = smartEdit.supplier
+  if (smartEdit.price) formData.price = smartEdit.price
+  if (smartEdit.cost_price) formData.cost_price = smartEdit.cost_price
+  if (smartEdit.category) formData.category = smartEdit.category
+  if (smartEdit.unit) formData.unit = smartEdit.unit
+  if (smartEdit.remark) formData.remark = smartEdit.remark
   smartResult.value = null
+  resetSmartEdit()
   toast('已填入识别结果')
 }
 
 function clearSmartResult() {
   smartResult.value = null
   smartError.value = ''
+  resetSmartEdit()
 }
 // ─── Image paste handler (图片URL区域)
 const imageUploading = ref(false)
@@ -399,6 +419,7 @@ function deleteImage() {
 function closeForm() {
   showForm.value = false
   smartResult.value = null
+  resetSmartEdit()
   smartError.value = ''
   smartRecognizing.value = false
   imageDownloading.value = false
@@ -677,7 +698,7 @@ onMounted(() => {
                   <label class="form-label-modern">销售单价</label>
                   <input class="form-control" v-model="formData.price" type="number" step="0.01" min="0" placeholder="0.00">
                 </div>
-                <div v-if="isAdmin()" class="col-md-3">
+                <div class="col-md-3">
                   <label class="form-label-modern">成本价</label>
                   <input class="form-control" v-model="formData.cost_price" type="number" step="0.01" min="0" placeholder="0.00">
                 </div>
@@ -727,25 +748,47 @@ onMounted(() => {
                     <div v-if="smartError" class="alert alert-warning py-1 px-2 mb-0 small" style="font-size:.8rem">
                       {{ smartError }}
                     </div>
-                    <!-- 识别结果预览 -->
-                    <div v-if="smartResult" class="mt-2 p-2 rounded-2" style="background:white;border:1px solid var(--gray-200);font-size:.82rem">
+                    <!-- 识别结果预览（可编辑） -->
+                    <div v-if="smartResult" class="mt-2 p-2 rounded-2" style="background:white;border:2px solid var(--bs-danger, #dc3545);font-size:.82rem">
                       <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="fw-semibold text-primary"><i class="bi bi-check-circle"></i> 识别结果</span>
+                        <span class="fw-semibold text-primary"><i class="bi bi-check-circle"></i> 识别结果（可编辑修正）</span>
                         <button class="btn btn-sm btn-outline-secondary py-0 px-2" @click="clearSmartResult" style="font-size:.7rem">✕</button>
                       </div>
-                      <table class="table table-sm table-borderless mb-2" style="font-size:.78rem">
-                        <tbody>
-                          <tr v-if="smartResult.name"><td class="text-muted pe-2" style="width:70px">产品名称</td><td class="fw-medium">{{ smartResult.name }}</td></tr>
-                          <tr v-if="smartResult.spec"><td class="text-muted pe-2">规格型号</td><td>{{ smartResult.spec }}</td></tr>
-                          <tr v-if="smartResult.supplier"><td class="text-muted pe-2">厂商</td><td>{{ smartResult.supplier }}</td></tr>
-                          <tr v-if="smartResult.price"><td class="text-muted pe-2">销售单价</td><td class="text-primary fw-medium">¥{{ smartResult.price }}</td></tr>
-                          <tr v-if="smartResult.cost_price"><td class="text-muted pe-2">成本价</td><td>¥{{ smartResult.cost_price }}</td></tr>
-                          <tr v-if="smartResult.unit"><td class="text-muted pe-2">单位</td><td>{{ smartResult.unit }}</td></tr>
-                          <tr v-if="smartResult.category"><td class="text-muted pe-2">分类</td><td>{{ smartResult.category }}</td></tr>
-                          <tr v-if="smartResult.remark"><td class="text-muted pe-2">备注</td><td>{{ smartResult.remark }}</td></tr>
-                        </tbody>
-                      </table>
-                      <button class="btn btn-sm btn-primary w-100" @click="fillFromSmartResult">
+                      <div class="row g-1">
+                        <div class="col-6 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">产品名称</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.name" style="font-size:.78rem">
+                        </div>
+                        <div class="col-6 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">规格型号</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.spec" style="font-size:.78rem">
+                        </div>
+                        <div class="col-6 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">厂商</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.supplier" style="font-size:.78rem">
+                        </div>
+                        <div class="col-6 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">分类</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.category" style="font-size:.78rem">
+                        </div>
+                        <div class="col-4 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">销售单价</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.price" style="font-size:.78rem">
+                        </div>
+                        <div class="col-4 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">成本价</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.cost_price" style="font-size:.78rem">
+                        </div>
+                        <div class="col-4 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">单位</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.unit" style="font-size:.78rem">
+                        </div>
+                        <div class="col-12 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">备注</label>
+                          <input class="form-control form-control-sm" v-model="smartEdit.remark" style="font-size:.78rem">
+                        </div>
+                      </div>
+                      <button class="btn btn-sm btn-primary w-100 mt-1" @click="fillFromSmartResult">
                         <i class="bi bi-arrow-up"></i> 确认填入上方表单
                       </button>
                     </div>
