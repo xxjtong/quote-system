@@ -592,7 +592,34 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
           </div>
         </div>
       </div>
-    </div>\n\n    <!-- Quote Preview Modal -->\n    <Teleport to=\"body\">\n      <div v-if=\"showQuotePreview\" class=\"modal-backdrop show\" @click=\"closeQuotePreview()\"></div>\n      <div v-if=\"showQuotePreview\" class=\"modal d-block modern-modal\" tabindex=\"-1\">\n        <div class=\"modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable\">\n          <div class=\"modal-content\">\n            <div class=\"modal-header\">\n              <h5 class=\"modal-title fw-semibold\">{{ previewQuoteTitle }}</h5>\n            </div>\n            <div class=\"modal-body\" style=\"background:#f8f9fa\">\n              <div v-if=\"previewQuoteLoading\" class=\"text-center py-5\">\n                <div class=\"spinner-border text-primary\" role=\"status\"></div>\n                <p class=\"text-muted mt-2 small\">加载预览...</p>\n              </div>\n              <div v-else class=\"preview-wrapper\" v-html=\"previewQuoteHtml\"></div>\n            </div>\n            <div class=\"modal-footer\" style=\"gap:8px\">\n              <button class=\"btn btn-primary btn-modern\" @click=\"showQuotePreview = false; router.push({ name: 'newquote', query: { edit: previewQuoteId } })\">编辑</button>\n              <button class=\"btn btn-secondary btn-modern\" @click=\"closeQuotePreview()\">关闭</button>\n            </div>\n          </div>\n        </div>\n      </div>\n    </Teleport>\n  </template>\n</template>
+    </div>
+
+    <!-- Quote Preview Modal -->
+    <Teleport to="body">
+      <div v-if="showQuotePreview" class="modal-backdrop show" @click="closeQuotePreview()"></div>
+      <div v-if="showQuotePreview" class="modal d-block modern-modal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title fw-semibold">{{ previewQuoteTitle }}</h5>
+            </div>
+            <div class="modal-body" style="background:#f8f9fa">
+              <div v-if="previewQuoteLoading" class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="text-muted mt-2 small">加载预览...</p>
+              </div>
+              <div v-else class="preview-wrapper" v-html="previewQuoteHtml"></div>
+            </div>
+            <div class="modal-footer" style="gap:8px">
+              <button class="btn btn-primary btn-modern" @click="showQuotePreview = false; router.push({ name: 'newquote', query: { edit: previewQuoteId } })">编辑</button>
+              <button class="btn btn-secondary btn-modern" @click="closeQuotePreview()">关闭</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+  </template>
+</template>
 
 <style scoped>
 .chat-msg-user { display: flex; justify-content: flex-end; margin-bottom: .5rem; }
