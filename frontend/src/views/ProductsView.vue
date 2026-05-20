@@ -215,6 +215,7 @@ function showAddProduct() {
   existingImageUrl.value = ''
   smartResult.value = null
   smartSource.value = ''
+  smartRawText.value = ''
   resetSmartEdit()
   smartError.value = ''
   imageDownloading.value = false
@@ -238,6 +239,7 @@ function showEditProduct(p) {
   existingImageUrl.value = p.image_url || ''
   smartResult.value = null
   smartSource.value = ''
+  smartRawText.value = ''
   resetSmartEdit()
   smartError.value = ''
   smartRecognizing.value = false
@@ -278,7 +280,8 @@ function onImageUrlKeydown(e) {
 const smartRecognizing = ref(false)
 const smartResult = ref(null)
 const smartSource = ref('')
-const smartEdit = reactive({ name: '', spec: '', supplier: '', category: '', price: '', cost_price: '', unit: '', remark: '' })
+const smartRawText = ref('')
+const smartEdit = reactive({ name: '', spec: '', supplier: '', category: '', price: '', cost_price: '', unit: '', function_desc: '', remark: '' })
 const smartError = ref('')
 
 const SOURCE_LABELS = {
@@ -295,12 +298,13 @@ function populateSmartEdit(result) {
   smartEdit.price = result.price || ''
   smartEdit.cost_price = result.cost_price || ''
   smartEdit.unit = result.unit || ''
+  smartEdit.function_desc = result.function_desc || ''
   smartEdit.remark = result.remark || ''
 }
 
 function resetSmartEdit() {
   smartEdit.name = ''; smartEdit.spec = ''; smartEdit.supplier = ''; smartEdit.category = ''
-  smartEdit.price = ''; smartEdit.cost_price = ''; smartEdit.unit = ''; smartEdit.remark = ''
+  smartEdit.price = ''; smartEdit.cost_price = ''; smartEdit.unit = ''; smartEdit.function_desc = ''; smartEdit.remark = ''
 }
 
 async function onSmartPaste(e) {
@@ -323,6 +327,7 @@ async function onSmartPaste(e) {
         if (r.products && r.products.length > 0) {
           smartResult.value = r.products[0]
           smartSource.value = r.source || ''
+          smartRawText.value = r.raw_text || ''
           populateSmartEdit(r.products[0])
         } else {
           smartError.value = r.error || '未能识别出产品信息'
@@ -349,6 +354,7 @@ async function onSmartPaste(e) {
           if (r.products && r.products.length > 0) {
             smartResult.value = r.products[0]
             smartSource.value = r.source || ''
+            smartRawText.value = r.raw_text || ''
             populateSmartEdit(r.products[0])
           } else {
             smartError.value = r.error || '未能识别出产品信息'
@@ -372,9 +378,11 @@ function fillFromSmartResult() {
   if (smartEdit.cost_price) formData.cost_price = smartEdit.cost_price
   if (smartEdit.category) formData.category = smartEdit.category
   if (smartEdit.unit) formData.unit = smartEdit.unit
+  if (smartEdit.function_desc) formData.function_desc = smartEdit.function_desc
   if (smartEdit.remark) formData.remark = smartEdit.remark
   smartResult.value = null
   smartSource.value = ''
+  smartRawText.value = ''
   resetSmartEdit()
   toast('已填入识别结果')
 }
@@ -382,6 +390,7 @@ function fillFromSmartResult() {
 function clearSmartResult() {
   smartResult.value = null
   smartSource.value = ''
+  smartRawText.value = ''
   smartError.value = ''
   resetSmartEdit()
 }
@@ -433,6 +442,7 @@ function closeForm() {
   showForm.value = false
   smartResult.value = null
   smartSource.value = ''
+  smartRawText.value = ''
   resetSmartEdit()
   smartError.value = ''
   smartRecognizing.value = false
@@ -804,7 +814,16 @@ onMounted(() => {
                           <label class="form-label-modern mb-0" style="font-size:.7rem">备注</label>
                           <input class="form-control form-control-sm" v-model="smartEdit.remark" style="font-size:.78rem">
                         </div>
+                        <div class="col-12 mb-1">
+                          <label class="form-label-modern mb-0" style="font-size:.7rem">功能描述</label>
+                          <textarea class="form-control form-control-sm" v-model="smartEdit.function_desc" rows="2" style="font-size:.78rem;resize:vertical"></textarea>
+                        </div>
                       </div>
+                      <!-- 原始识别数据 -->
+                      <details v-if="smartRawText" class="mt-2">
+                        <summary class="text-muted" style="font-size:.72rem;cursor:pointer">📋 模型返回原始数据</summary>
+                        <pre class="mt-1 p-2 rounded-1" style="background:var(--gray-50);font-size:.7rem;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all">{{ smartRawText }}</pre>
+                      </details>
                       <button class="btn btn-sm btn-primary w-100 mt-1" @click="fillFromSmartResult">
                         <i class="bi bi-arrow-up"></i> 确认填入上方表单
                       </button>

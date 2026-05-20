@@ -941,6 +941,7 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
                 'category': str(parsed.get('category', '')).strip()[:50],
                 'function_desc': str(parsed.get('function_desc', '')).strip()[:500],
                 'remark': str(parsed.get('remark', '')).strip()[:500],
+                '_raw': raw_text,
             }
             if product['name']:
                 return product
@@ -1036,7 +1037,9 @@ def deepseek_parse_product(text):
                 'cost_price': _safe_number(parsed.get('cost_price', 0)),
                 'unit': str(parsed.get('unit', '')).strip()[:10],
                 'category': str(parsed.get('category', '')).strip()[:50],
+                'function_desc': str(parsed.get('function_desc', '')).strip()[:500],
                 'remark': str(parsed.get('remark', '')).strip()[:500],
+                '_raw': reply,
             }
         _debug_log(f'[deepseek_parse] Failed. reply[:200]: {reply[:200]}')
     except Exception as e:
@@ -1051,12 +1054,16 @@ def recognize_product():
     每次只识别1个产品。
     图片用豆包 Vision；OCR/文字用 DeepSeek v4 Flash 解析（regex 降级）。
     请求体：{"text": "..."} 或上传 file 字段的图片
-    返回：{"products": [...], "source": "doubao-vision|deepseek-parse|regex-parse"}
+    返回：{"products": [...], "source": "...", "raw_text": "..."}
     """
     data = request.get_json(silent=True) or {}
     uploaded_file = request.files.get('file')
 
     text = None
+
+    def _respond(product, source):
+        raw = product.pop('_raw', '') if product else ''
+        return jsonify({'products': [product] if product else [], 'source': source, 'raw_text': raw[:3000]})
 
     # 模式1: 图片文件上传 → 豆包 Vision
     if uploaded_file:
@@ -1075,7 +1082,7 @@ def recognize_product():
             product = doubao_vision_recognize(image_b64)
             if product:
                 os.remove(tmp_path)
-                return jsonify({'products': [product], 'source': 'doubao-vision'})
+                return _respond(product, 'doubao-vision')
 
             # 降级：OCR.space → DeepSeek 解析
             text = _ocr_fallback(str(tmp_path))
@@ -1083,11 +1090,11 @@ def recognize_product():
             if text:
                 product = deepseek_parse_product(text)
                 if product:
-                    return jsonify({'products': [product], 'source': 'deepseek-parse'})
+                    return _respond(product, 'deepseek-parse')
                 # DeepSeek 失败 → regex 兜底
                 product = smart_parse_product(text)
                 if product:
-                    return jsonify({'products': [product], 'source': 'regex-parse'})
+                    return _respond(product, 'regex-parse')
             return jsonify({'products': [], 'error': '未能从图片中识别出产品信息，请检查图片清晰度'})
         except Exception as e:
             return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
@@ -1102,7 +1109,7 @@ def recognize_product():
 
             product = doubao_vision_recognize(img_data, mime_type=data.get('mime_type', 'image/png'))
             if product:
-                return jsonify({'products': [product], 'source': 'doubao-vision'})
+                return _respond(product, 'doubao-vision')
             return jsonify({'products': [], 'error': '未能从图片中识别出产品信息，请检查图片清晰度'})
         except Exception as e:
             return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
@@ -1119,12 +1126,12 @@ def recognize_product():
     # DeepSeek v4 Flash 优先
     product = deepseek_parse_product(text)
     if product:
-        return jsonify({'products': [product], 'source': 'deepseek-parse'})
+        return _respond(product, 'deepseek-parse')
 
     # regex 降级
     product = smart_parse_product(text)
     if product:
-        return jsonify({'products': [product], 'source': 'regex-parse'})
+        return _respond(product, 'regex-parse')
     return jsonify({'products': [], 'error': '未能从内容中识别出产品信息，请检查粘贴内容'})
 
 
