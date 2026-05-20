@@ -63,7 +63,10 @@ async function downloadQuote() {
     const blob = await r.blob()
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = ''
+    // Use server Content-Disposition filename, or fallback to quote title
+    const cd = r.headers.get('Content-Disposition') || ''
+    const m = cd.match(/filename[^;=\n]*=["']?((?:[^"';\n]|\\")*)["']?/)
+    a.download = (m && m[1]) ? m[1].replace(/\\"/g, '') : (props.quoteTitle || '报价单') + '.xlsx'
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
