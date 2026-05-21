@@ -309,6 +309,9 @@ function populateSmartEdit(result) {
   smartEdit.remark = result.remark || ''
   // 自动填入上方表单
   fillFromSmartResult()
+  // 识别成功提示
+  const src = SOURCE_LABELS[smartSource.value] || smartSource.value || 'AI'
+  toast(`${src} 识别成功，已填入表单`)
 }
 
 function resetSmartEdit() {
@@ -416,15 +419,26 @@ function fillFromSmartResult() {
   smartSource.value = ''
   smartRawText.value = ''
   resetSmartEdit()
-  toast('已填入识别结果')
 }
 
 function clearSmartResult() {
+  // 清空识别结果 + 已填入表单的内容 + textarea输入
   smartResult.value = null
   smartSource.value = ''
   smartRawText.value = ''
   smartError.value = ''
+  smartTextInput.value = ''
   resetSmartEdit()
+  // 清空表单中被识别填入的字段
+  formData.name = ''
+  formData.spec = ''
+  formData.supplier = ''
+  formData.category = ''
+  formData.price = ''
+  formData.cost_price = ''
+  formData.unit = ''
+  formData.function_desc = ''
+  formData.remark = ''
 }
 // ─── Image paste handler (图片URL区域)
 const imageUploading = ref(false)
@@ -807,7 +821,7 @@ onMounted(() => {
                         <span class="fw-semibold text-primary"><i class="bi bi-check-circle"></i> 识别结果（可编辑修正）</span>
                         <div class="d-flex align-items-center gap-2">
                           <small v-if="smartSource" class="text-muted" style="font-size:.7rem;background:var(--gray-100);padding:1px 6px;border-radius:4px">{{ SOURCE_LABELS[smartSource] || smartSource }}</small>
-                          <button class="btn btn-sm btn-outline-secondary py-0 px-2" @click="clearSmartResult" style="font-size:.7rem">✕</button>
+                          <button class="btn btn-sm btn-outline-danger py-0 px-2" @click="clearSmartResult" style="font-size:.7rem"><i class="bi bi-trash3"></i> 清空重识</button>
                         </div>
                       </div>
                       <div class="row g-1">
