@@ -89,6 +89,10 @@ app.config['REGISTRATION_OPEN'] = os.environ.get('QUOTE_REGISTRATION', 'true').l
 
 db.init_app(app)
 
+# Flask-Migrate (Alembic) — 替代手动 ALTER TABLE
+from flask_migrate import Migrate
+migrate = Migrate(app, db)
+
 # ─── Helpers ─────────────────────────────────────────────────────
 # _store_image_blob, add_pinyin_field — still in products_bp.py
 # 12 shared helpers — moved to utils.py and product_utils.py
