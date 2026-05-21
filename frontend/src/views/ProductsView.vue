@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
+import { usePagination } from '../composables/usePagination'
 
 const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
@@ -15,10 +16,10 @@ const { api, isAdmin, currentUser } = useApi()
 const products = ref([])
 const categories = ref([])
 const suppliers = ref([])
-const totalProducts = ref(0)
-const currentPage = ref(1)
-const perPage = ref(20)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalProducts.value / perPage.value)))
+const totalItems = ref(0)
+const { currentPage, perPage, totalPages, pageNumbers, goPage, resetPage, setFetchFn } = usePagination({
+  perPageDefault: 20,
+})
 
 const searchTerm = ref('')
 const categoryFilter = ref('')
@@ -56,6 +57,7 @@ function clearSearch() {
 }
 
 // ─── Fetch products ───
+setFetchFn(() => fetchProducts())
 async function fetchProducts() {
   loading.value = true
   try {
@@ -72,7 +74,7 @@ async function fetchProducts() {
     const data = await api(`/api/products?${params}`)
     if (!data.error) {
       products.value = data.products || []
-      totalProducts.value = data.total || 0
+      totalItems.value = data.total || 0
       categories.value = data.categories || []
       suppliers.value = data.suppliers || []
       cacheVersion = data.version
@@ -485,23 +487,6 @@ async function saveProduct() {
   }
 }
 
-// ─── Page navigation ───
-function goPage(p) {
-  currentPage.value = p
-  fetchProducts()
-}
-
-// ─── Pagination display ───
-const pageNumbers = computed(() => {
-  if (totalPages.value <= 1) return []
-  let start = Math.max(1, Math.min(currentPage.value - 3, totalPages.value - 6))
-  let end = Math.min(totalPages.value, start + 6)
-  if (end - start < 6) start = Math.max(1, end - 6)
-  const pages = []
-  for (let p = start; p <= end; p++) pages.push(p)
-  return pages
-})
-
 // ─── Init ───
 onMounted(() => {
   // Defer fetch to next tick — ensures App.vue session check completes first,
@@ -557,8 +542,8 @@ onMounted(() => {
           </select>
         </div>
         <div class="col-md-3 d-flex justify-content-md-end align-items-center gap-2" style="flex-wrap:wrap">
-          <span v-if="!loading" class="text-muted" style="font-size:.82rem">共 {{ totalProducts }} 个产品</span>
-          <select class="per-page-select" v-model.number="perPage" @change="currentPage = 1; fetchProducts()">
+          <span v-if="!loading" class="text-muted" style="font-size:.82rem">共 {{ totalItems }} 个产品</span>
+          <select class="per-page-select" v-model.number="perPage" @change="resetPage()">
             <option :value="10">10条/页</option>
             <option :value="20">20条/页</option>
             <option :value="50">50条/页</option>

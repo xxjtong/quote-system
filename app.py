@@ -496,34 +496,31 @@ def list_products():
     # 拼音搜索：纯ASCII（无汉字）时启用
     is_pinyin = search and not re.search(r'[\u4e00-\u9fff]', search)
     if is_pinyin:
-        from pypinyin import pinyin, Style
         q_lower = search.lower().strip()
-        all_products = query.order_by(col.asc() if sort_order == 'asc' else col.desc()).all()
-
-        def pinyin_match(prod):
-            """匹配产品名/规格/厂商/功能描述中的拼音"""
-            texts = [prod.name, prod.spec or '', prod.supplier or '', prod.function_desc or '']
-            for text in texts:
-                if not text:
-                    continue
-                # 全拼匹配
-                py_list = pinyin(text, style=Style.NORMAL, heteronym=False)
-                full_py = ''.join(p[0] for p in py_list).lower()
-                if q_lower in full_py:
-                    return True
-                # 首字母匹配
-                initials = ''.join(p[0][0] for p in py_list).lower()
-                if q_lower in initials:
-                    return True
-                # 模糊：逐字首字母子串（如 "hwsb" 匹配 "华为设备"）
-                if len(q_lower) >= 2 and len(initials) >= 2:
-                    if q_lower in initials:
-                        return True
-            return False
-
-        filtered = [p for p in all_products if pinyin_match(p)]
-        total = len(filtered)
-        products = filtered[(page - 1) * per_page: page * per_page]
+        # 优先用预计算pinyin_search字段（DB LIKE），回退到实时计算
+        if Product.pinyin_search is not None:
+            like = f'%{q_lower}%'
+            query = query.filter(Product.pinyin_search.like(like))
+            query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
+            total = query.count()
+            products = query.offset((page - 1) * per_page).limit(per_page).all()
+        else:
+            # 回退：实时拼音匹配（兼容旧数据）
+            from pypinyin import pinyin, Style
+            all_products = query.order_by(col.asc() if sort_order == 'asc' else col.desc()).all()
+            def pinyin_match(prod):
+                texts = [prod.name, prod.spec or '', prod.supplier or '', prod.function_desc or '']
+                for text in texts:
+                    if not text: continue
+                    py_list = pinyin(text, style=Style.NORMAL, heteronym=False)
+                    full_py = ''.join(p[0] for p in py_list).lower()
+                    if q_lower in full_py: return True
+                    initials = ''.join(p[0][0] for p in py_list).lower()
+                    if q_lower in initials: return True
+                return False
+            filtered = [p for p in all_products if pinyin_match(p)]
+            total = len(filtered)
+            products = filtered[(page - 1) * per_page: page * per_page]
     else:
         query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
         if search:
@@ -594,6 +591,7 @@ def create_product():
         created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
     )
     _store_image_blob(product, data)
+    product.pinyin_search = _compute_pinyin_search(name, spec, data.get('category', ''), data.get('supplier', ''))
     db.session.add(product)
     db.session.commit()
     return jsonify({'product': product.to_dict()}), 201
@@ -650,6 +648,7 @@ def update_product(product_id):
     if 'cost_price' in data:
         product.cost_price = round(float(data['cost_price']), 2)
     _store_image_blob(product, data)
+    product.pinyin_search = _compute_pinyin_search(product.name, product.spec or '', product.category or '', product.supplier or '')
     db.session.commit()
     return jsonify({'product': product.to_dict()})
 
@@ -1042,6 +1041,24 @@ def _log_ai_usage(user_id, action, model='', elapsed=0, success=True, error=''):
     except Exception:
         try: db.session.rollback()
         except: pass
+
+
+def _compute_pinyin_search(name, sku='', category='', supplier=''):
+    """预计算产品拼音搜索字段 — 所有字段拼音首字母+全拼拼接"""
+    try:
+        from pypinyin import pinyin, Style
+        parts = [name or '', sku or '', category or '', supplier or '']
+        all_py = []
+        for text in parts:
+            if text:
+                py_list = pinyin(text, style=Style.NORMAL, heteronym=False)
+                all_py.extend([p[0] for p in py_list])
+                # 首字母
+                first_letters = pinyin(text, style=Style.FIRST_LETTER, heteronym=False)
+                all_py.extend([f[0] for f in first_letters])
+        return ' '.join(all_py)
+    except Exception:
+        return ''
 
 
 def _safe_number(val):
@@ -2081,6 +2098,66 @@ def batch_delete_quotes():
     })
 
 
+def _excel_common_styles():
+    """报价单Excel公共样式定义（export_quote_excel和_build_excel共用）"""
+    YELLOW_FILL = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+    title_font = Font(name='微软雅黑', size=10, bold=True)
+    header_font = Font(name='微软雅黑', size=10, bold=True)
+    data_font = Font(name='微软雅黑', size=11, bold=True)
+    total_font = Font(name='微软雅黑', size=10, bold=True)
+    note_font = Font(name='微软雅黑', size=10, bold=False)
+    thin = Side(style='thin')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    ca = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    money_fmt = '#,##0.00'
+    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16, 16.0]
+    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注', '图片']
+    return {
+        'YELLOW_FILL': YELLOW_FILL, 'title_font': title_font, 'header_font': header_font,
+        'data_font': data_font, 'total_font': total_font, 'note_font': note_font,
+        'thin_border': thin_border, 'ca': ca, 'money_fmt': money_fmt,
+        'col_widths': col_widths, 'headers': headers, 'COL_COUNT': len(headers),
+    }
+
+
+def _excel_write_header(ws, quote, styles):
+    """写入Excel前3行（公司信息+黄色标题+列表头），返回当前行号"""
+    s = styles
+    COL_COUNT = s['COL_COUNT']
+    for ci, w in enumerate(s['col_widths'], 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+    # 第1行：公司名 + 客户信息
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
+    company = get_setting('company_name', '').strip()
+    parts = [f'公司：{company}'] if company else []
+    if quote.client: parts.append(f'客户：{quote.client}')
+    if quote.contact: parts.append(f'联系人：{quote.contact}')
+    if quote.phone: parts.append(f'电话：{quote.phone}')
+    if quote.tax_rate and quote.tax_rate > 0: parts.append(f'税率：{quote.tax_rate}%')
+    if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
+    info = '  |  '.join(parts) if parts else ''
+    c1 = ws.cell(row=1, column=1, value=info)
+    c1.font = Font(name='微软雅黑', size=9, color='666666')
+    c1.alignment = Alignment(horizontal='left', vertical='center')
+    for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=1, column=ci).border = s['thin_border']
+    ws.row_dimensions[1].height = 17
+    # 第2行：黄色标题
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
+    t = ws.cell(row=2, column=1, value=quote.title or '报价单')
+    t.font = s['title_font']; t.fill = s['YELLOW_FILL']; t.alignment = s['ca']
+    for ci in range(1, COL_COUNT + 1):
+        ws.cell(row=2, column=ci).border = s['thin_border']
+    ws.row_dimensions[2].height = 18
+    # 第3行：表头
+    HEAD = 3
+    ws.row_dimensions[HEAD].height = 17
+    for ci, h in enumerate(s['headers'], 1):
+        cell = ws.cell(row=HEAD, column=ci, value=h)
+        cell.font = s['header_font']; cell.alignment = s['ca']; cell.border = s['thin_border']
+    return HEAD
+
+
 @app.route('/api/quotes/<int:quote_id>/export-excel', methods=['GET'])
 def export_quote_excel(quote_id):
     """导出报价单 — 样式精确克隆模板.xlsx"""
@@ -2098,63 +2175,11 @@ def export_quote_excel(quote_id):
     ws = wb.active
     ws.title = quote.title or '报价单'
 
-    # ── 样式（精确匹配模板） ──
-    YELLOW_FILL = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
-    title_font = Font(name='微软雅黑', size=10, bold=True)
-    header_font = Font(name='微软雅黑', size=10, bold=True)
-    data_font = Font(name='微软雅黑', size=11, bold=True)
-    total_font = Font(name='微软雅黑', size=10, bold=True)
-    note_font = Font(name='微软雅黑', size=10, bold=False)
-
-    thin = Side(style='thin')
-    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    ca = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    money_fmt = '#,##0.00'
+    # ── 公共样式 + 表头 ──
+    styles = _excel_common_styles()
+    HEAD = _excel_write_header(ws, quote, styles)
+    s = styles
     pct_fmt = '0%'
-
-    # ── 列宽（精确匹配模板） ──
-    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16, 16.0]
-    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注', '图片']
-    COL_COUNT = len(headers)
-
-    for ci, w in enumerate(col_widths, 1):
-        ws.column_dimensions[get_column_letter(ci)].width = w
-
-    # ── 第1行：公司名 + 客户信息 ──
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
-    company = get_setting('company_name', '').strip()
-    parts = [f'公司：{company}'] if company else []
-    if quote.client: parts.append(f'客户：{quote.client}')
-    if quote.contact: parts.append(f'联系人：{quote.contact}')
-    if quote.phone: parts.append(f'电话：{quote.phone}')
-    if quote.tax_rate and quote.tax_rate > 0: parts.append(f'税率：{quote.tax_rate}%')
-    if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
-    info = '  |  '.join(parts) if parts else ''
-    c1 = ws.cell(row=1, column=1, value=info)
-    c1.font = Font(name='微软雅黑', size=9, color='666666')
-    c1.alignment = Alignment(horizontal='left', vertical='center')
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=1, column=ci).border = thin_border
-    ws.row_dimensions[1].height = 17
-
-    # ── 第2行：黄色标题 ──
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
-    t = ws.cell(row=2, column=1, value=quote.title or '报价单')
-    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=2, column=ci).border = thin_border
-    ws.row_dimensions[2].height = 18
-
-    # ── 第3行：表头 ──
-    HEAD = 3
-    ws.row_dimensions[HEAD].height = 17
-    for ci, h in enumerate(headers, 1):
-        cell = ws.cell(row=HEAD, column=ci, value=h)
-        cell.font = header_font; cell.alignment = ca
-        cell.border = thin_border
-    ws.cell(row=HEAD, column=1).border = thin_border
-    ws.cell(row=HEAD, column=COL_COUNT).border = thin_border
 
     # ── 数据行 ──
     row = HEAD
@@ -2183,12 +2208,12 @@ def export_quote_excel(quote_id):
 
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
-            cell.font = data_font; cell.alignment = ca; cell.border = thin_border
-            if ci in (6, 8, 10): cell.number_format = money_fmt
+            cell.font = s['data_font']; cell.alignment = s['ca']; cell.border = s['thin_border']
+            if ci in (6, 8, 10): cell.number_format = s['money_fmt']
             elif ci == 9: cell.number_format = pct_fmt
 
-        ws.cell(row=row, column=1).border = thin_border
-        ws.cell(row=row, column=COL_COUNT).border = thin_border
+        ws.cell(row=row, column=1).border = s['thin_border']
+        ws.cell(row=row, column=s['COL_COUNT']).border = s['thin_border']
 
         # 嵌入产品图片到图片列（L列）— 从 BLOB 读取
         if image_url:
@@ -2229,41 +2254,41 @@ def export_quote_excel(quote_id):
 
     total_amt = quote.total_amount or 0
     tlabel = ws.cell(row=row, column=1, value=f'合计（大写）：{number_to_cn(total_amt)}')
-    tlabel.font = total_font
+    tlabel.font = s['total_font']
     tlabel.alignment = Alignment(horizontal='right', vertical='center')
-    tlabel.border = thin_border
+    tlabel.border = s['thin_border']
 
     for ci in range(2, 11):
         c = ws.cell(row=row, column=ci)
-        c.font = total_font; c.border = thin_border
+        c.font = s['total_font']; c.border = s['thin_border']
 
     tc = ws.cell(row=row, column=11, value=total_amt)
-    tc.font = total_font; tc.number_format = money_fmt; tc.alignment = ca
-    tc.border = thin_border
+    tc.font = s['total_font']; tc.number_format = s['money_fmt']; tc.alignment = s['ca']
+    tc.border = s['thin_border']
 
-    ws.cell(row=row, column=12).border = thin_border
-    ws.cell(row=row, column=12).font = total_font
+    ws.cell(row=row, column=12).border = s['thin_border']
+    ws.cell(row=row, column=12).font = s['total_font']
 
     # ── 备注行 ──
     row += 1
     ws.row_dimensions[row].height = 18
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=s['COL_COUNT'])
     nc = ws.cell(row=row, column=1, value=quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。')
-    nc.font = note_font
+    nc.font = s['note_font']
     nc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=row, column=ci).border = thin_border
+    for ci in range(1, s['COL_COUNT'] + 1):
+        ws.cell(row=row, column=ci).border = s['thin_border']
 
     # ── 页脚行（公司自定义） ──
     footer = get_setting('footer_text', '').strip()
     if footer:
         row += 1
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=s['COL_COUNT'])
         fc = ws.cell(row=row, column=1, value=footer)
         fc.font = Font(name='微软雅黑', size=9, color='888888')
         fc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
         ws.row_dimensions[row].height = 30
-        for ci in range(1, COL_COUNT + 1):
+        for ci in range(1, s['COL_COUNT'] + 1):
             ws.cell(row=row, column=ci).border = Border()
 
     # ── 打印：纵向 ──
@@ -2351,48 +2376,10 @@ def _build_excel(quote, pmap, filepath):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = quote.title or ''
-    YELLOW_FILL = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
-    title_font = Font(name='微软雅黑', size=10, bold=True)
-    header_font = Font(name='微软雅黑', size=10, bold=True)
-    data_font = Font(name='微软雅黑', size=11, bold=True)
-    total_font = Font(name='微软雅黑', size=10, bold=True)
-    note_font = Font(name='微软雅黑', size=10, bold=False)
-    thin = Side(style='thin')
-    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    ca = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    money_fmt = '#,##0.00'
-    col_widths = [9.66, 27.16, 18.83, 20.16, 60.16, 13.33, 7.5, 11.33, 6.5, 12.16, 18.16, 16.0]
-    headers = ['序号', '名称', '规格型号', '型号', '功能描述', '单价', '数量', '合计', '折扣率', '成交价', '备注', '图片']
-    COL_COUNT = len(headers)
-    for ci, w in enumerate(col_widths, 1):
-        ws.column_dimensions[get_column_letter(ci)].width = w
-    # ── 第1行：公司名 + 客户信息 ──
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=COL_COUNT)
-    company = get_setting('company_name', '').strip()
-    parts = [f'公司：{company}'] if company else []
-    if quote.client: parts.append(f'客户：{quote.client}')
-    if quote.contact: parts.append(f'联系人：{quote.contact}')
-    if quote.phone: parts.append(f'电话：{quote.phone}')
-    if quote.tax_rate and quote.tax_rate > 0: parts.append(f'税率：{quote.tax_rate}%')
-    if quote.quote_date: parts.append(f'日期：{quote.quote_date}')
-    info = '  |  '.join(parts) if parts else ''
-    c1 = ws.cell(row=1, column=1, value=info)
-    c1.font = Font(name='微软雅黑', size=9, color='666666'); c1.alignment = Alignment(horizontal='left', vertical='center')
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=1, column=ci).border = thin_border
-    ws.row_dimensions[1].height = 17
-    # ── 第2行：黄色标题 ──
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=COL_COUNT)
-    t = ws.cell(row=2, column=1, value=quote.title or '')
-    t.font = title_font; t.fill = YELLOW_FILL; t.alignment = ca
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=2, column=ci).border = thin_border
-    ws.row_dimensions[2].height = 18
-    HEAD = 3
-    ws.row_dimensions[HEAD].height = 17
-    for ci, h in enumerate(headers, 1):
-        cell = ws.cell(row=HEAD, column=ci, value=h)
-        cell.font = header_font; cell.alignment = ca; cell.border = thin_border
+    # ── 公共样式 + 表头 ──
+    styles = _excel_common_styles()
+    s = styles
+    HEAD = _excel_write_header(ws, quote, styles)
     row = HEAD
     for i, item in enumerate(quote.items, 1):
         row += 1
@@ -2409,7 +2396,7 @@ def _build_excel(quote, pmap, filepath):
         vals = [i, item.product_name, item.product_spec or '', item.product_spec or item.product_sku or '', product_function_desc, up, qty, subtotal, 0, subtotal, item.remark or '', '']
         for ci, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=ci, value=val)
-            cell.font = data_font; cell.alignment = ca; cell.border = thin_border
+            cell.font = s['data_font']; cell.alignment = s['ca']; cell.border = s['thin_border']
         # 嵌入产品图片到图片列（L列）— 从 BLOB 读取
         if image_url:
             try:
@@ -2427,7 +2414,6 @@ def _build_excel(quote, pmap, filepath):
                     ratio = min(max_w / w, max_h / h, 1)
                     img.width = int(w * ratio)
                     img.height = int(h * ratio)
-                    # 图片单元格内居中
                     col_l = get_column_letter(12)
                     col_w_px = (ws.column_dimensions[col_l].width or 10) * 7
                     row_h_pt = ws.row_dimensions[row].height or 60
@@ -2445,28 +2431,28 @@ def _build_excel(quote, pmap, filepath):
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
     total_amt = quote.total_amount or 0
     tlabel = ws.cell(row=row, column=1, value=f'合计（大写）：{number_to_cn(total_amt)}')
-    tlabel.font = total_font; tlabel.alignment = Alignment(horizontal='right', vertical='center'); tlabel.border = thin_border
+    tlabel.font = s['total_font']; tlabel.alignment = Alignment(horizontal='right', vertical='center'); tlabel.border = s['thin_border']
     for ci in range(2, 11):
-        c = ws.cell(row=row, column=ci); c.font = total_font; c.border = thin_border
+        c = ws.cell(row=row, column=ci); c.font = s['total_font']; c.border = s['thin_border']
     tc = ws.cell(row=row, column=11, value=total_amt)
-    tc.font = total_font; tc.number_format = money_fmt; tc.alignment = ca; tc.border = thin_border
-    ws.cell(row=row, column=12).border = thin_border; ws.cell(row=row, column=12).font = total_font
+    tc.font = s['total_font']; tc.number_format = s['money_fmt']; tc.alignment = s['ca']; tc.border = s['thin_border']
+    ws.cell(row=row, column=12).border = s['thin_border']; ws.cell(row=row, column=12).font = s['total_font']
     row += 1
     ws.row_dimensions[row].height = 18
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=s['COL_COUNT'])
     nc = ws.cell(row=row, column=1, value=quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。')
-    nc.font = note_font; nc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-    for ci in range(1, COL_COUNT + 1):
-        ws.cell(row=row, column=ci).border = thin_border
+    nc.font = s['note_font']; nc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    for ci in range(1, s['COL_COUNT'] + 1):
+        ws.cell(row=row, column=ci).border = s['thin_border']
     footer = get_setting('footer_text', '').strip()
     if footer:
         row += 1
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=COL_COUNT)
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=s['COL_COUNT'])
         fc = ws.cell(row=row, column=1, value=footer)
         fc.font = Font(name='微软雅黑', size=9, color='888888')
         fc.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
         ws.row_dimensions[row].height = 30
-        for ci in range(1, COL_COUNT + 1):
+        for ci in range(1, s['COL_COUNT'] + 1):
             ws.cell(row=row, column=ci).border = Border()
     wb.save(filepath)
 
@@ -3189,6 +3175,16 @@ with app.app_context():
                 q.created_by = admin_user.id
             db.session.commit()
             print(f'[Init] 已为 {len(orphan_quotes)} 条历史报价单分配创建者: admin')
+
+    # 回填：为旧产品计算拼音搜索字段
+    missing_pinyin = Product.query.filter(
+        (Product.pinyin_search.is_(None) | (Product.pinyin_search == ''))
+    ).limit(500).all()
+    if missing_pinyin:
+        for p in missing_pinyin:
+            p.pinyin_search = _compute_pinyin_search(p.name, p.spec or '', p.category or '', p.supplier or '')
+        db.session.commit()
+        print(f'[Init] 已回填 {len(missing_pinyin)} 个产品的拼音搜索字段')
     # 初始化默认系统设置
     defaults = {'company_name': '', 'footer_text': ''}
     for k, v in defaults.items():

@@ -20,6 +20,7 @@ class Product(db.Model):
     image_data = db.Column(db.LargeBinary, nullable=True)
     image_mime = db.Column(db.String(30), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    pinyin_search = db.Column(db.Text, nullable=True)  # 预计算拼音，搜索用
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
