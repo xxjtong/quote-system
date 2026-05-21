@@ -11,6 +11,7 @@ const { api } = useApi()
 
 const editId = ref(route.query.edit || null)
 const autoProduct = ref(route.query.product ? decodeURIComponent(route.query.product) : '')
+const autoProducts = ref(route.query.products ? decodeURIComponent(route.query.products).split(',').filter(Boolean) : [])
 const isEditing = computed(() => !!editId.value)
 
 // ─── Form state ───
@@ -200,7 +201,8 @@ async function saveQuote() {
 
 onMounted(() => {
   loadQuote()
-  if (autoProduct.value) autoAddProduct()
+  if (autoProducts.value.length > 0) autoAddProducts()
+  else if (autoProduct.value) autoAddProduct()
 })
 
 async function autoAddProduct() {
@@ -276,6 +278,60 @@ async function autoAddProduct() {
     form.title = form.title || `${name} 报价`
   }
   toast(`已添加 ${found.length} 个产品`)
+}
+
+async function autoAddProducts() {
+  // 从AI对话传入的多个产品名，逐个搜索并添加
+  const names = autoProducts.value
+  let added = 0
+  for (const name of names) {
+    let found = []
+    // 1. 按型号搜索
+    const modelMatch = name.match(/[A-Z]{2,}[\d\-]+/gi) || []
+    for (const m of modelMatch) {
+      if (found.length > 0) break
+      try {
+        const data = await api(`/api/products?search=${encodeURIComponent(m)}&per_page=3`)
+        found = (data.products || []).filter(p => p.is_active !== false)
+      } catch {}
+    }
+    // 2. 按全名搜索
+    if (found.length === 0) {
+      try {
+        const data = await api(`/api/products?search=${encodeURIComponent(name)}&per_page=3`)
+        found = (data.products || []).filter(p => p.is_active !== false)
+      } catch {}
+    }
+    // 3. 按关键词搜索
+    if (found.length === 0) {
+      const keywords = name.split(/\s+/).filter(s => s.length >= 2)
+      const sorted = keywords.sort((a, b) => b.length - a.length)
+      for (const kw of sorted.slice(0, 2)) {
+        if (found.length > 0) break
+        try {
+          const data = await api(`/api/products?search=${encodeURIComponent(kw)}&per_page=1`)
+          const hits = (data.products || []).filter(p => p.is_active !== false)
+          if (hits.length > 0) found = [hits[0]]
+        } catch {}
+      }
+    }
+    for (const p of found) {
+      const existing = items.find(i => i.product_id === p.id)
+      if (existing) continue
+      items.push({
+        product_id: p.id, name: p.name, spec: p.spec || '',
+        unit: p.unit || '', price: p.price || 0,
+        quantity: 1, discount: 100, remark: '',
+      })
+      added++
+    }
+  }
+  if (added > 0) {
+    form.title = form.title || `${names[0]} 报价`
+    toast(`已添加 ${added} 个产品`)
+  } else {
+    toast(`未找到匹配产品，请手动添加`, 'warning')
+  }
 }
 </script>
 

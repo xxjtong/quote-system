@@ -321,6 +321,12 @@ async function createQuoteFromProduct(productName) {
   router.push({ name: 'newquote', query: { product: productName } })
 }
 
+function createQuoteFromProducts(products) {
+  // 把对话中提取的产品名列表传入query，逗号分隔
+  const names = (products || []).map(p => p.name).filter(Boolean)
+  router.push({ name: 'newquote', query: { products: names.join(',') } })
+}
+
 // Handle quick reply button
 function quickReply(text) {
   sendMessage(text)
@@ -591,7 +597,7 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
                 class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
                 @click="quickReply(qr)">{{ qr }}</button>
               <button class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
-                @click="createQuoteFromProduct('')">
+                @click="createQuoteFromProducts(msg.parsed?.products || [])">
                 <i class="bi bi-plus-circle me-1"></i>一键创建报价单
               </button>
             </div>
