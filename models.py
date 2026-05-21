@@ -19,8 +19,8 @@ class Product(db.Model):
     image_url = db.Column(db.String(500), nullable=True)
     image_data = db.Column(db.LargeBinary, nullable=True)
     image_mime = db.Column(db.String(30), nullable=True)
-    is_active = db.Column(db.Boolean, default=True)
-    pinyin_search = db.Column(db.Text, nullable=True)  # 预计算拼音，搜索用
+    is_active = db.Column(db.Boolean, default=True, index=True)
+    pinyin_search = db.Column(db.Text, nullable=True, index=True)  # 预计算拼音，搜索用
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
@@ -61,10 +61,10 @@ class Quote(db.Model):
     phone = db.Column(db.String(50), nullable=True)
     quote_date = db.Column(db.String(20), nullable=True)
     valid_days = db.Column(db.Integer, default=15)
-    status = db.Column(db.String(20), default='draft')
+    status = db.Column(db.String(20), default='draft', index=True)
     total_amount = db.Column(db.Float, default=0)
     download_count = db.Column(db.Integer, default=0)
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
     remark = db.Column(db.Text, nullable=True)
     tax_rate = db.Column(db.Float, default=0)
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -104,8 +104,8 @@ class Quote(db.Model):
 class QuoteItem(db.Model):
     __tablename__ = 'quote_items'
     id = db.Column(db.Integer, primary_key=True)
-    quote_id = db.Column(db.Integer, db.ForeignKey('quotes.id', ondelete='CASCADE'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True)
+    quote_id = db.Column(db.Integer, db.ForeignKey('quotes.id', ondelete='CASCADE'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True, index=True)
     product_name = db.Column(db.String(200), nullable=False)
     product_sku = db.Column(db.String(100), nullable=True)
     product_spec = db.Column(db.String(500), nullable=True)

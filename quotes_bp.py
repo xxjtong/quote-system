@@ -774,7 +774,7 @@ def preview_quote_html(quote_id):
     def fmt_int(n):
         if n is None: return ''
         try: return f'{int(float(n))}'
-        except: return str(n)
+        except Exception: return str(n)
 
     def e(s):
         """html.escape shorthand — 防止用户输入中的HTML/JS注入"""

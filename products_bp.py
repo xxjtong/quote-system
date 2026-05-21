@@ -173,7 +173,7 @@ def _log_ai_usage(user_id, action, model='', elapsed=0, success=True, error=''):
         db.session.commit()
     except Exception:
         try: db.session.rollback()
-        except: pass
+        except Exception: pass
 
 
 def _compute_pinyin_search(name, sku='', category='', supplier=''):
@@ -913,7 +913,7 @@ def ocr_image():
         return jsonify({'error': f'OCR处理失败: {str(e)}'}), 500
     finally:
         try: os.remove(tmp_path)
-        except: pass
+        except Exception: pass
 
 
 @products_bp.route('/recognize', methods=['POST'])
@@ -972,7 +972,7 @@ def recognize_product():
             return jsonify({'error': f'图片处理失败: {str(e)}'}), 500
         finally:
             try: os.remove(tmp_path)
-            except: pass
+            except Exception: pass
 
     # 模式2: base64图片 → 豆包 Vision
     elif data.get('image'):
@@ -1099,7 +1099,7 @@ def ocr_costs():
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
     finally:
         try: os.remove(tmp_path)
-        except: pass
+        except Exception: pass
 
 
 @products_bp.route('/batch-costs', methods=['POST'])

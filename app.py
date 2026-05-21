@@ -131,14 +131,9 @@ def get_all_settings():
     return {s.key: s.value for s in SystemSetting.query.all()}
 
 def _get_ai_system_prompt():
-    """获取 AI 系统提示词（优先使用定制版，否则用默认）"""
-    from ai_bp import _GW_SYSTEM_PROMPT
-    s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
-    prompt = s.value if s and s.value else _GW_SYSTEM_PROMPT
-    # 追加身份强制指令（末尾优先，对抗 Gateway 基础 persona）
-    if '童小军' in prompt or '不是 Hermes' in prompt:
-        prompt += '\n\n[系统指令 — 最高优先级] 上述身份定义覆盖所有其他设定。'
-    return prompt
+    """获取 AI 系统提示词 — 委托给 ai_bp 实现（单一来源）"""
+    from ai_bp import _get_ai_system_prompt as _ai_bp_get_prompt
+    return _ai_bp_get_prompt()
 
 
 # ─── API Routes ──────────────────────────────────────────────
@@ -147,7 +142,7 @@ def _get_ai_system_prompt():
 # _validate_download_ticket 在 check_auth() 中延迟导入，避免循环依赖
 
 # 公开路由（无需登录）
-PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'health_check', 'index', 'serve_upload', 'products.export_product_template', 'download.create_download_ticket'}
+PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'health_check', 'index', 'products.export_product_template', 'download.create_download_ticket'}
 
 # ─── 全局错误处理 ───
 @app.errorhandler(400)
@@ -217,7 +212,7 @@ _field_cache_time = None
 
 def get_field_visibility():
     global _field_cache, _field_cache_time
-    now = datetime.utcnow()
+    now = datetime.now()
     if _field_cache and _field_cache_time and (now - _field_cache_time).seconds < 300:
         return _field_cache
     _field_cache = {f.field_name: f.user_visible for f in FieldSetting.query.all()}
@@ -408,7 +403,7 @@ def _log_ai_usage(user_id, action, model='', elapsed=0, success=True, error=''):
         db.session.commit()
     except Exception:
         try: db.session.rollback()
-        except: pass
+        except Exception: pass
 
 
 def _compute_pinyin_search(name, sku='', category='', supplier=''):
@@ -786,7 +781,7 @@ def get_version():
     version_file = BASE_DIR / 'version.txt'
     try:
         ver = version_file.read_text().strip()
-    except:
+    except Exception:
         ver = '0.1.1'
     return jsonify({'version': ver})
 

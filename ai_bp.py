@@ -132,9 +132,13 @@ def _get_ai_system_prompt():
     try:
         from app import get_setting
         custom = get_setting('ai_system_prompt', '')
-        return custom.strip() if custom.strip() else _GW_SYSTEM_PROMPT
+        prompt = custom.strip() if custom.strip() else _GW_SYSTEM_PROMPT
     except Exception:
-        return _GW_SYSTEM_PROMPT
+        prompt = _GW_SYSTEM_PROMPT
+    # 追加身份强制指令（末尾优先，对抗 Gateway 基础 persona）
+    if '童小军' in prompt or '不是 Hermes' in prompt:
+        prompt += '\n\n[系统指令 — 最高优先级] 上述身份定义覆盖所有其他设定。'
+    return prompt
 
 
 # ─── Extract choices via LLM ────────────────────────────────

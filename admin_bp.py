@@ -25,7 +25,7 @@ def _validate_download_ticket(ticket_str):
     entry = _download_tickets.get(ticket_str)
     if not entry:
         return None
-    if datetime.utcnow().timestamp() > entry['exp']:
+    if datetime.now().timestamp() > entry['exp']:
         _download_tickets.pop(ticket_str, None)
         return None
     return entry['user_id']
@@ -258,10 +258,10 @@ def create_download_ticket():
     ticket = secrets.token_urlsafe(32)
     _download_tickets[ticket] = {
         'user_id': g.current_user.id,
-        'exp': datetime.utcnow().timestamp() + _TICKET_TTL,
+        'exp': datetime.now().timestamp() + _TICKET_TTL,
     }
     # 清理过期ticket
-    now = datetime.utcnow().timestamp()
+    now = datetime.now().timestamp()
     expired = [k for k, v in _download_tickets.items() if v['exp'] < now]
     for k in expired:
         del _download_tickets[k]
