@@ -142,7 +142,7 @@ def _get_ai_system_prompt():
 # _validate_download_ticket 在 check_auth() 中延迟导入，避免循环依赖
 
 # 公开路由（无需登录）
-PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'health_check', 'index', 'products.export_product_template', 'download.create_download_ticket', 'products.get_product_image'}
+PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'health_check', 'index', 'products.export_product_template', 'products.get_product_image'}
 
 # ─── 全局错误处理 ───
 @app.errorhandler(400)
