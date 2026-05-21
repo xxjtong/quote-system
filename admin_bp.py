@@ -98,7 +98,7 @@ def update_settings():
 @require_admin
 def get_ai_prompt():
     """获取当前 AI 系统提示词（定制或默认）"""
-    from app import _GW_SYSTEM_PROMPT, _get_ai_system_prompt
+    from ai_bp import _GW_SYSTEM_PROMPT
     s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
     current = s.value if s and s.value else _GW_SYSTEM_PROMPT
     return jsonify({
@@ -112,7 +112,7 @@ def get_ai_prompt():
 @require_admin
 def update_ai_prompt():
     """更新 AI 系统提示词 — 同时清除所有会话缓存，下次对话立即生效"""
-    from app import _GW_SYSTEM_PROMPT
+    from ai_bp import _GW_SYSTEM_PROMPT
     data = request.get_json()
     if not data:
         return jsonify({'error': '数据为空'}), 400
