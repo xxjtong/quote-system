@@ -1,0 +1,14 @@
+/opt/quote-system/gunicorn-access.log
+/opt/quote-system/gunicorn-error.log
+{
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    maxsize 50M
+    dateext
+    dateformat -%Y%m%d
+}

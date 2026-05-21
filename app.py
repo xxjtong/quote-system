@@ -84,7 +84,7 @@ if not app.config['JWT_SECRET']:
         app.config['JWT_SECRET'] = secrets.token_hex(32)
         _secret_file.write_text(app.config['JWT_SECRET'])
 app.config['JWT_EXPIRY_HOURS'] = 72
-app.config['DEFAULT_ADMIN_PASSWORD'] = os.environ.get('QUOTE_ADMIN_PASSWORD', 'admin123')
+app.config['DEFAULT_ADMIN_PASSWORD'] = os.environ.get('QUOTE_ADMIN_PASSWORD', '')  # 空值=首次启动自动生成随机密码
 app.config['REGISTRATION_OPEN'] = os.environ.get('QUOTE_REGISTRATION', 'true').lower() == 'true'
 
 db.init_app(app)
@@ -850,14 +850,22 @@ with app.app_context():
 
     # 预置管理员账号
     if not User.query.filter_by(username='admin').first():
+        _admin_pwd = app.config['DEFAULT_ADMIN_PASSWORD']
+        if not _admin_pwd:
+            # 未设环境变量时，生成随机密码并写入文件，避免硬编码弱密码
+            _admin_pwd = secrets.token_urlsafe(12)
+            _pwd_file = Path(BASE_DIR) / '.admin_password'
+            _pwd_file.write_text(_admin_pwd)
+            _pwd_file.chmod(0o600)
+            print(f'[Init] 随机密码已写入 {_pwd_file}（请妥善保管）')
         admin = User(
             username='admin',
-            password_hash=hash_password(app.config['DEFAULT_ADMIN_PASSWORD']),
+            password_hash=hash_password(_admin_pwd),
             role='admin', is_active=True
         )
         db.session.add(admin)
         db.session.commit()
-        print(f'[Init] 已创建管理员: admin / {app.config["DEFAULT_ADMIN_PASSWORD"]}')
+        print(f'[Init] 已创建管理员: admin / [密码已设]')
     # 迁移：历史报价单 assign 给 admin (user_id=1)
     orphan_quotes = Quote.query.filter(Quote.created_by.is_(None)).all()
     if orphan_quotes:

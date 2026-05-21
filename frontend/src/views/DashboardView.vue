@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, inject, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
-import { formatMoney } from '../composables/useUtils'
+import { formatMoney, escHtml } from '../composables/useUtils'
 import QuotePreviewModal from '../components/QuotePreviewModal.vue'
 
 const router = useRouter()
@@ -389,7 +389,7 @@ function renderTable(rows) {
   if (isSep) {
     html += '<thead><tr>'
     for (const h of header) {
-      html += `<th style="border-bottom:2px solid #dee2e6;padding:4px 8px;text-align:left;white-space:nowrap">${h}</th>`
+      html += `<th style="border-bottom:2px solid #dee2e6;padding:4px 8px;text-align:left;white-space:nowrap">${escHtml(h)}</th>`
     }
     html += '</tr></thead>'
   }
@@ -398,7 +398,7 @@ function renderTable(rows) {
     const cells = row.split('|').filter(c => c.trim()).map(c => c.trim())
     html += '<tr>'
     for (const c of cells) {
-      html += `<td style="border-bottom:1px solid #e9ecef;padding:4px 8px;white-space:nowrap">${c}</td>`
+      html += `<td style="border-bottom:1px solid #e9ecef;padding:4px 8px;white-space:nowrap">${escHtml(c)}</td>`
     }
     html += '</tr>'
   }
