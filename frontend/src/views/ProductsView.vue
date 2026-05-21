@@ -819,23 +819,20 @@ onMounted(() => {
                 <!-- 智能识别区域 -->
                 <div class="col-12 mt-3" @paste="onSmartPaste">
                   <div class="p-3 rounded-3" style="background:var(--gray-50);border:2px dashed var(--gray-300)">
-                    <label class="form-label-modern mb-1" style="font-size:.82rem">
-                      <i class="bi bi-magic"></i> 智能识别
-                    </label>
-                    <!-- 状态栏 -->
-                    <div v-if="smartRecognizing || smartResult || smartError" class="mb-2 d-flex align-items-center gap-2" style="font-size:.78rem">
-                      <span v-if="smartRecognizing" class="text-primary">
+                    <label class="form-label-modern mb-1 d-flex align-items-center gap-2" style="font-size:.82rem">
+                      <span><i class="bi bi-magic"></i> 智能识别</span>
+                      <span v-if="smartRecognizing" class="text-primary" style="font-size:.78rem">
                         <span class="spinner-border spinner-border-sm" style="width:.7rem;height:.7rem"></span>
                         识别中... {{ smartElapsed > 0 ? smartElapsed.toFixed(1) + 's' : '' }}
                       </span>
-                      <span v-else-if="smartResult" class="text-success">
+                      <span v-else-if="smartResult" class="text-success" style="font-size:.78rem">
                         <i class="bi bi-check-circle-fill"></i>
                         {{ SOURCE_LABELS[smartSource] || smartSource || 'AI' }} 识别完成 {{ smartElapsed > 0 ? smartElapsed.toFixed(1) + 's' : '' }}
                       </span>
-                      <span v-else-if="smartError" class="text-danger">
+                      <span v-else-if="smartError" class="text-danger" style="font-size:.78rem">
                         <i class="bi bi-x-circle-fill"></i> 识别失败
                       </span>
-                    </div>
+                    </label>
                     <!-- 文字输入区 -->
                     <div class="d-flex gap-2 mb-2">
                       <textarea class="form-control form-control-sm" v-model="smartTextInput"
