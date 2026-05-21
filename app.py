@@ -173,6 +173,9 @@ def _mark_req_start():
 
 @app.before_request
 def check_auth():
+    # 放行 CORS preflight (OPTIONS) 请求
+    if request.method == 'OPTIONS':
+        return None
     if not request.path.startswith('/api/') and not request.path.startswith('/uploads/'):
         return None
     # 提取路由名
