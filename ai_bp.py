@@ -470,7 +470,7 @@ def ai_chat():
         parsed = _parse_reply_actions(reply)
 
         # Lazy import _log_ai_usage from app
-        from app import _log_ai_usage
+        from utils import _log_ai_usage
         _log_ai_usage(user_id=user.id, action='chat', model=body.get('model', ''), elapsed=t2-t0)
 
         return jsonify({
@@ -480,7 +480,7 @@ def ai_chat():
             'timings': {'Gateway': f'{t2 - t1:.1f}s', '总耗时': f'{t2 - t0:.1f}s'}
         })
     except Exception as e:
-        from app import _log_ai_usage
+        from utils import _log_ai_usage
         _log_ai_usage(user_id=user.id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0, success=False, error=str(e)[:200])
         return jsonify({
             'error': f'AI 服务异常: {str(e)}',
@@ -537,7 +537,7 @@ def _ai_chat_sse(body, t0, user_id=None):
                     yield f'data: {_json.dumps({"type": "tool"})}\n\n'
 
             parsed = _parse_reply_actions(accumulated)
-            from app import _log_ai_usage
+            from utils import _log_ai_usage
             _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0)
             # 先发 done（含规则提取的 quick_replies），不阻塞等 LLM
             yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
@@ -551,7 +551,7 @@ def _ai_chat_sse(body, t0, user_id=None):
                     pass
 
         except Exception as e:
-            from app import _log_ai_usage
+            from utils import _log_ai_usage
             _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0, success=False, error=str(e)[:200])
             yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
 
