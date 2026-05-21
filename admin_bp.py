@@ -15,20 +15,24 @@ from auth import require_admin, hash_password, _is_registration_open
 # ─── Blueprint 定义 ──────────────────────────────────────────
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
-# ─── 下载 Ticket 机制（替代 URL token，防泄露/CSRF） ───────
-_download_tickets = {}  # {ticket_str: {'user_id': int, 'exp': float}}
+# ─── 下载 Ticket 机制（数据库存储，多 worker 安全） ───────
 _TICKET_TTL = 120  # 秒
 
 
 def _validate_download_ticket(ticket_str):
     """验证下载ticket，返回 user_id 或 None"""
-    entry = _download_tickets.get(ticket_str)
-    if not entry:
+    from models import DownloadTicket
+    row = DownloadTicket.query.filter_by(ticket=ticket_str).first()
+    if not row:
         return None
-    if datetime.now().timestamp() > entry['exp']:
-        _download_tickets.pop(ticket_str, None)
+    if datetime.now().timestamp() > row.expires_at:
+        db.session.delete(row)
+        db.session.commit()
         return None
-    return entry['user_id']
+    # 一次性使用后删除
+    db.session.delete(row)
+    db.session.commit()
+    return row.user_id
 
 
 # ─── Registration ────────────────────────────────────────────
@@ -255,14 +259,15 @@ def create_download_ticket():
     """已认证用户获取短期下载ticket（2分钟有效）"""
     if not hasattr(g, 'current_user') or not g.current_user:
         return jsonify({'error': '请先登录'}), 401
+    from models import DownloadTicket
     ticket = secrets.token_urlsafe(32)
-    _download_tickets[ticket] = {
-        'user_id': g.current_user.id,
-        'exp': datetime.now().timestamp() + _TICKET_TTL,
-    }
+    db.session.add(DownloadTicket(
+        ticket=ticket,
+        user_id=g.current_user.id,
+        expires_at=datetime.now().timestamp() + _TICKET_TTL,
+    ))
     # 清理过期ticket
     now = datetime.now().timestamp()
-    expired = [k for k, v in _download_tickets.items() if v['exp'] < now]
-    for k in expired:
-        del _download_tickets[k]
+    DownloadTicket.query.filter(DownloadTicket.expires_at < now).delete()
+    db.session.commit()
     return jsonify({'ticket': ticket})

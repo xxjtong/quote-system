@@ -200,6 +200,15 @@ class SystemSetting(db.Model):
     value = db.Column(db.Text, nullable=True, default='')
 
 
+class DownloadTicket(db.Model):
+    """下载凭证 — 替代内存字典，多 worker 安全"""
+    __tablename__ = 'download_tickets'
+    id = db.Column(db.Integer, primary_key=True)
+    ticket = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    expires_at = db.Column(db.Float, nullable=False)
+
+
 class AIChatSession(db.Model):
     """AI 对话初始化标记 — 替代内存 set，多 worker 安全"""
     __tablename__ = 'ai_chat_sessions'
