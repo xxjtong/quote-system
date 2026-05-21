@@ -101,6 +101,10 @@ function productTooltip(p) {
 function imageSrc(p) {
   if (!p.has_image && !p.image_url) return ''
   if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image'
+  if (p.image_url.startsWith('/uploads/')) {
+    const token = localStorage.getItem('quote_token')
+    return BASE_URL + p.image_url + (token ? '?token=' + token : '')
+  }
   return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
 }
 

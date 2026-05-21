@@ -173,14 +173,14 @@ def _mark_req_start():
 
 @app.before_request
 def check_auth():
-    if not request.path.startswith('/api/'):
+    if not request.path.startswith('/api/') and not request.path.startswith('/uploads/'):
         return None
     # 提取路由名
     endpoint = request.endpoint
     if endpoint in PUBLIC_ROUTES or (endpoint and endpoint.startswith('static')):
         return None
-    # 鉴权：优先 Bearer Token，其次 download_ticket（短期一次性）
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    # 鉴权：优先 Bearer Token，其次 query param token（图片等场景），最后 download_ticket
+    token = request.headers.get('Authorization', '').replace('Bearer ', '') or request.args.get('token', '')
     if token:
         try:
             data = jwt.decode(token, app.config['JWT_SECRET'], algorithms=['HS256'])
