@@ -824,6 +824,9 @@ onMounted(() => {
                           <button class="btn btn-sm btn-outline-danger py-0 px-2" @click="clearSmartResult" style="font-size:.7rem"><i class="bi bi-trash3"></i> 清空重识</button>
                         </div>
                       </div>
+                      <div v-if="smartResult.existing_product_id" class="alert alert-info py-1 px-2 mb-2" style="font-size:.78rem">
+                        <i class="bi bi-link-45deg"></i> 产品库已有该产品（ID:{{ smartResult.existing_product_id }}），当前为新增录入
+                      </div>
                       <div class="row g-1">
                         <div class="col-6 mb-1">
                           <label class="form-label-modern mb-0" style="font-size:.7rem">产品名称</label>

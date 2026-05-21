@@ -244,7 +244,8 @@ def _parse_json_reply(text):
 
 
 def _product_from_parsed(parsed, raw=''):
-    """从解析出的dict构建标准化产品dict，截断字段长度"""
+    """从解析出的dict构建标准化产品dict，截断字段长度。
+    如果匹配到已有产品，附加 existing_product_id 字段。"""
     if not parsed:
         return None
     product = {
@@ -259,7 +260,33 @@ def _product_from_parsed(parsed, raw=''):
         'remark': str(parsed.get('remark', '')).strip()[:500],
         '_raw': raw,
     }
-    return product if product['name'] else None
+    if not product['name']:
+        return None
+
+    # 尝试匹配已有产品（按型号或 名称+厂商）
+    try:
+        spec = product['spec'].strip()
+        name = product['name'].strip()
+        supplier = product['supplier'].strip()
+        match = None
+        if spec and len(spec) >= 3:
+            match = Product.query.filter(Product.spec == spec, Product.is_active == 1).first()
+        if not match and name and supplier:
+            match = Product.query.filter(
+                Product.name == name, Product.supplier == supplier, Product.is_active == 1
+            ).first()
+        if not match and name:
+            from sqlalchemy import func
+            match = Product.query.filter(
+                func.lower(Product.name) == name.lower(), Product.is_active == 1
+            ).first()
+        if match:
+            product['existing_product_id'] = match.id
+            product['existing_product_image'] = match.image_url or ''
+    except Exception:
+        pass
+
+    return product
 
 
 def _ocr_fallback(image_path):
