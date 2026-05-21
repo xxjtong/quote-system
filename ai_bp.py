@@ -150,49 +150,60 @@ def _get_ai_system_prompt():
     return prompt
 
 
-# ─── Generate quick replies via LLM ──────────────────────────
-def _generate_quick_replies(reply_text):
-    """用 deepseek-v4-flash 分析 AI 回复，生成 2-4 个快捷回复按钮。返回列表或 []。"""
+# ─── Direct LLM call via Gateway Chat Completions (lightweight) ──
+def _call_flash_via_gateway(system_msg, user_msg, max_tokens=100, timeout=8):
+    """通过 Gateway /v1/chat/completions 调用 deepseek-v4-flash。返回文本或 None。"""
     import urllib.request, json as _json
-    # 截取最后800字（问题通常在末尾）
-    snippet = reply_text.strip()[-800:]
-    prompt = (
-        '你是一个快捷回复生成器。根据AI助手的回复，推测用户最可能想说的2-4个简短回复。\n'
-        '规则：\n'
-        '- 每个回复5-15字，简洁自然，像用户口头说的\n'
-        '- 如果AI问了"还是"选择题，提取两个选项\n'
-        '- 如果AI推荐了产品，生成"详细对比这两款""查看更多同类产品"\n'
-        '- 如果AI问了是否创建报价单，生成"创建报价单""先不用"\n'
-        '- 如果AI给了价格，生成"有更便宜的替代吗""查看参数对比"\n'
-        '- 如果AI列了方案，生成"用方案一""用方案二"\n'
-        '- 如果不确定，生成通用的"继续推荐""换个方向"\n'
-        '- 返回纯JSON数组如["创建报价单","先看看参数"],不要markdown、不要解释\n'
-        f'AI回复摘要："""{snippet}"""'
+    body = _json.dumps({
+        'model': 'deepseek-v4-flash',
+        'messages': [
+            {'role': 'system', 'content': system_msg},
+            {'role': 'user', 'content': user_msg},
+        ],
+        'max_tokens': max_tokens,
+        'temperature': 0.3,
+    })
+    req = urllib.request.Request(
+        f'{_gateway_url}/v1/chat/completions',
+        data=body.encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST'
     )
     try:
-        body = _json.dumps({
-            'model': 'deepseek-v4-flash',
-            'input': prompt,
-            'max_output_tokens': 100,
-        })
-        req = urllib.request.Request(
-            f'{_gateway_url}/v1/responses',
-            data=body.encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-        resp = urllib.request.urlopen(req, timeout=8)
+        resp = urllib.request.urlopen(req, timeout=timeout)
         result = _json.loads(resp.read())
-        reply = ''
-        for o in result.get('output', []):
-            if o.get('type') == 'message':
-                content = o.get('content', [])
-                if content:
-                    reply = content[0].get('text', '')
-                break
-        reply = reply.strip()
-        if reply.startswith('['):
-            arr = _json.loads(reply)
+        return result['choices'][0]['message']['content'].strip()
+    except Exception:
+        return None
+
+
+# ─── Generate quick replies via LLM ──────────────────────────
+def _generate_quick_replies(reply_text):
+    """用 DeepSeek Flash 分析 AI 回复，生成 2-4 个快捷回复按钮。返回列表或 []。"""
+    import json as _json
+    snippet = reply_text.strip()[-800:]
+    user_msg = (
+        '根据AI助手回复，推测用户最可能想说的2-4个简短回复。\\n'
+        '规则：\\n'
+        '- 每个回复5-15字，简洁自然，像用户口头说的\\n'
+        '- 如果AI问了"还是"选择题，提取两个选项\\n'
+        '- 如果AI推荐了产品，生成"详细对比这两款""查看更多同类产品"\\n'
+        '- 如果AI问了是否创建报价单，生成"创建报价单""先不用"\\n'
+        '- 如果AI给了价格，生成"有更便宜的替代吗""查看参数对比"\\n'
+        '- 如果AI列了方案，生成"用方案一""用方案二"\\n'
+        '- 如果不确定，生成通用的"继续推荐""换个方向"\\n'
+        '- 返回纯JSON数组如["创建报价单","先看看参数"],不要markdown、不要解释\\n'
+        f'AI回复摘要："""{snippet}"""'
+    )
+    text = _call_flash_via_gateway(
+        '你是快捷回复生成器，只返回JSON数组，不要任何解释。',
+        user_msg, max_tokens=100, timeout=8,
+    )
+    if not text:
+        return []
+    try:
+        if text.startswith('['):
+            arr = _json.loads(text)
             if isinstance(arr, list) and 1 <= len(arr) <= 6:
                 return [str(x).strip() for x in arr if 2 <= len(str(x).strip()) <= 30][:4]
     except Exception:
@@ -203,7 +214,7 @@ def _generate_quick_replies(reply_text):
 # ─── Extract choices via LLM ────────────────────────────────
 def _extract_choices_via_llm(text):
     """用 LLM 从「是A还是B」问句中提取两个选项。返回 [a, b] 或 []。"""
-    import urllib.request, json as _json
+    import json as _json
     if '还是' not in text:
         return []
     sentences = re.split(r'[。！\n]', text)
@@ -212,37 +223,22 @@ def _extract_choices_via_llm(text):
     if '还是' not in question:
         question = text.strip()[-300:]
 
-    prompt = (
+    user_msg = (
         '从这句话中提取「还是」前后两个选项。返回纯JSON数组如["A","B"]，不要markdown、不要解释。\n'
         '去掉「这是/是要/是/用/选/给」等前缀词和「的/呢/吗/啊」等后缀词，只留核心5-15字。\n'
         '例：「继续用威发西安还是新建客户？」→ ["继续用威发西安","新建客户"]\n'
         '例：「要改方案还是新项目？」→ ["改方案","新项目"]\n'
         f'提取："{question}"'
     )
+    text = _call_flash_via_gateway(
+        '你是选项提取器，只返回JSON数组，不要任何解释。',
+        user_msg, max_tokens=50, timeout=5,
+    )
+    if not text:
+        return []
     try:
-        body = _json.dumps({
-            'model': 'deepseek-v4-flash',
-            'input': prompt,
-            'max_output_tokens': 100,
-        })
-        req = urllib.request.Request(
-            f'{_gateway_url}/v1/responses',
-            data=body.encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-        resp = urllib.request.urlopen(req, timeout=5)
-        result = _json.loads(resp.read())
-        reply = ''
-        for o in result.get('output', []):
-            if o.get('type') == 'message':
-                content = o.get('content', [])
-                if content:
-                    reply = content[0].get('text', '')
-                break
-        reply = reply.strip()
-        if reply.startswith('['):
-            arr = _json.loads(reply)
+        if text.startswith('['):
+            arr = _json.loads(text)
             if isinstance(arr, list) and len(arr) == 2:
                 a, b = str(arr[0]).strip(), str(arr[1]).strip()
                 if 1 <= len(a) <= 30 and 1 <= len(b) <= 30:
