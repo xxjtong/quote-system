@@ -19,8 +19,7 @@ const loading = ref(true)
 
 // ─── Search & Pagination ───
 const searchTerm = ref('')
-const totalQuotes = ref(0)
-const { currentPage, perPage, totalPages, pageNumbers, goPage, resetPage, setFetchFn } = usePagination({
+const { currentPage, perPage, totalItems, totalPages, pageNumbers, goPage, resetPage, setFetchFn } = usePagination({
   perPageDefault: 20,
 })
 setFetchFn(() => fetchQuotes())
@@ -61,7 +60,7 @@ async function fetchQuotes() {
     const data = await api(`/api/quotes?${params}`)
     if (!data.error) {
       quotes.value = data.quotes || []
-      totalQuotes.value = data.total || 0
+      totalItems.value = data.total || 0
       await nextTick()
     }
   } catch (e) {
@@ -213,7 +212,7 @@ function closePreview() {
               <i class="bi bi-x-lg"></i>
             </button>
           </div>
-          <span v-if="!loading" class="text-muted" style="font-size:.82rem">共 {{ totalQuotes }} 条</span>
+          <span v-if="!loading" class="text-muted" style="font-size:.82rem">共 {{ totalItems }} 条</span>
           <select class="per-page-select" v-model.number="perPage" @change="resetPage()">
             <option :value="10">10条/页</option>
             <option :value="20">20条/页</option>

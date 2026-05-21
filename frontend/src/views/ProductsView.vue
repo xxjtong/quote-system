@@ -16,8 +16,7 @@ const { api, isAdmin, currentUser } = useApi()
 const products = ref([])
 const categories = ref([])
 const suppliers = ref([])
-const totalItems = ref(0)
-const { currentPage, perPage, totalPages, pageNumbers, goPage, resetPage, setFetchFn } = usePagination({
+const { currentPage, perPage, totalItems, totalPages, pageNumbers, goPage, resetPage, setFetchFn } = usePagination({
   perPageDefault: 20,
 })
 
@@ -100,9 +99,9 @@ function productTooltip(p) {
 
 function imageSrc(p) {
   if (!p.has_image && !p.image_url) return ''
-  if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image'
+  const token = localStorage.getItem('quote_token')
+  if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image' + (token ? '?token=' + token : '')
   if (p.image_url.startsWith('/uploads/')) {
-    const token = localStorage.getItem('quote_token')
     return BASE_URL + p.image_url + (token ? '?token=' + token : '')
   }
   return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
@@ -194,7 +193,8 @@ watch(() => route.params.id, async (id) => {
 
 function detailImageSrc(p) {
   if (!p || (!p.has_image && !p.image_url)) return ''
-  if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image'
+  const token = localStorage.getItem('quote_token')
+  if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image' + (token ? '?token=' + token : '')
   return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
 }
 

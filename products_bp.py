@@ -768,9 +768,23 @@ def get_product(product_id):
 
 
 @products_bp.route('/<int:product_id>/image', methods=['GET'])
-@require_auth
 def get_product_image(product_id):
-    """返回产品图片二进制数据"""
+    """返回产品图片二进制数据（支持 query param token 认证）"""
+    # 不用 @require_auth，手动验证（img 标签无法设 header）
+    from flask import request as _req
+    token = _req.headers.get('Authorization', '').replace('Bearer ', '') or _req.args.get('token', '')
+    if not token:
+        return '', 401
+    try:
+        import jwt as _jwt
+        from flask import current_app
+        data = _jwt.decode(token, current_app.config['JWT_SECRET'], algorithms=['HS256'])
+        from models import User
+        user = db.session.get(User, data['user_id'])
+        if not user or not user.is_active:
+            return '', 403
+    except Exception:
+        return '', 401
     product = db.session.get(Product, product_id)
     if not product or not product.image_data:
         return '', 404
