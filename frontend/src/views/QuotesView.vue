@@ -3,6 +3,7 @@ import { ref, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
+import { usePagination } from '../composables/usePagination'
 import QuotePreviewModal from '../components/QuotePreviewModal.vue'
 
 const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -18,10 +19,11 @@ const loading = ref(true)
 
 // ─── Search & Pagination ───
 const searchTerm = ref('')
-const currentPage = ref(1)
-const perPage = ref(20)
 const totalQuotes = ref(0)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalQuotes.value / perPage.value)))
+const { currentPage, perPage, totalPages, pageNumbers, goPage, resetPage, setFetchFn } = usePagination({
+  perPageDefault: 20,
+})
+setFetchFn(() => fetchQuotes())
 
 // ─── IME composition ───
 const isComposing = ref(false)
@@ -38,39 +40,12 @@ function debouncedSearch(val) {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     searchTerm.value = val
-    currentPage.value = 1
-    fetchQuotes()
+    resetPage()
   }, 500)
 }
 function clearSearch() {
   searchTerm.value = ''
-  currentPage.value = 1
-  fetchQuotes()
-}
-
-// ─── Pagination pages ───
-const pageNumbers = computed(() => {
-  const total = totalPages.value
-  if (total <= 1) return []
-
-  // 始终显示最多 7 页，当前页居中
-  const half = 3
-  let start = Math.max(1, currentPage.value - half)
-  let end = Math.min(total, currentPage.value + half)
-
-  // 靠近边界时补齐
-  if (start === 1) end = Math.min(total, start + 6)
-  else if (end === total) start = Math.max(1, end - 6)
-
-  const pages = []
-  for (let p = start; p <= end; p++) pages.push(p)
-  return pages
-})
-
-function goPage(p) {
-  if (p < 1 || p > totalPages.value) return
-  currentPage.value = p
-  fetchQuotes()
+  resetPage()
 }
 
 async function fetchQuotes() {
@@ -219,7 +194,7 @@ function closePreview() {
     <div class="card-modern">
       <div class="d-flex justify-content-between align-items-center mb-3">
         <div class="d-flex align-items-center gap-2">
-          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="currentPage=1;fetchQuotes()">
+          <select class="form-select form-select-sm d-inline-block w-auto" v-model="statusFilter" @change="resetPage()">
             <option value="">全部状态</option>
             <option value="draft">草稿</option>
             <option value="sent">已发送</option>
@@ -239,7 +214,7 @@ function closePreview() {
             </button>
           </div>
           <span v-if="!loading" class="text-muted" style="font-size:.82rem">共 {{ totalQuotes }} 条</span>
-          <select class="per-page-select" v-model.number="perPage" @change="currentPage = 1; fetchQuotes()">
+          <select class="per-page-select" v-model.number="perPage" @change="resetPage()">
             <option :value="10">10条/页</option>
             <option :value="20">20条/页</option>
             <option :value="50">50条/页</option>
