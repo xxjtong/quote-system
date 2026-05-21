@@ -250,6 +250,11 @@ async function sendMessage(textOverride) {
             chatMessages.value[msgIndex].parsed = data.parsed
             chatMessages.value[msgIndex].elapsed = parseFloat(data.elapsed) || elapsedSeconds.value
             currentPhase.value = phases.length - 1
+          } else if (data.type === 'quick_replies') {
+            // LLM 异步补发的 quick_replies，追加到 parsed
+            if (data.items?.length && chatMessages.value[msgIndex]?.parsed) {
+              chatMessages.value[msgIndex].parsed.quick_replies = data.items
+            }
           } else if (data.type === 'error') {
             chatMessages.value[msgIndex].content = `❌ ${data.error}`
           }

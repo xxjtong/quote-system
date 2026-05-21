@@ -17,12 +17,12 @@ chat_bp = Blueprint('chat', __name__)  # /api/chat 不在 /api/ai 前缀下
 admin_ai_bp = Blueprint('admin_ai', __name__)  # /api/admin/ai-usage
 
 # ─── 配置 ──────────────────────────────────────────────────
-_ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-pro')
+_ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
 _gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8643')
 
 _AVAILABLE_MODELS = [
-    {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
     {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash', 'desc': '快速响应，适合日常问答'},
+    {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
 ]
 
 
@@ -127,8 +127,15 @@ _GW_SYSTEM_PROMPT = (
 )
 
 
+_prompt_cache = {'value': None, 'exp': 0}
+_PROMPT_CACHE_TTL = 30  # 秒
+
 def _get_ai_system_prompt():
-    """从 DB 设置或默认值获取 AI 系统提示词"""
+    """从 DB 设置或默认值获取 AI 系统提示词（30秒TTL缓存）"""
+    import time as _t
+    now = _t.time()
+    if _prompt_cache['value'] is not None and now < _prompt_cache['exp']:
+        return _prompt_cache['value']
     try:
         from app import get_setting
         custom = get_setting('ai_system_prompt', '')
@@ -138,6 +145,8 @@ def _get_ai_system_prompt():
     # 追加身份强制指令（末尾优先，对抗 Gateway 基础 persona）
     if '童小军' in prompt or '不是 Hermes' in prompt:
         prompt += '\n\n[系统指令 — 最高优先级] 上述身份定义覆盖所有其他设定。'
+    _prompt_cache['value'] = prompt
+    _prompt_cache['exp'] = now + _PROMPT_CACHE_TTL
     return prompt
 
 
@@ -296,11 +305,7 @@ def _parse_reply_actions(reply_text):
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
             result['quick_replies'] = [p['name'] for p in result['products'][:6]]
 
-    # 兜底：如果规则提取不到quick_replies，用LLM生成
-    if not result['quick_replies']:
-        llm_replies = _generate_quick_replies(reply_text)
-        if llm_replies:
-            result['quick_replies'] = llm_replies
+    # 注意：LLM兜底生成quick_replies已移到SSE层异步执行，不阻塞_parse_reply_actions
 
     dl_match = re.search(r'(https://bwh\.ddns\.mobi/quote/api/quotes/(\d+)/export-excel)', reply_text)
     if dl_match:
@@ -349,7 +354,7 @@ def ai_chat():
         'model': data.get('model') or _ai_model,
         'input': user_input,
         'conversation': conversation,
-        'max_output_tokens': 2000,
+        'max_output_tokens': 800,
     }
 
     import hashlib
@@ -476,7 +481,16 @@ def _ai_chat_sse(body, t0, user_id=None):
             parsed = _parse_reply_actions(accumulated)
             from app import _log_ai_usage
             _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0)
+            # 先发 done（含规则提取的 quick_replies），不阻塞等 LLM
             yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
+            # 异步：如果规则没提取到 quick_replies，用 LLM 生成后补发
+            if not parsed.get('quick_replies'):
+                try:
+                    llm_replies = _generate_quick_replies(accumulated)
+                    if llm_replies:
+                        yield f'data: {_json.dumps({"type": "quick_replies", "items": llm_replies})}\n\n'
+                except Exception:
+                    pass
 
         except Exception as e:
             from app import _log_ai_usage
