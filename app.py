@@ -46,6 +46,10 @@ CORS(app, **cors_kwargs)
 
 # Register auth blueprint
 app.register_blueprint(auth_bp)
+# Admin + download blueprints (lazy import to avoid circular dependency)
+import admin_bp as _admin_bp_mod
+app.register_blueprint(_admin_bp_mod.admin_bp)
+app.register_blueprint(_admin_bp_mod.download_bp)
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'uploads'
@@ -122,29 +126,10 @@ def check_quote_owner(quote_id):
     return quote, None, None
 
 
-# ─── Admin API ───────────────────────────────────────────────
+# ─── Admin API (moved to admin_bp.py) ───────────────────────
+# Admin routes are now in admin_bp.py; register blueprint below.
 
-@app.route('/api/admin/registration', methods=['GET'])
-@require_admin
-def get_registration():
-    return jsonify({'registration_open': _is_registration_open()})
-
-@app.route('/api/admin/registration', methods=['PUT'])
-@require_admin
-def set_registration():
-    data = request.get_json()
-    if 'registration_open' in data:
-        open_val = bool(data['registration_open'])
-        s = SystemSetting.query.filter_by(key='registration_open').first()
-        if s:
-            s.value = str(open_val).lower()
-        else:
-            db.session.add(SystemSetting(key='registration_open', value=str(open_val).lower()))
-        db.session.commit()
-        app.config['REGISTRATION_OPEN'] = open_val
-    return jsonify({'registration_open': _is_registration_open()})
-
-# ─── 系统设置 API ─────────────────────────────────
+# ─── 系统设置 Helper（仍被 app.py 其他路由使用） ───────
 def get_setting(key, default=''):
     """读取单个系统设置"""
     s = SystemSetting.query.filter_by(key=key).first()
@@ -153,61 +138,6 @@ def get_setting(key, default=''):
 def get_all_settings():
     """读取所有系统设置 (返回dict)"""
     return {s.key: s.value for s in SystemSetting.query.all()}
-
-@app.route('/api/admin/settings', methods=['GET'])
-@require_admin
-def get_settings():
-    return jsonify({'settings': get_all_settings()})
-
-@app.route('/api/admin/settings', methods=['PUT'])
-@require_admin
-def update_settings():
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': '数据为空'}), 400
-    for key, value in data.items():
-        s = SystemSetting.query.filter_by(key=key).first()
-        if s:
-            s.value = str(value) if value else ''
-        else:
-            db.session.add(SystemSetting(key=key, value=str(value) if value else ''))
-    db.session.commit()
-    return jsonify({'settings': get_all_settings()})
-
-
-# ─── AI Prompt 管理 ──────────────────────────────
-
-@app.route('/api/admin/prompt', methods=['GET'])
-@require_admin
-def get_ai_prompt():
-    """获取当前 AI 系统提示词（定制或默认）"""
-    s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
-    current = s.value if s and s.value else _GW_SYSTEM_PROMPT
-    return jsonify({
-        'prompt': current,
-        'is_custom': bool(s and s.value),
-        'default': _GW_SYSTEM_PROMPT,
-    })
-
-
-@app.route('/api/admin/prompt', methods=['PUT'])
-@require_admin
-def update_ai_prompt():
-    """更新 AI 系统提示词 — 同时清除所有会话缓存，下次对话立即生效"""
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': '数据为空'}), 400
-    prompt = data.get('prompt', '')
-    s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
-    if s:
-        s.value = prompt
-    else:
-        db.session.add(SystemSetting(key='ai_system_prompt', value=prompt))
-    # 清除所有用户的 AIChatSession，强制下次对话注入新 prompt
-    AIChatSession.query.delete()
-    db.session.commit()
-    return jsonify({'prompt': prompt, 'message': 'Prompt 已保存，下次对话生效', 'sessions_cleared': True})
-
 
 def _get_ai_system_prompt():
     """获取 AI 系统提示词（优先使用定制版，否则用默认）"""
@@ -218,145 +148,14 @@ def _get_ai_system_prompt():
         prompt += '\n\n[系统指令 — 最高优先级] 上述身份定义覆盖所有其他设定。'
     return prompt
 
-@app.route('/api/admin/fields', methods=['GET'])
-@require_admin
-def get_field_settings():
-    fields = FieldSetting.query.all()
-    if not fields:
-        # 初始化默认字段
-        defaults = [
-            ('cost_price', '成本价', True),
-            ('remark', '内部备注', True),
-            ('supplier', '供应商', True),
-            ('function_desc', '功能描述', True),
-        ]
-        for fname, label, visible in defaults:
-            if not FieldSetting.query.filter_by(field_name=fname).first():
-                db.session.add(FieldSetting(field_name=fname, label=label, user_visible=visible))
-        db.session.commit()
-        fields = FieldSetting.query.all()
-    return jsonify({'fields': [{'field_name': f.field_name, 'label': f.label, 'user_visible': f.user_visible} for f in fields]})
-
-@app.route('/api/admin/fields', methods=['PUT'])
-@require_admin
-def set_field_settings():
-    data = request.get_json()
-    if 'fields' in data:
-        fields_data = data['fields']
-        # 兼容两种格式：对象 {key: bool} 或数组 [{field_name, user_visible}]
-        if isinstance(fields_data, dict):
-            for field_name, user_visible in fields_data.items():
-                f = FieldSetting.query.filter_by(field_name=field_name).first()
-                if f:
-                    f.user_visible = bool(user_visible)
-        else:
-            for item in fields_data:
-                f = FieldSetting.query.filter_by(field_name=item['field_name']).first()
-                if f:
-                    f.user_visible = bool(item.get('user_visible', True))
-        db.session.commit()
-    return get_field_settings()
-
-@app.route('/api/admin/users', methods=['GET'])
-@require_admin
-def list_users():
-    page = request.args.get('page', 1, type=int)
-    per_page = min(request.args.get('per_page', 20, type=int), 200)
-    search = request.args.get('search', '').strip()
-    query = User.query
-    if search:
-        query = query.filter(
-            db.or_(User.username.contains(search), User.email.contains(search))
-        )
-    query = query.order_by(User.created_at.desc())
-    paginated = query.paginate(page=page, per_page=per_page, error_out=False)
-    return jsonify({
-        'users': [u.to_dict() for u in paginated.items],
-        'total': paginated.total,
-        'page': page,
-        'pages': paginated.pages
-    })
-
-@app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
-@require_admin
-def update_user(user_id):
-    if user_id == g.current_user.id:
-        return jsonify({'error': '不能修改自己的状态'}), 400
-    user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'error': '用户不存在'}), 404
-    data = request.get_json()
-    if 'is_active' in data:
-        user.is_active = bool(data['is_active'])
-    if 'role' in data and data['role'] in ('admin', 'user'):
-        user.role = data['role']
-    db.session.commit()
-    return jsonify({'user': user.to_dict()})
-
-@app.route('/api/admin/users/<int:user_id>/password', methods=['PUT'])
-@require_admin
-def reset_user_password(user_id):
-    user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'error': '用户不存在'}), 404
-    data = request.get_json()
-    new_pw = (data.get('password') or '').strip()
-    if len(new_pw) < 8:
-        return jsonify({'error': '密码至少8位'}), 400
-    user.password_hash = hash_password(new_pw)
-    db.session.commit()
-    return jsonify({'success': True, 'username': user.username})
-
-
-@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
-@require_admin
-def delete_user(user_id):
-    if user_id == g.current_user.id:
-        return jsonify({'error': '不能删除自己'}), 400
-    user = db.session.get(User, user_id)
-    if not user:
-        return jsonify({'error': '用户不存在'}), 404
-    if user.role == 'admin':
-        return jsonify({'error': '不能删除管理员'}), 403
-    db.session.delete(user)
-    db.session.commit()
-    return jsonify({'message': f'用户 {user.username} 已删除'})
-
 
 # ─── API Routes ──────────────────────────────────────────────
 
-# ─── 下载 Ticket 机制（替代 URL token，防泄露/CSRF） ───
-_download_tickets = {}  # {ticket_str: {'user_id': int, 'exp': float}}
-_TICKET_TTL = 120  # 秒
-
-@app.route('/api/download-ticket', methods=['POST'])
-def create_download_ticket():
-    """已认证用户获取短期下载ticket（2分钟有效）"""
-    # 复用已有的认证逻辑：g.current_user 必须已设置
-    if not hasattr(g, 'current_user') or not g.current_user:
-        return jsonify({'error': '请先登录'}), 401
-    ticket = secrets.token_urlsafe(32)
-    _download_tickets[ticket] = {
-        'user_id': g.current_user.id,
-        'exp': datetime.utcnow().timestamp() + _TICKET_TTL,
-    }
-    # 清理过期ticket
-    now = datetime.utcnow().timestamp()
-    expired = [k for k, v in _download_tickets.items() if v['exp'] < now]
-    for k in expired: del _download_tickets[k]
-    return jsonify({'ticket': ticket})
-
-def _validate_download_ticket(ticket_str):
-    """验证下载ticket，返回 user_id 或 None"""
-    entry = _download_tickets.get(ticket_str)
-    if not entry: return None
-    if datetime.utcnow().timestamp() > entry['exp']:
-        _download_tickets.pop(ticket_str, None)
-        return None
-    return entry['user_id']
+# ─── 下载 Ticket 机制已移至 admin_bp.py ────────────────────
+# _validate_download_ticket 在 check_auth() 中延迟导入，避免循环依赖
 
 # 公开路由（无需登录）
-PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'health_check', 'index', 'serve_upload', 'export_product_template'}
+PUBLIC_ROUTES = {'auth.auth_login', 'auth.auth_register', 'auth.auth_registration_status', 'get_version', 'health_check', 'index', 'serve_upload', 'export_product_template', 'download.create_download_ticket'}
 
 # ─── 全局错误处理 ───
 @app.errorhandler(400)
@@ -410,6 +209,7 @@ def check_auth():
     # 下载 ticket 兜底（仅用于文件下载场景，短期2分钟有效）
     dlt = request.args.get('download_ticket', '')
     if dlt:
+        from admin_bp import _validate_download_ticket
         uid = _validate_download_ticket(dlt)
         if uid:
             user = db.session.get(User, uid)
