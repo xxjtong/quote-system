@@ -374,25 +374,22 @@ def deepseek_parse_product(text):
     try:
         body = _json.dumps({
             'model': 'deepseek-v4-flash',
-            'input': prompt,
-            'max_output_tokens': 500,
+            'messages': [
+                {'role': 'system', 'content': '你是产品信息提取器，只返回JSON，不要markdown和解释。'},
+                {'role': 'user', 'content': prompt},
+            ],
+            'max_tokens': 500,
+            'temperature': 0.2,
         })
         req = urllib.request.Request(
-            f'{_gateway_url}/v1/responses',
+            f'{_gateway_url}/v1/chat/completions',
             data=body.encode('utf-8'),
             headers={'Content-Type': 'application/json'},
             method='POST'
         )
         resp = urllib.request.urlopen(req, timeout=30)
         result = _json.loads(resp.read())
-        reply = ''
-        for o in result.get('output', []):
-            if o.get('type') == 'message':
-                content = o.get('content', [])
-                if content:
-                    reply = content[0].get('text', '')
-                break
-        reply = reply.strip()
+        reply = result['choices'][0]['message']['content'].strip()
         # 解析 JSON（公共3层兜底）
         parsed = _parse_json_reply(reply)
         if parsed:

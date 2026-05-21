@@ -287,6 +287,7 @@ const smartRecognizing = ref(false)
 const smartResult = ref(null)
 const smartSource = ref('')
 const smartRawText = ref('')
+const smartTextInput = ref('')
 const smartEdit = reactive({ name: '', spec: '', supplier: '', category: '', price: '', cost_price: '', unit: '', function_desc: '', remark: '' })
 const smartError = ref('')
 
@@ -306,11 +307,36 @@ function populateSmartEdit(result) {
   smartEdit.unit = result.unit || ''
   smartEdit.function_desc = result.function_desc || ''
   smartEdit.remark = result.remark || ''
+  // 自动填入上方表单
+  fillFromSmartResult()
 }
 
 function resetSmartEdit() {
   smartEdit.name = ''; smartEdit.spec = ''; smartEdit.supplier = ''; smartEdit.category = ''
   smartEdit.price = ''; smartEdit.cost_price = ''; smartEdit.unit = ''; smartEdit.function_desc = ''; smartEdit.remark = ''
+}
+
+async function recognizeFromText() {
+  const text = smartTextInput.value.trim()
+  if (!text || smartRecognizing.value) return
+  smartRecognizing.value = true
+  smartError.value = ''
+  smartResult.value = null
+  try {
+    const r = await api('/api/products/recognize', 'POST', { text })
+    if (r.products && r.products.length > 0) {
+      smartResult.value = r.products[0]
+      smartSource.value = r.source || ''
+      smartRawText.value = r.raw_text || ''
+      populateSmartEdit(r.products[0])
+    } else {
+      smartError.value = r.error || '未能识别出产品信息'
+    }
+  } catch (err) {
+    smartError.value = '识别失败，请重试'
+  } finally {
+    smartRecognizing.value = false
+  }
 }
 
 async function onSmartPaste(e) {
@@ -761,17 +787,22 @@ onMounted(() => {
                     <label class="form-label-modern mb-1" style="font-size:.82rem">
                       <i class="bi bi-magic"></i> 智能识别
                       <span v-if="smartRecognizing" class="spinner-border spinner-border-sm ms-2" style="width:.75rem;height:.75rem"></span>
-                      <small class="text-muted ms-2">Ctrl+V 粘贴产品文字或截图，自动提取信息</small>
                     </label>
-                    <div v-if="!smartResult && !smartError && !smartRecognizing"
-                      class="text-center py-2 text-muted" style="font-size:.8rem">
-                      在此区域粘贴 或 点击后 Ctrl+V
+                    <!-- 文字输入区 -->
+                    <div class="d-flex gap-2 mb-2">
+                      <textarea class="form-control form-control-sm" v-model="smartTextInput"
+                        placeholder="粘贴产品文字/参数，或直接 Ctrl+V 粘贴截图"
+                        rows="2" style="font-size:.78rem;resize:vertical"></textarea>
+                      <button class="btn btn-primary btn-sm px-3" @click="recognizeFromText"
+                        :disabled="smartRecognizing || !smartTextInput.trim()" style="white-space:nowrap">
+                        <i class="bi bi-magic"></i> 识别
+                      </button>
                     </div>
                     <div v-if="smartError" class="alert alert-warning py-1 px-2 mb-0 small" style="font-size:.8rem">
                       {{ smartError }}
                     </div>
                     <!-- 识别结果预览（可编辑） -->
-                    <div v-if="smartResult" class="mt-2 p-2 rounded-2" style="background:white;border:2px solid var(--bs-danger, #dc3545);font-size:.82rem">
+                    <div v-if="smartResult" class="mt-2 p-2 rounded-2" style="background:white;border:2px solid var(--primary);font-size:.82rem">
                       <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="fw-semibold text-primary"><i class="bi bi-check-circle"></i> 识别结果（可编辑修正）</span>
                         <div class="d-flex align-items-center gap-2">
@@ -822,8 +853,8 @@ onMounted(() => {
                         <summary class="text-muted" style="font-size:.72rem;cursor:pointer">📋 模型返回原始数据</summary>
                         <pre class="mt-1 p-2 rounded-1" style="background:var(--gray-50);font-size:.7rem;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all">{{ smartRawText }}</pre>
                       </details>
-                      <button class="btn btn-sm btn-primary w-100 mt-1" @click="fillFromSmartResult">
-                        <i class="bi bi-arrow-up"></i> 确认填入上方表单
+                      <button class="btn btn-sm btn-outline-primary w-100 mt-1" @click="fillFromSmartResult">
+                        <i class="bi bi-arrow-up"></i> 重新填入上方表单
                       </button>
                     </div>
                   </div>
