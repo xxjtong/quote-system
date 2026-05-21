@@ -622,8 +622,6 @@ def toggle_product_active(product_id):
 def import_products():
     """从Excel导入产品 — 支持多Sheet、自动识别分类、提取嵌入图片"""
     import openpyxl
-    from openpyxl.styles import Font, Alignment
-    from openpyxl.utils import get_column_letter
 
     file = request.files.get('file')
     if not file:
@@ -631,196 +629,200 @@ def import_products():
 
     try:
         wb = openpyxl.load_workbook(file, data_only=True)
-
-        field_map = {
-            'name': ['产品名称', '名称', '品名', 'name', 'product'],
-            'sku': ['编号', 'sku', '编码', '货号', '产品编号', '料号'],
-            'spec': ['规格', '型号', '规格型号', 'spec', 'model', '功能/型号'],
-            'unit': ['单位', 'unit'],
-            'price': ['单价', '价格', '售价', '销售价', 'price', 'unit price'],
-            'cost_price': ['成本价', '成本', '进价', '采购价', 'cost'],
-            'supplier': ['供应商', '厂商', 'supplier'],
-            'function_desc': ['功能描述'],
-            'remark': ['备注', '说明', 'remark'],
-            'image_url': ['图片', 'image', 'image_url', '产品图片'],
-        }
-
-        def find_col(header, names):
-            for i, h in enumerate(header):
-                if not h:  # 跳过空表头
-                    continue
-                for n in names:
-                    if n in h or h in n:
-                        return i
-            return -1
-
-        def safe_float(val):
-            if val is None:
-                return 0
-            if isinstance(val, (int, float)):
-                return round(float(val) if val else 0, 2)
-            try:
-                return round(float(val), 2)
-            except (ValueError, TypeError):
-                return 0
-
-        imported = 0
-        errors = []
-        total_sheets = len(wb.sheetnames)
-
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            rows = list(ws.iter_rows(values_only=True))
-            if not rows or len(rows) < 2:
-                continue
-
-            # 检测表头行：第一行只有一个非空值(标题行)，表头在第二行
-            first_nonempty = [v for v in rows[0] if v is not None and str(v).strip()]
-            second_nonempty = [v for v in rows[1] if v is not None and str(v).strip()] if len(rows) > 1 else []
-            header_row_idx = 0
-            if len(first_nonempty) <= 2 and len(second_nonempty) >= 3:
-                header_row_idx = 1
-
-            header = [str(h).strip().lower() if h else '' for h in rows[header_row_idx]]
-
-            col_idx = {}
-            for key, names in field_map.items():
-                col_idx[key] = find_col(header, names)
-
-            # ── 智能解析：备注 vs 内部备注 vs 图片 ──
-            inner_remark_col = find_col(header, ['内部备注'])
-            if inner_remark_col >= 0 and col_idx.get('remark', -1) >= 0:
-                # 模板同时有「备注」和「内部备注」→ 备注=图片, 内部备注=remark
-                if col_idx.get('image_url', -1) < 0:
-                    col_idx['image_url'] = col_idx['remark']
-                col_idx['remark'] = inner_remark_col
-            elif col_idx.get('image_url', -1) >= 0 and col_idx.get('remark', -1) < 0:
-                pass  # 专用图片列，remark 另行处理
-            elif col_idx.get('image_url', -1) < 0 and col_idx.get('remark', -1) >= 0:
-                # 仅有一个备注列 → 优先检查是否含嵌入图片，无则保持为 remark
-                pass
-
-            # ── 构建嵌入图片索引 ──
-            image_map = {}
-            if hasattr(ws, '_images'):
-                for img in ws._images:
-                    try:
-                        anc = img.anchor
-                        if hasattr(anc, '_from'):
-                            image_map[(anc._from.col, anc._from.row)] = img
-                    except Exception:
-                        pass
-
-            # 没有找到名称列则跳过此sheet
-            if col_idx.get('name', -1) < 0:
-                continue
-
-            # 供应商列回退：若表头未匹配到，尝试扫描数据行定位
-            if col_idx.get('supplier', -1) < 0:
-                data_start2 = header_row_idx + 1
-                candidate_cols = [11, 12, 13]  # 常见位置（0-indexed: 12→11）
-                for cc in candidate_cols:
-                    if cc >= len(rows[header_row_idx]):
-                        continue
-                    # 检查该列在数据行中是否有非空值
-                    sample_count = 0
-                    for dr in rows[data_start2:data_start2+10]:
-                        if dr and cc < len(dr) and dr[cc] and str(dr[cc]).strip():
-                            sample_count += 1
-                    if sample_count >= 2:
-                        col_idx['supplier'] = cc
-                        break
-
-            data_start = header_row_idx + 1
-            sheet_count = 0
-            sheet_supplier = ''
-            for row_idx, row in enumerate(rows[data_start:], data_start + 1):
-                if all(c is None or str(c).strip() == '' for c in row):
-                    continue
-                first_col = str(row[0]).strip().lower() if row[0] else ''
-                if first_col in ('小计', '合计', '总计', 'subtotal', 'total', '注', '备注'):
-                    continue
-
-                try:
-                    name_idx = col_idx['name']
-                    name = str(row[name_idx]).strip() if name_idx >= 0 and name_idx < len(row) and row[name_idx] else ''
-                    if not name:
-                        # 名称为空时，用规格型号作为名称
-                        spec_idx = col_idx.get('spec', -1)
-                        if spec_idx >= 0 and spec_idx < len(row) and row[spec_idx]:
-                            name = str(row[spec_idx]).strip()
-                    if not name:
-                        continue
-
-                    sup_val = str(row[col_idx['supplier']]).strip() if col_idx.get('supplier', -1) >= 0 and col_idx['supplier'] < len(row) and row[col_idx['supplier']] else ''
-                    if not sup_val and sheet_supplier:
-                        sup_val = sheet_supplier  # 空供应商继承上行
-                    else:
-                        sheet_supplier = sup_val
-
-                    sku_val = str(row[col_idx['sku']]).strip() if col_idx.get('sku', -1) >= 0 and col_idx['sku'] < len(row) and row[col_idx['sku']] else ''
-                    spec_val = str(row[col_idx['spec']]).strip() if col_idx.get('spec', -1) >= 0 and col_idx['spec'] < len(row) and row[col_idx['spec']] else ''
-                    # 规格型号统一：spec 优先，无 spec 时用 sku 填充
-                    if spec_val:
-                        sku_val = spec_val
-                    else:
-                        spec_val = sku_val
-                    product = Product(
-                        name=name,
-                        category=sheet_name,  # 用sheet名作为分类
-                        sku=sku_val or spec_val,
-                        spec=spec_val,
-                        unit=str(row[col_idx['unit']]).strip() if col_idx.get('unit', -1) >= 0 and col_idx['unit'] < len(row) and row[col_idx['unit']] else '',
-                        price=safe_float(row[col_idx['price']]) if col_idx.get('price', -1) >= 0 and col_idx['price'] < len(row) else 0,
-                        cost_price=safe_float(row[col_idx['cost_price']]) if col_idx.get('cost_price', -1) >= 0 and col_idx['cost_price'] < len(row) else 0,
-                        supplier=sup_val,
-                        function_desc=str(row[col_idx['function_desc']]).strip() if col_idx.get('function_desc', -1) >= 0 and col_idx['function_desc'] < len(row) and row[col_idx['function_desc']] else '',
-                        remark=str(row[col_idx['remark']]).strip() if col_idx.get('remark', -1) >= 0 and col_idx['remark'] < len(row) and row[col_idx['remark']] else '',
-                        created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
-                    )
-
-                    # ── 提取图片：嵌入图片优先，URL 文本次之 ──
-                    if col_idx.get('image_url', -1) >= 0:
-                        img_col_0 = col_idx['image_url']
-                        # 1) 检查嵌入图片
-                        emb_img = image_map.get((img_col_0, row_idx - 1))
-                        if emb_img is not None:
-                            try:
-                                img_bytes = emb_img._data()
-                                ext = (emb_img.format or 'png').lower()
-                                if ext == 'jpeg':
-                                    ext = 'jpg'
-                                fname = f'prod_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}.{ext}'
-                                img_dir = UPLOAD_DIR / 'images'
-                                img_dir.mkdir(parents=True, exist_ok=True)
-                                save_path = img_dir / fname
-                                save_path.write_bytes(img_bytes)
-                                _, compressed_fname = compress_image_if_needed(str(save_path))
-                                product.image_url = f'/uploads/images/{compressed_fname}'
-                            except Exception:
-                                pass
-                        # 2) 没有嵌入图片时，检查 URL 文本
-                        if not product.image_url and img_col_0 < len(row) and row[img_col_0]:
-                            txt = str(row[img_col_0]).strip()
-                            if txt and (txt.startswith('http') or txt.startswith('/uploads/')):
-                                product.image_url = txt[:500]
-
-                    _store_image_blob(product, {'image_url': product.image_url or ''})
-
-                    db.session.add(product)
-                    imported += 1
-                    sheet_count += 1
-                except Exception as e:
-                    errors.append(f'[{sheet_name}] 第{row_idx}行: {str(e)}')
-
+        imported, errors = _import_all_sheets(wb)
         db.session.commit()
         return jsonify({
-            'message': f'成功导入 {imported} 个产品（共{total_sheets}个Sheet）',
+            'message': f'成功导入 {imported} 个产品（共{len(wb.sheetnames)}个Sheet）',
             'imported': imported,
             'errors': errors,
         })
     except Exception as e:
         return jsonify({'error': f'导入失败: {str(e)}'}), 400
+
+
+# ─── import_products 子函数 ────────────────────────────────────
+
+_FIELD_MAP = {
+    'name': ['产品名称', '名称', '品名', 'name', 'product'],
+    'sku': ['编号', 'sku', '编码', '货号', '产品编号', '料号'],
+    'spec': ['规格', '型号', '规格型号', 'spec', 'model', '功能/型号'],
+    'unit': ['单位', 'unit'],
+    'price': ['单价', '价格', '售价', '销售价', 'price', 'unit price'],
+    'cost_price': ['成本价', '成本', '进价', '采购价', 'cost'],
+    'supplier': ['供应商', '厂商', 'supplier'],
+    'function_desc': ['功能描述'],
+    'remark': ['备注', '说明', 'remark'],
+    'image_url': ['图片', 'image', 'image_url', '产品图片'],
+}
+
+
+def _find_col(header, names):
+    """在表头中查找包含指定名称的列索引"""
+    for i, h in enumerate(header):
+        if not h:
+            continue
+        for n in names:
+            if n in h or h in n:
+                return i
+    return -1
+
+
+def _parse_excel_header(ws, rows, header_row_idx):
+    """解析Excel表头，返回列索引映射 + 嵌入图片索引"""
+    header = [str(h).strip().lower() if h else '' for h in rows[header_row_idx]]
+    col_idx = {}
+    for key, names in _FIELD_MAP.items():
+        col_idx[key] = _find_col(header, names)
+
+    # 智能解析：备注 vs 内部备注 vs 图片
+    inner_remark_col = _find_col(header, ['内部备注'])
+    if inner_remark_col >= 0 and col_idx.get('remark', -1) >= 0:
+        if col_idx.get('image_url', -1) < 0:
+            col_idx['image_url'] = col_idx['remark']
+        col_idx['remark'] = inner_remark_col
+    elif col_idx.get('image_url', -1) < 0 and col_idx.get('remark', -1) >= 0:
+        pass  # 仅有一个备注列，保持为 remark
+
+    # 构建嵌入图片索引
+    image_map = {}
+    if hasattr(ws, '_images'):
+        for img in ws._images:
+            try:
+                anc = img.anchor
+                if hasattr(anc, '_from'):
+                    image_map[(anc._from.col, anc._from.row)] = img
+            except Exception:
+                pass
+
+    return col_idx, image_map
+
+
+def _detect_supplier_col(rows, header_row_idx):
+    """供应商列回退：扫描数据行定位常见位置"""
+    data_start2 = header_row_idx + 1
+    for cc in [11, 12, 13]:
+        if cc >= len(rows[header_row_idx]):
+            continue
+        sample_count = 0
+        for dr in rows[data_start2:data_start2 + 10]:
+            if dr and cc < len(dr) and dr[cc] and str(dr[cc]).strip():
+                sample_count += 1
+        if sample_count >= 2:
+            return cc
+    return -1
+
+
+def _extract_embedded_image(emb_img):
+    """从Excel嵌入图片提取并保存，返回 image_url 路径或空字符串"""
+    try:
+        img_bytes = emb_img._data()
+        ext = (emb_img.format or 'png').lower()
+        if ext == 'jpeg':
+            ext = 'jpg'
+        fname = f'prod_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}.{ext}'
+        img_dir = UPLOAD_DIR / 'images'
+        img_dir.mkdir(parents=True, exist_ok=True)
+        save_path = img_dir / fname
+        save_path.write_bytes(img_bytes)
+        _, compressed_fname = compress_image_if_needed(str(save_path))
+        return f'/uploads/images/{compressed_fname}'
+    except Exception:
+        return ''
+
+
+def _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supplier_ref):
+    """处理单行数据，返回 (Product对象, error_string_or_None)"""
+    name_idx = col_idx['name']
+    name = str(row[name_idx]).strip() if name_idx >= 0 and name_idx < len(row) and row[name_idx] else ''
+    if not name:
+        spec_idx = col_idx.get('spec', -1)
+        if spec_idx >= 0 and spec_idx < len(row) and row[spec_idx]:
+            name = str(row[spec_idx]).strip()
+    if not name:
+        return None, None
+
+    sup_val = str(row[col_idx['supplier']]).strip() if col_idx.get('supplier', -1) >= 0 and col_idx['supplier'] < len(row) and row[col_idx['supplier']] else ''
+    if not sup_val and sheet_supplier_ref[0]:
+        sup_val = sheet_supplier_ref[0]
+    else:
+        sheet_supplier_ref[0] = sup_val
+
+    sku_val = str(row[col_idx['sku']]).strip() if col_idx.get('sku', -1) >= 0 and col_idx['sku'] < len(row) and row[col_idx['sku']] else ''
+    spec_val = str(row[col_idx['spec']]).strip() if col_idx.get('spec', -1) >= 0 and col_idx['spec'] < len(row) and row[col_idx['spec']] else ''
+    if spec_val:
+        sku_val = spec_val
+    else:
+        spec_val = sku_val
+
+    product = Product(
+        name=name,
+        category=sheet_name,
+        sku=sku_val or spec_val,
+        spec=spec_val,
+        unit=str(row[col_idx['unit']]).strip() if col_idx.get('unit', -1) >= 0 and col_idx['unit'] < len(row) and row[col_idx['unit']] else '',
+        price=_safe_number(row[col_idx['price']]) if col_idx.get('price', -1) >= 0 and col_idx['price'] < len(row) else 0,
+        cost_price=_safe_number(row[col_idx['cost_price']]) if col_idx.get('cost_price', -1) >= 0 and col_idx['cost_price'] < len(row) else 0,
+        supplier=sup_val,
+        function_desc=str(row[col_idx['function_desc']]).strip() if col_idx.get('function_desc', -1) >= 0 and col_idx['function_desc'] < len(row) and row[col_idx['function_desc']] else '',
+        remark=str(row[col_idx['remark']]).strip() if col_idx.get('remark', -1) >= 0 and col_idx['remark'] < len(row) and row[col_idx['remark']] else '',
+        created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
+    )
+
+    # 提取图片：嵌入图片优先，URL 文本次之
+    if col_idx.get('image_url', -1) >= 0:
+        img_col_0 = col_idx['image_url']
+        emb_img = image_map.get((img_col_0, row_idx - 1))
+        if emb_img is not None:
+            product.image_url = _extract_embedded_image(emb_img)
+        if not product.image_url and img_col_0 < len(row) and row[img_col_0]:
+            txt = str(row[img_col_0]).strip()
+            if txt and (txt.startswith('http') or txt.startswith('/uploads/')):
+                product.image_url = txt[:500]
+
+    _store_image_blob(product, {'image_url': product.image_url or ''})
+    return product, None
+
+
+def _import_all_sheets(wb):
+    """遍历所有Sheet导入产品，返回 (imported_count, errors_list)"""
+    imported = 0
+    errors = []
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows or len(rows) < 2:
+            continue
+
+        # 检测表头行
+        first_nonempty = [v for v in rows[0] if v is not None and str(v).strip()]
+        second_nonempty = [v for v in rows[1] if v is not None and str(v).strip()] if len(rows) > 1 else []
+        header_row_idx = 1 if len(first_nonempty) <= 2 and len(second_nonempty) >= 3 else 0
+
+        col_idx, image_map = _parse_excel_header(ws, rows, header_row_idx)
+        if col_idx.get('name', -1) < 0:
+            continue
+
+        if col_idx.get('supplier', -1) < 0:
+            col_idx['supplier'] = _detect_supplier_col(rows, header_row_idx)
+
+        sheet_supplier_ref = ['']  # 用list以便在_process_import_row中修改
+        data_start = header_row_idx + 1
+        for row_idx, row in enumerate(rows[data_start:], data_start + 1):
+            if all(c is None or str(c).strip() == '' for c in row):
+                continue
+            first_col = str(row[0]).strip().lower() if row[0] else ''
+            if first_col in ('小计', '合计', '总计', 'subtotal', 'total', '注', '备注'):
+                continue
+            try:
+                product, err = _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supplier_ref)
+                if product:
+                    db.session.add(product)
+                    imported += 1
+            except Exception as e:
+                errors.append(f'[{sheet_name}] 第{row_idx}行: {str(e)}')
+
+    return imported, errors
 
 
 @products_bp.route('/export-template', methods=['GET'])
