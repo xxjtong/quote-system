@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-1.7.8-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-1.7.9-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -36,7 +36,7 @@
 | 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、**自定义公司名/页脚**、下载计数统计 |
 | 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权） |
 | 📧 **邮件** | SMTP 配置，一键发送报价单 Excel 附件 |
-| 🔍 **智能识别** | 粘贴文本自动解析产品信息、火山引擎豆包 Vision 图片识别、**发票 OCR → 批量更新成本价** |
+| 🔍 **智能识别** | 粘贴文本自动解析产品信息、豆包 Vision 图片识别、DeepSeek V4 Flash 文本解析、**可编辑识别结果**、**发票 OCR → 批量更新成本价** |
 | 🤖 **AI 助手** | Dashboard 内嵌 AI 产品助手，SSE 流式输出、快捷回复、产品卡片、对比表、一键报价、对话历史、自定义 Prompt（管理员可编辑，身份注入防 Gateway persona 覆盖） (v1.7.6) |
 | 🎨 **UI** | 统一页面风格、上下布局、`.page-header` / `.card-modern` / `.form-label-modern` 一致样式体系 |
 | ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹、前端本地拼音过滤 |
