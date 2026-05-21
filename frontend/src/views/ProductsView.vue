@@ -296,7 +296,7 @@ const smartError = ref('')
 
 const SOURCE_LABELS = {
   'doubao-vision': '豆包 Vision',
-  'deepseek-parse': 'DeepSeek V4 Flash',
+  'deepseek-parse': '豆包 Seed Mini',
   'regex-parse': '正则解析',
 }
 

@@ -352,7 +352,7 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
                 'Content-Type': 'application/json',
             },
             json={
-                'model': 'doubao-seed-2-0-lite-260215',
+                'model': 'doubao-seed-2-0-mini-260428',
                 'messages': [{
                     'role': 'user',
                     'content': [
@@ -389,10 +389,13 @@ def doubao_vision_recognize(image_b64, mime_type='image/jpeg'):
 
 
 def deepseek_parse_product(text):
-    """使用 DeepSeek v4 Flash（通过 Hermes Gateway）从非结构化文本中提取产品信息。
-    返回结构化 dict 或 None。
+    """使用豆包 Seed Mini 从非结构化文本中提取产品信息。
+    直连火山API（不走Gateway），返回结构化 dict 或 None。
     """
-    import urllib.request, json as _json
+    import json as _json, urllib.request
+    api_key = os.environ.get('VOLCENGINE_API_KEY', '')
+    if not api_key:
+        return None
     prompt = (
         '从以下产品文本中提取信息，返回纯JSON（只返回JSON，不要markdown、不要解释）：\n'
         '{"name":"产品名称（中文，不含型号，≤20字）","spec":"规格型号（大写字母+数字+横杠组合）","supplier":"厂商/品牌","price":售价数字,"cost_price":成本价数字,"category":"分类（如传感器/网关/会议屏/门禁/工牌，空则填空字符串）","unit":"单位（台/个/套/件，默认台）","function_desc":"功能描述（核心功能、特性、参数亮点）","remark":"备注（价格后面的补充信息，如产地、认证、包装、质保等次要信息，无则填空字符串）"}\n'
@@ -407,7 +410,7 @@ def deepseek_parse_product(text):
     )
     try:
         body = _json.dumps({
-            'model': 'deepseek-v4-flash',
+            'model': 'doubao-seed-2-0-mini-260428',
             'messages': [
                 {'role': 'system', 'content': '你是产品信息提取器，只返回JSON，不要markdown和解释。'},
                 {'role': 'user', 'content': prompt},
@@ -416,9 +419,12 @@ def deepseek_parse_product(text):
             'temperature': 0.2,
         })
         req = urllib.request.Request(
-            f'{_gateway_url}/v1/chat/completions',
+            'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
             data=body.encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            },
             method='POST'
         )
         resp = urllib.request.urlopen(req, timeout=30)
@@ -430,9 +436,9 @@ def deepseek_parse_product(text):
             product = _product_from_parsed(parsed, reply)
             if product:
                 return product
-        _debug_log(f'[deepseek_parse] Failed. reply[:200]: {reply[:200]}')
+        _debug_log(f'[doubao_text_parse] Failed. reply[:200]: {reply[:200]}')
     except Exception as e:
-        _debug_log(f'[deepseek_parse] Exception: {e}')
+        _debug_log(f'[doubao_text_parse] Exception: {e}')
         pass
     return None
 
