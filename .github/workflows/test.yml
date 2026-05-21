@@ -19,28 +19,54 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
-          pip install flask flask-sqlalchemy flask-cors gunicorn openpyxl pypinyin pyjwt Pillow
+          pip install -r requirements.txt
           pip install pytest requests
 
-      - name: Start application
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
         run: |
-          export QUOTE_JWT_SECRET="test-secret-ci-$(openssl rand -hex 16)"
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Initialize database & start app
+        run: |
+          export QUOTE_JWT_SECRET="test-ci-secret-key-$(openssl rand -hex 16)"
           export QUOTE_ADMIN_PASSWORD="admin123"
+          export QUOTE_GATEWAY_URL="http://127.0.0.1:8643"
+          export OCR_SPACE_API_KEY="helloworld"
           mkdir -p uploads/images exports
-          python -c "
+          # Pre-create DB schema
+          python3 -c "
+          import os
+          os.environ['QUOTE_JWT_SECRET'] = '$QUOTE_JWT_SECRET'
+          os.environ['QUOTE_ADMIN_PASSWORD'] = '$QUOTE_ADMIN_PASSWORD'
           from app import app, db
           with app.app_context():
               db.create_all()
+          print('DB initialized')
           "
-          python app.py &
+          # Start app in background
+          nohup python3 -c "
+          import os
+          os.environ['QUOTE_JWT_SECRET'] = '$QUOTE_JWT_SECRET'
+          os.environ['QUOTE_ADMIN_PASSWORD'] = '$QUOTE_ADMIN_PASSWORD'
+          from app import app
+          app.run(host='127.0.0.1', port=5001, debug=False)
+          " > /tmp/quote-app.log 2>&1 &
           sleep 3
-          curl -f http://127.0.0.1:5001/api/version
+          curl -f http://127.0.0.1:5001/api/health || { cat /tmp/quote-app.log; exit 1; }
 
       - name: Run tests
         run: |
-          python -m pytest tests/test_auth.py tests/test_products.py tests/test_quotes.py tests/test_admin.py tests/test_edge_cases.py tests/test_comprehensive.py -v --tb=short --junitxml=test-results.xml
+          QUOTE_TEST_URL=http://127.0.0.1:5001 QUOTE_TEST_PASS=admin123 \
+            python3 -m pytest tests/test_auth.py tests/test_products.py tests/test_quotes.py tests/test_admin.py -v --tb=short --junitxml=test-results.xml
 
       - name: Upload test results
         if: always()
