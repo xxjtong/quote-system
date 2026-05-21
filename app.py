@@ -3156,6 +3156,28 @@ with app.app_context():
     except Exception:
         pass
     db.create_all()
+
+    # 自动迁移：检测缺失列并ALTER TABLE（SQLite兼容）
+    _auto_migrate_columns = [
+        ('quote_items', 'discount_rate', 'REAL DEFAULT 100'),
+        ('products', 'pinyin_search', 'TEXT'),
+    ]
+    import sqlite3 as _sqlite3
+    _auto_db = _sqlite3.connect(str(BASE_DIR / 'quote.db'))
+    _existing = _auto_db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    _existing_tables = {r[0] for r in _existing}
+    for _tbl, _col, _col_type in _auto_migrate_columns:
+        if _tbl in _existing_tables:
+            _cols = [r[1] for r in _auto_db.execute(f'PRAGMA table_info({_tbl})').fetchall()]
+            if _col not in _cols:
+                try:
+                    _auto_db.execute(f'ALTER TABLE {_tbl} ADD COLUMN {_col} {_col_type}')
+                    _auto_db.commit()
+                    print(f'[Migrate] 已添加 {_tbl}.{_col}')
+                except Exception as e:
+                    print(f'[Migrate] 添加 {_tbl}.{_col} 失败: {e}')
+    _auto_db.close()
+
     # 预置管理员账号
     if not User.query.filter_by(username='admin').first():
         admin = User(
