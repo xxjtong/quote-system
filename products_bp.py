@@ -367,8 +367,13 @@ def deepseek_parse_product(text):
     import urllib.request, json as _json
     prompt = (
         '从以下产品文本中提取信息，返回纯JSON（只返回JSON，不要markdown、不要解释）：\n'
-        '{"name":"产品名称（中文，不包括型号，截取前20字）","spec":"规格型号（大写字母+数字+横杠组合）","supplier":"厂商/品牌","price":售价数字,"cost_price":成本价数字,"category":"分类","unit":"单位","remark":"备注/功能描述"}\n'
-        '规则：型号是大写字母+数字+横杠组合。厂商从文字中直接提取，不要猜测。价格只取数字。没有的字段填空字符串或0。\n'
+        '{"name":"产品名称（中文，不含型号，≤20字）","spec":"规格型号（大写字母+数字+横杠组合）","supplier":"厂商/品牌","price":售价数字,"cost_price":成本价数字,"category":"分类（如传感器/网关/会议屏/门禁/工牌，空则填空字符串）","unit":"单位（台/个/套/件，默认台）","function_desc":"功能描述（核心功能、特性、参数亮点）","remark":"其他备注（产地、认证、包装等次要信息，无则填空字符串）"}\n'
+        '规则：\n'
+        '- 型号是大写字母+数字+横杠组合\n'
+        '- 厂商从文字中直接提取，不要猜测\n'
+        '- 价格只取数字\n'
+        '- function_desc放核心功能特性，remark放次要备注，两者分开\n'
+        '- 没有的字段填空字符串或0\n'
         f'文本：\n{text[:3000]}'
     )
     try:
@@ -413,7 +418,7 @@ def smart_parse_product(text):
               'price': 0, 'cost_price': 0, 'supplier': '', 'remark': ''}
 
     text = text.strip()
-    if not text:
+    if not text or len(text) < 5:
         return None
 
     # ── 1. 提取价格（支持：¥123.45 / 123元 / 价格:123 / 售价 ¥123）──
