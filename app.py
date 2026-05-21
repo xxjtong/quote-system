@@ -761,6 +761,9 @@ def parse_product_line(line):
 # ─── AI (moved to ai_bp.py) ───────────────────────
 # All AI routes and helper functions have been moved to ai_bp.py
 
+# ─── Frontend ────────────────────────────────────────────────
+_dist_dir = os.path.join(os.path.dirname(__file__), 'frontend', 'dist')
+_has_vue_build = os.path.isdir(_dist_dir)
 
 @app.route('/')
 def index():
