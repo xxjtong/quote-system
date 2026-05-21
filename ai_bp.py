@@ -272,12 +272,22 @@ def _parse_reply_actions(reply_text):
         (r'沿用.*还是.*新.*', ['沿用上一份', '新建报价单']),
         (r'新建.*还是.*合并', ['新建报价单', '合并到已有']),
         (r'需要我(?:帮[您你])?.*吗[？?]', ['好的，开始吧', '先不用']),
-        (r'哪个[？?]', []),
+        (r'选哪种[？?]', []),
+        (r'选哪个[？?]', []),
+        (r'哪个方案[？?]', []),
+        (r'哪种方案[？?]', []),
+        (r'选哪[个种款][？?]', []),
     ]
     if '还是' in reply_text:
         choices = _extract_choices_via_llm(reply_text)
         if choices:
             result['quick_replies'] = choices
+
+    # 检测多方案选择（"方案A/方案B/方案C"）并自动生成快捷按钮
+    if not result['quick_replies']:
+        scheme_re = re.findall(r'方案([A-Z])[：:）)]\s*(.{2,30}?)(?:[（(]|$)', reply_text, re.MULTILINE)
+        if len(scheme_re) >= 2:
+            result['quick_replies'] = [f'方案{letter}（{desc.strip()}）' for letter, desc in scheme_re]
 
     if not result['quick_replies']:
         for pat, replies in question_patterns:
