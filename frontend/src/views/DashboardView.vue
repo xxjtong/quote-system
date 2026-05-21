@@ -1,13 +1,13 @@
 <script setup>
 import { ref, computed, onMounted, inject, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useApi } from '../composables/useApi'
+import { useApi, BASE_URL } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
 import QuotePreviewModal from '../components/QuotePreviewModal.vue'
 
 const router = useRouter()
 const toast = inject('toast')
-const { api, isAdmin } = useApi()
+const { api, authToken, isAdmin } = useApi()
 
 const stats = ref({ prodCount: 0, quoteCount: 0, downloadTotal: 0, totalAmount: 0, catCount: 0, aiMyCount: 0, aiTotalCount: 0 })
 const recentQuotes = ref([])
@@ -57,13 +57,8 @@ const defaultModel = ref('')
 
 async function fetchModels() {
   try {
-    const token = localStorage.getItem('quote_token')
-    const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
-    const resp = await fetch(BASE_URL + '/api/chat/models', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    if (resp.ok) {
-      const data = await resp.json()
+    const data = await api('/api/chat/models')
+    if (!data.error) {
       availableModels.value = data.models || []
       defaultModel.value = data.default || 'deepseek-v4-flash'
       if (!selectedModel.value) selectedModel.value = defaultModel.value
@@ -189,8 +184,7 @@ async function sendMessage(textOverride) {
 
   try {
     // Use SSE streaming — need raw fetch for ReadableStream
-    const token = localStorage.getItem('quote_token')
-    const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+    const token = authToken.value
 
     const resp = await fetch(BASE_URL + '/api/chat', {
       method: 'POST',
@@ -413,7 +407,7 @@ function previewCreatedQuote(id) {
 }
 
 function downloadCreatedQuote(url) {
-  const token = localStorage.getItem('quote_token')
+  const token = authToken.value
   const a = document.createElement('a')
   a.href = url + '?token=' + token
   document.body.appendChild(a)

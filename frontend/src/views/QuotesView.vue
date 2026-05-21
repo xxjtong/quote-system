@@ -1,12 +1,10 @@
 <script setup>
 import { ref, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useApi } from '../composables/useApi'
+import { useApi, BASE_URL } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
 import { usePagination } from '../composables/usePagination'
 import QuotePreviewModal from '../components/QuotePreviewModal.vue'
-
-const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
 const router = useRouter()
 const route = useRoute()

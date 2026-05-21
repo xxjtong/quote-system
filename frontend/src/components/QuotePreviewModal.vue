@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, inject, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useApi } from '../composables/useApi'
+import { useApi, BASE_URL } from '../composables/useApi'
 import DOMPurify from 'dompurify'
 
 const props = defineProps({
@@ -13,8 +13,7 @@ const emit = defineEmits(['update:show'])
 
 const router = useRouter()
 const toast = inject('toast')
-const { api } = useApi()
-const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+const { api, authToken } = useApi()
 
 const previewHtml = ref('')
 const safeHtml = computed(() => DOMPurify.sanitize(previewHtml.value, {
@@ -40,7 +39,7 @@ async function loadPreview() {
   previewHtml.value = ''
   previewLoading.value = true
   try {
-    const token = localStorage.getItem('quote_token')
+    const token = authToken.value
     const r = await fetch(BASE_URL + `/api/quotes/${props.quoteId}/preview`, {
       headers: { Authorization: 'Bearer ' + token, Accept: 'text/html' }
     })
@@ -59,7 +58,7 @@ async function loadPreview() {
 }
 
 async function downloadQuote() {
-  const token = localStorage.getItem('quote_token')
+  const token = authToken.value
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   try {
     // 先获取短期下载ticket（避免JWT暴露在URL中）

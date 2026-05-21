@@ -696,30 +696,11 @@ def list_products():
     is_pinyin = search and not re.search(r'[\u4e00-\u9fff]', search)
     if is_pinyin:
         q_lower = search.lower().strip()
-        # 优先用预计算pinyin_search字段（DB LIKE），回退到实时计算
-        if Product.pinyin_search is not None:
-            like = f'%{q_lower}%'
-            query = query.filter(Product.pinyin_search.like(like))
-            query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
-            total = query.count()
-            products = query.offset((page - 1) * per_page).limit(per_page).all()
-        else:
-            # 回退：实时拼音匹配（兼容旧数据）
-            from pypinyin import pinyin, Style
-            all_products = query.order_by(col.asc() if sort_order == 'asc' else col.desc()).all()
-            def pinyin_match(prod):
-                texts = [prod.name, prod.spec or '', prod.supplier or '', prod.function_desc or '']
-                for text in texts:
-                    if not text: continue
-                    py_list = pinyin(text, style=Style.NORMAL, heteronym=False)
-                    full_py = ''.join(p[0] for p in py_list).lower()
-                    if q_lower in full_py: return True
-                    initials = ''.join(p[0][0] for p in py_list).lower()
-                    if q_lower in initials: return True
-                return False
-            filtered = [p for p in all_products if pinyin_match(p)]
-            total = len(filtered)
-            products = filtered[(page - 1) * per_page: page * per_page]
+        like = f'%{q_lower}%'
+        query = query.filter(Product.pinyin_search.like(like))
+        query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
+        total = query.count()
+        products = query.offset((page - 1) * per_page).limit(per_page).all()
     else:
         query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
         if search:

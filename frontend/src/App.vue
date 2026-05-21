@@ -1,15 +1,14 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useApi } from './composables/useApi'
+import { useApi, BASE_URL } from './composables/useApi'
 import { escHtml } from './composables/useUtils'
 import ToastMessage from './components/ToastMessage.vue'
 
-const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+const { api, authToken, currentUser, fieldVisibility, registrationOpen, setToken, isLoggedIn, isAdmin } = useApi()
 
 const router = useRouter()
 const route = useRoute()
-const { api, authToken, currentUser, fieldVisibility, registrationOpen, setToken, isLoggedIn, isAdmin } = useApi()
 
 // ─── Toast ref ───
 const toastRef = ref(null)
@@ -109,11 +108,7 @@ window.addEventListener('resize', () => {
 onMounted(async () => {
   if (!authToken.value) return
   try {
-    const r = await fetch(BASE_URL + '/api/session', {
-      headers: { Authorization: 'Bearer ' + authToken.value, Accept: 'application/json' }
-    })
-    if (r.status === 401) { setToken(''); return }
-    const d = await r.json()
+    const d = await api('/api/session')
     if (d.user) {
       currentUser.value = d.user
       fieldVisibility.value = d.field_visibility || {}

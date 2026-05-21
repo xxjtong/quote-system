@@ -1,8 +1,6 @@
 <script setup>
 import { ref, inject, onMounted } from 'vue'
-import { useApi } from '../composables/useApi'
-
-const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+import { useApi, BASE_URL } from '../composables/useApi'
 
 const toast = inject('toast')
 const { api, authToken } = useApi()

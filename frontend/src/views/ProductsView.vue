@@ -1,16 +1,14 @@
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useApi } from '../composables/useApi'
+import { useApi, BASE_URL } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
 import { usePagination } from '../composables/usePagination'
-
-const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
 const router = useRouter()
 const route = useRoute()
 const toast = inject('toast')
-const { api, isAdmin, currentUser } = useApi()
+const { api, authToken, isAdmin, currentUser } = useApi()
 
 // ─── State ───
 const products = ref([])
@@ -99,7 +97,7 @@ function productTooltip(p) {
 
 function imageSrc(p) {
   if (!p.has_image && !p.image_url) return ''
-  const token = localStorage.getItem('quote_token')
+  const token = authToken.value
   if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image' + (token ? '?token=' + token : '')
   if (p.image_url.startsWith('/uploads/')) {
     return BASE_URL + p.image_url + (token ? '?token=' + token : '')
@@ -193,7 +191,7 @@ watch(() => route.params.id, async (id) => {
 
 function detailImageSrc(p) {
   if (!p || (!p.has_image && !p.image_url)) return ''
-  const token = localStorage.getItem('quote_token')
+  const token = authToken.value
   if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image' + (token ? '?token=' + token : '')
   return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
 }
@@ -502,7 +500,7 @@ function currentImagePreview() {
   if (!url) return ''
   if (url.startsWith('http')) return url
   // 本地路径需要加token认证
-  const token = localStorage.getItem('quote_token')
+  const token = authToken.value
   return BASE_URL + url + (token ? '?token=' + token : '')
 }
 

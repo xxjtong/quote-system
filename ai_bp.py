@@ -4,7 +4,7 @@ AI Blueprint — AI 对话、使用统计相关 API 路由
 
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Blueprint, request, jsonify, g, Response
 from auth import require_auth, require_admin, create_token
@@ -365,8 +365,18 @@ def _parse_reply_actions(reply_text):
 
 
 # ─── AI 速率限制 ────────────────────────────────────────────
-_ai_rate_limit = {}  # {user_id: [timestamp, ...]}
 _AI_RATE_LIMIT = 5  # 每分钟最多5次
+
+def _check_ai_rate_limit(user_id):
+    """DB-based rate limit — works across gunicorn workers. Returns True if rate limited."""
+    from sqlalchemy import func as _func
+    cutoff = datetime.now() - timedelta(minutes=1)
+    recent = AIUsageLog.query.filter(
+        AIUsageLog.user_id == user_id,
+        AIUsageLog.action == 'chat',
+        AIUsageLog.created_at >= cutoff
+    ).count()
+    return recent >= _AI_RATE_LIMIT
 
 
 # ─── Chat endpoint ──────────────────────────────────────────
@@ -378,12 +388,8 @@ def ai_chat():
     t0 = time.time()
 
     uid = g.current_user.id
-    now = time.time()
-    _ai_rate_limit.setdefault(uid, [])
-    _ai_rate_limit[uid] = [t for t in _ai_rate_limit[uid] if now - t < 60]
-    if len(_ai_rate_limit[uid]) >= _AI_RATE_LIMIT:
+    if _check_ai_rate_limit(uid):
         return jsonify({'error': f'请求过快，每分钟最多{_AI_RATE_LIMIT}次，请稍后再试'}), 429
-    _ai_rate_limit[uid].append(now)
 
     data = request.get_json(silent=True) or {}
     user_input = (data.get('input', '') or '').strip()

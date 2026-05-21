@@ -6,6 +6,8 @@ const currentUser = ref(null)
 const fieldVisibility = ref({})
 const registrationOpen = ref(true)
 
+export { BASE_URL }
+
 export function useApi() {
   function setToken(token) {
     authToken.value = token

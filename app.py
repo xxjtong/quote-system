@@ -879,7 +879,7 @@ with app.app_context():
     # 回填：为旧产品计算拼音搜索字段
     missing_pinyin = Product.query.filter(
         (Product.pinyin_search.is_(None) | (Product.pinyin_search == ''))
-    ).limit(500).all()
+    ).all()
     if missing_pinyin:
         for p in missing_pinyin:
             p.pinyin_search = _compute_pinyin_search(p.name, p.spec or '', p.category or '', p.supplier or '')

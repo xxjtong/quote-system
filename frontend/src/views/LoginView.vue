@@ -1,9 +1,7 @@
 <script setup>
 import { ref, inject, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useApi } from '../composables/useApi'
-
-const BASE_URL = import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')
+import { useApi, BASE_URL } from '../composables/useApi'
 
 const router = useRouter()
 const toast = inject('toast')
@@ -22,11 +20,7 @@ async function doLogin() {
     return
   }
   try {
-    const d = await fetch(BASE_URL + '/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u, password: p })
-    }).then(r => r.json())
+    const d = await api('/api/auth/login', 'POST', { username: u, password: p })
     if (d.token) {
       setToken(d.token)
       currentUser.value = d.user
@@ -64,11 +58,7 @@ async function doRegister() {
     return
   }
   try {
-    const d = await fetch(BASE_URL + '/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u, password: p, email: e })
-    }).then(r => r.json())
+    const d = await api('/api/auth/register', 'POST', { username: u, password: p, email: e })
     if (d.token) {
       setToken(d.token)
       currentUser.value = d.user
@@ -84,8 +74,7 @@ async function doRegister() {
 // 每次进入登录页时查询注册开放状态
 onMounted(async () => {
   try {
-    const r = await fetch(BASE_URL + '/api/auth/registration-status')
-    const d = await r.json()
+    const d = await api('/api/auth/registration-status')
     registrationOpen.value = d.registration_open !== false
   } catch (e) { /* 网络错误时默认显示注册链接 */ }
 })
