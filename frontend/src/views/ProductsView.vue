@@ -288,6 +288,8 @@ const smartResult = ref(null)
 const smartSource = ref('')
 const smartRawText = ref('')
 const smartTextInput = ref('')
+const smartElapsed = ref(0)
+let _smartTimer = null
 const smartEdit = reactive({ name: '', spec: '', supplier: '', category: '', price: '', cost_price: '', unit: '', function_desc: '', remark: '' })
 const smartError = ref('')
 
@@ -295,6 +297,16 @@ const SOURCE_LABELS = {
   'doubao-vision': '豆包 Vision',
   'deepseek-parse': 'DeepSeek V4 Flash',
   'regex-parse': '正则解析',
+}
+
+function _startSmartTimer() {
+  smartElapsed.value = 0
+  if (_smartTimer) clearInterval(_smartTimer)
+  _smartTimer = setInterval(() => { smartElapsed.value += 0.1 }, 100)
+}
+
+function _stopSmartTimer() {
+  if (_smartTimer) { clearInterval(_smartTimer); _smartTimer = null }
 }
 
 function populateSmartEdit(result) {
@@ -325,6 +337,7 @@ async function recognizeFromText() {
   smartRecognizing.value = true
   smartError.value = ''
   smartResult.value = null
+  _startSmartTimer()
   try {
     const r = await api('/api/products/recognize', 'POST', { text })
     if (r.products && r.products.length > 0) {
@@ -339,6 +352,7 @@ async function recognizeFromText() {
     smartError.value = '识别失败，请重试'
   } finally {
     smartRecognizing.value = false
+    _stopSmartTimer()
   }
 }
 
@@ -355,6 +369,7 @@ async function onSmartPaste(e) {
       smartRecognizing.value = true
       smartError.value = ''
       smartResult.value = null
+      _startSmartTimer()
       try {
         const form = new FormData()
         form.append('file', blob, 'smart.' + (item.type.split('/')[1] || 'png'))
@@ -371,6 +386,7 @@ async function onSmartPaste(e) {
         smartError.value = '识别失败，请重试'
       } finally {
         smartRecognizing.value = false
+        _stopSmartTimer()
       }
       return
     }
@@ -384,6 +400,7 @@ async function onSmartPaste(e) {
         smartRecognizing.value = true
         smartError.value = ''
         smartResult.value = null
+        _startSmartTimer()
         try {
           const r = await api('/api/products/recognize', 'POST', { text })
           if (r.products && r.products.length > 0) {
@@ -398,6 +415,7 @@ async function onSmartPaste(e) {
           smartError.value = '识别失败，请重试'
         } finally {
           smartRecognizing.value = false
+          _stopSmartTimer()
         }
       })
       return
@@ -476,7 +494,10 @@ async function onImagePaste(e) {
 function currentImagePreview() {
   const url = existingImageUrl.value || formData.image_url.trim()
   if (!url) return ''
-  return url.startsWith('http') ? url : BASE_URL + url
+  if (url.startsWith('http')) return url
+  // 本地路径需要加token认证
+  const token = localStorage.getItem('quote_token')
+  return BASE_URL + url + (token ? '?token=' + token : '')
 }
 
 function deleteImage() {
@@ -800,17 +821,36 @@ onMounted(() => {
                   <div class="p-3 rounded-3" style="background:var(--gray-50);border:2px dashed var(--gray-300)">
                     <label class="form-label-modern mb-1" style="font-size:.82rem">
                       <i class="bi bi-magic"></i> 智能识别
-                      <span v-if="smartRecognizing" class="spinner-border spinner-border-sm ms-2" style="width:.75rem;height:.75rem"></span>
                     </label>
+                    <!-- 状态栏 -->
+                    <div v-if="smartRecognizing || smartResult || smartError" class="mb-2 d-flex align-items-center gap-2" style="font-size:.78rem">
+                      <span v-if="smartRecognizing" class="text-primary">
+                        <span class="spinner-border spinner-border-sm" style="width:.7rem;height:.7rem"></span>
+                        识别中... {{ smartElapsed > 0 ? smartElapsed.toFixed(1) + 's' : '' }}
+                      </span>
+                      <span v-else-if="smartResult" class="text-success">
+                        <i class="bi bi-check-circle-fill"></i>
+                        {{ SOURCE_LABELS[smartSource] || smartSource || 'AI' }} 识别完成 {{ smartElapsed > 0 ? smartElapsed.toFixed(1) + 's' : '' }}
+                      </span>
+                      <span v-else-if="smartError" class="text-danger">
+                        <i class="bi bi-x-circle-fill"></i> 识别失败
+                      </span>
+                    </div>
                     <!-- 文字输入区 -->
                     <div class="d-flex gap-2 mb-2">
                       <textarea class="form-control form-control-sm" v-model="smartTextInput"
                         placeholder="粘贴产品文字/参数，或直接 Ctrl+V 粘贴截图"
                         rows="2" style="font-size:.78rem;resize:vertical"></textarea>
-                      <button class="btn btn-primary btn-sm px-3" @click="recognizeFromText"
-                        :disabled="smartRecognizing || !smartTextInput.trim()" style="white-space:nowrap">
-                        <i class="bi bi-magic"></i> 识别
-                      </button>
+                      <div class="d-flex flex-column gap-1" style="min-width:70px">
+                        <button class="btn btn-primary btn-sm px-2" @click="recognizeFromText"
+                          :disabled="smartRecognizing || !smartTextInput.trim()" style="white-space:nowrap;font-size:.78rem">
+                          <i class="bi bi-magic"></i> 识别
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm px-2" @click="clearSmartResult"
+                          style="white-space:nowrap;font-size:.78rem" title="清空所有内容重新识别">
+                          <i class="bi bi-arrow-counterclockwise"></i> 重置
+                        </button>
+                      </div>
                     </div>
                     <div v-if="smartError" class="alert alert-warning py-1 px-2 mb-0 small" style="font-size:.8rem">
                       {{ smartError }}
@@ -819,10 +859,7 @@ onMounted(() => {
                     <div v-if="smartResult" class="mt-2 p-2 rounded-2" style="background:white;border:2px solid var(--primary);font-size:.82rem">
                       <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="fw-semibold text-primary"><i class="bi bi-check-circle"></i> 识别结果（可编辑修正）</span>
-                        <div class="d-flex align-items-center gap-2">
-                          <small v-if="smartSource" class="text-muted" style="font-size:.7rem;background:var(--gray-100);padding:1px 6px;border-radius:4px">{{ SOURCE_LABELS[smartSource] || smartSource }}</small>
-                          <button class="btn btn-sm btn-outline-danger py-0 px-2" @click="clearSmartResult" style="font-size:.7rem"><i class="bi bi-trash3"></i> 清空重识</button>
-                        </div>
+                        <small v-if="smartSource" class="text-muted" style="font-size:.7rem;background:var(--gray-100);padding:1px 6px;border-radius:4px">{{ SOURCE_LABELS[smartSource] || smartSource }}</small>
                       </div>
                       <div v-if="smartResult.existing_product_id" class="alert alert-info py-1 px-2 mb-2" style="font-size:.78rem">
                         <i class="bi bi-link-45deg"></i> 产品库已有该产品（ID:{{ smartResult.existing_product_id }}），当前为新增录入
