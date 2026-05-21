@@ -195,7 +195,7 @@ async function sendMessage(textOverride) {
     const resp = await fetch(BASE_URL + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ input: text, stream: true, model: selectedModel.value }),
+      body: JSON.stringify({ input: text, stream: true, model: selectedModel.value, conversation_id: currentSessionId.value }),
     })
 
     if (!resp.ok) {

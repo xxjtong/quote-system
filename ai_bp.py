@@ -398,7 +398,9 @@ def ai_chat():
 
     stream = data.get('stream', False)
     user = g.current_user
-    conversation = f'quote-user-{user.id}'
+    conv_id = data.get('conversation_id', '') or ''
+    # 每个前端session独立conversation，+号新建时conversation_id变化
+    conversation = f'quote-user-{user.id}-{conv_id}' if conv_id else f'quote-user-{user.id}'
 
     body = {
         'model': data.get('model') or _ai_model,
