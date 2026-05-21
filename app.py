@@ -132,6 +132,7 @@ def get_all_settings():
 
 def _get_ai_system_prompt():
     """获取 AI 系统提示词（优先使用定制版，否则用默认）"""
+    from ai_bp import _GW_SYSTEM_PROMPT
     s = SystemSetting.query.filter_by(key='ai_system_prompt').first()
     prompt = s.value if s and s.value else _GW_SYSTEM_PROMPT
     # 追加身份强制指令（末尾优先，对抗 Gateway 基础 persona）
