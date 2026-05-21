@@ -289,6 +289,7 @@ const smartSource = ref('')
 const smartRawText = ref('')
 const smartTextInput = ref('')
 const smartElapsed = ref(0)
+const smartStatus = ref('')  // idle | recognizing | success | error
 let _smartTimer = null
 const smartEdit = reactive({ name: '', spec: '', supplier: '', category: '', price: '', cost_price: '', unit: '', function_desc: '', remark: '' })
 const smartError = ref('')
@@ -301,6 +302,7 @@ const SOURCE_LABELS = {
 
 function _startSmartTimer() {
   smartElapsed.value = 0
+  smartStatus.value = 'recognizing'
   if (_smartTimer) clearInterval(_smartTimer)
   _smartTimer = setInterval(() => { smartElapsed.value += 0.1 }, 100)
 }
@@ -319,6 +321,7 @@ function populateSmartEdit(result) {
   smartEdit.unit = result.unit || ''
   smartEdit.function_desc = result.function_desc || ''
   smartEdit.remark = result.remark || ''
+  smartStatus.value = 'success'
   // 自动填入上方表单
   fillFromSmartResult()
   // 识别成功提示
@@ -347,9 +350,11 @@ async function recognizeFromText() {
       populateSmartEdit(r.products[0])
     } else {
       smartError.value = r.error || '未能识别出产品信息'
+      smartStatus.value = 'error'
     }
   } catch (err) {
     smartError.value = '识别失败，请重试'
+    smartStatus.value = 'error'
   } finally {
     smartRecognizing.value = false
     _stopSmartTimer()
@@ -446,6 +451,7 @@ function clearSmartResult() {
   smartRawText.value = ''
   smartError.value = ''
   smartTextInput.value = ''
+  smartStatus.value = 'idle'
   resetSmartEdit()
   // 清空表单中被识别填入的字段
   formData.name = ''
@@ -821,15 +827,15 @@ onMounted(() => {
                   <div class="p-3 rounded-3" style="background:var(--gray-50);border:2px dashed var(--gray-300)">
                     <label class="form-label-modern mb-1 d-flex align-items-center gap-2" style="font-size:.82rem">
                       <span><i class="bi bi-magic"></i> 智能识别</span>
-                      <span v-if="smartRecognizing" class="text-primary" style="font-size:.78rem">
+                      <span v-if="smartStatus === 'recognizing'" class="text-primary" style="font-size:.78rem">
                         <span class="spinner-border spinner-border-sm" style="width:.7rem;height:.7rem"></span>
                         识别中... {{ smartElapsed > 0 ? smartElapsed.toFixed(1) + 's' : '' }}
                       </span>
-                      <span v-else-if="smartResult" class="text-success" style="font-size:.78rem">
+                      <span v-else-if="smartStatus === 'success'" class="text-success" style="font-size:.78rem">
                         <i class="bi bi-check-circle-fill"></i>
-                        {{ SOURCE_LABELS[smartSource] || smartSource || 'AI' }} 识别完成 {{ smartElapsed > 0 ? smartElapsed.toFixed(1) + 's' : '' }}
+                        {{ SOURCE_LABELS[smartSource.value] || smartSource.value || 'AI' }} 识别完成 {{ smartElapsed > 0 ? smartElapsed.toFixed(1) + 's' : '' }}
                       </span>
-                      <span v-else-if="smartError" class="text-danger" style="font-size:.78rem">
+                      <span v-else-if="smartStatus === 'error'" class="text-danger" style="font-size:.78rem">
                         <i class="bi bi-x-circle-fill"></i> 识别失败
                       </span>
                     </label>
