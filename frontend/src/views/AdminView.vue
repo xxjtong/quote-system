@@ -225,11 +225,6 @@ onMounted(() => {
       <div class="card-title-modern d-flex align-items-center justify-content-between">
         <div><i class="bi bi-robot text-primary"></i>AI 系统提示词</div>
         <div class="d-flex gap-1">
-          <button class="btn btn-primary btn-sm" @click="saveAiPrompt" :disabled="aiPromptSaving">
-            <i v-if="aiPromptSaving" class="bi bi-hourglass-split me-1"></i>
-            <i v-else class="bi bi-check-lg me-1"></i>
-            {{ aiPromptSaving ? '保存中...' : '保存' }}
-          </button>
           <button v-if="aiPromptCustom" class="btn btn-sm btn-outline-secondary" @click="resetAiPrompt" :disabled="aiPromptSaving">
             <i class="bi bi-arrow-counterclockwise"></i> 恢复默认
           </button>

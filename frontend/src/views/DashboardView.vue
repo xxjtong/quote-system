@@ -527,8 +527,16 @@ onMounted(() => { fetchDashboard(); loadHistory(); fetchModels() })
 
       <!-- Messages -->
       <div ref="chatBox" class="chat-messages" style="max-height:60vh;overflow-y:auto;margin-bottom:.75rem">
-        <div v-if="chatMessages.length === 0" class="text-muted text-center py-3 small">
-          💡 试试问我：20间会议室安装人数感应器 | 推荐最便宜的网关 | 比较星纵VS121和VS321
+        <div v-if="chatMessages.length === 0" class="text-center py-3 small">
+          💡 试试问我：
+          <div class="d-flex flex-wrap justify-content-center gap-2 mt-2">
+            <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
+              @click="sendMessage('20间会议室安装人数感应器')">20间会议室安装人数感应器</button>
+            <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
+              @click="sendMessage('推荐最便宜的网关')">推荐最便宜的网关</button>
+            <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
+              @click="sendMessage('比较星纵VS121和VS321')">比较星纵VS121和VS321</button>
+          </div>
         </div>
 
         <div v-for="(msg, i) in chatMessages" :key="i"

@@ -84,11 +84,11 @@ function viewQuote(id, title) {
 
 // ─── Status toggle ───
 const validStatuses = [
-  { value: 'draft', label: '草稿', cls: 'bg-light text-dark' },
-  { value: 'sent', label: '已发送', cls: 'bg-primary' },
+  { value: 'draft', label: '草稿', cls: 'bg-info' },
+  { value: 'sent', label: '已发送', cls: 'bg-success' },
   { value: 'confirmed', label: '已接受', cls: 'bg-success' },
   { value: 'rejected', label: '已拒绝', cls: 'bg-danger' },
-  { value: 'expired', label: '已过期', cls: 'bg-secondary' },
+  { value: 'expired', label: '已过期', cls: 'bg-warning text-dark' },
 ]
 
 async function updateStatus(quote, newStatus) {
@@ -155,8 +155,8 @@ function statusBadge(s) {
 }
 
 function statusClass(s) {
-  const map = { draft: 'bg-light text-dark', sent: 'bg-primary', accepted: 'bg-success', rejected: 'bg-danger', confirmed: 'bg-success', expired: 'bg-secondary' }
-  return map[s] || 'bg-light text-dark'
+  const map = { draft: 'bg-info', sent: 'bg-success', accepted: 'bg-success', rejected: 'bg-danger', confirmed: 'bg-success', expired: 'bg-warning text-dark' }
+  return map[s] || 'bg-info'
 }
 
 onMounted(() => {
@@ -221,13 +221,18 @@ function closePreview() {
             <option :value="100">100条/页</option>
           </select>
         </div>
-        <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 bg-warning bg-opacity-10 rounded">
-          <span class="small fw-medium">已选 {{ selectedIds.size }} 条</span>
-          <button class="btn btn-danger btn-sm" @click="batchDelete">
-            <i class="bi bi-trash"></i> 批量删除
-          </button>
-          <button class="btn btn-outline-secondary btn-sm" @click="selectedIds = new Set(); selectAll = false">取消选择</button>
-        </div>
+      </div>
+
+      <!-- Batch action bar -->
+      <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 rounded mb-3" style="position:sticky;top:0;z-index:10;background:var(--bs-primary);color:#fff">
+        <i class="bi bi-check2-square me-1"></i>
+        <span class="small fw-medium">已选 {{ selectedIds.size }} 条报价单</span>
+        <button class="btn btn-sm btn-light btn-modern ms-2" @click="batchDelete">
+          <i class="bi bi-trash"></i> 批量删除
+        </button>
+        <button class="btn btn-sm btn-outline-light btn-modern" @click="selectedIds = new Set(); selectAll = false">
+          取消选择
+        </button>
       </div>
 
       <div v-if="loading" class="text-center py-5">
@@ -311,6 +316,27 @@ function closePreview() {
           <a class="page-link" @click="goPage(currentPage - 1)">上一页</a>
         </li>
         <li v-for="p in pageNumbers" :key="p" class="page-item" :class="{ active: p === currentPage }">
+          <a class="page-link" @click="goPage(p)">{{ p }}</a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+          <a class="page-link" @click="goPage(currentPage + 1)">下一页</a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+          <a class="page-link" @click="goPage(totalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- Bottom Pagination -->
+    <nav v-if="totalPages > 1" class="mt-3">
+      <ul class="pagination pagination-modern justify-content-center mb-0">
+        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+          <a class="page-link" @click="goPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+          <a class="page-link" @click="goPage(currentPage - 1)">上一页</a>
+        </li>
+        <li v-for="p in pageNumbers" :key="'b'+p" class="page-item" :class="{ active: p === currentPage }">
           <a class="page-link" @click="goPage(p)">{{ p }}</a>
         </li>
         <li class="page-item" :class="{ disabled: currentPage >= totalPages }">

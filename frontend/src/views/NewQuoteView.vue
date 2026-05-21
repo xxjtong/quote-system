@@ -283,10 +283,9 @@ async function autoAddProduct() {
   <div>
     <div class="page-header">
       <h5><i class="bi bi-plus-circle"></i>{{ isEditing ? '编辑报价单' : '新建报价单' }}</h5>
-      <button class="btn btn-primary btn-modern" @click="saveQuote" :disabled="saving">
-        <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
-        {{ isEditing ? '更新报价单' : '保存报价单' }}
-      </button>
+      <router-link :to="{name:'quotes'}" class="btn btn-outline-secondary btn-modern">
+        <i class="bi bi-arrow-left"></i> 返回列表
+      </router-link>
     </div>
 
     <!-- Client info -->
@@ -337,6 +336,15 @@ async function autoAddProduct() {
       <div v-if="items.length === 0" class="text-muted text-center py-4 small">
         <i class="bi bi-inbox d-block mb-2" style="font-size:2rem"></i>
         点击"添加产品"从产品库中选择
+      </div>
+
+      <!-- Placeholder totals when no products -->
+      <div v-if="items.length === 0" class="border-top pt-2 mt-2">
+        <div class="d-flex justify-content-end gap-4 small text-muted">
+          <span>小计: ¥0</span>
+          <span>税: ¥0</span>
+          <span class="fw-bold">总计: ¥0</span>
+        </div>
       </div>
 
       <div v-else class="table-responsive">

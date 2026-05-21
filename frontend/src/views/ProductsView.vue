@@ -554,10 +554,19 @@ onMounted(() => {
             <option :value="100">100条/页</option>
             <option :value="500">全部</option>
           </select>
-          <button v-if="selectedIds.size > 0" class="btn btn-sm btn-modern btn-outline-danger" @click="batchDelete">
-            <i class="bi bi-trash"></i> 删除({{ selectedIds.size }})
-          </button>
         </div>
+      </div>
+
+      <!-- Batch action bar -->
+      <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 rounded mb-3" style="position:sticky;top:0;z-index:10;background:var(--bs-primary);color:#fff">
+        <i class="bi bi-check2-square me-1"></i>
+        <span class="small fw-medium">已选 {{ selectedIds.size }} 个产品</span>
+        <button class="btn btn-sm btn-light btn-modern ms-2" @click="batchDelete">
+          <i class="bi bi-trash"></i> 批量删除
+        </button>
+        <button class="btn btn-sm btn-outline-light btn-modern" @click="selectedIds.clear()">
+          取消选择
+        </button>
       </div>
 
       <!-- Loading -->
@@ -615,7 +624,7 @@ onMounted(() => {
                     class="img-thumb"
                     @click="previewImage = imageSrc(p)">
                   <img v-if="p.has_image || p.image_url" :src="imageSrc(p)" class="img-thumb-large">
-                  <span v-else class="text-muted" style="font-size:.7rem">—</span>
+                  <i v-else class="bi bi-image text-muted" style="font-size:1.2rem;opacity:.4"></i>
                 </div>
               </td>
               <td>
@@ -668,6 +677,27 @@ onMounted(() => {
         </ul>
       </nav>
     </div>
+
+    <!-- Bottom Pagination -->
+    <nav v-if="totalPages > 1" class="mt-3">
+      <ul class="pagination pagination-modern justify-content-center mb-0">
+        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+          <a class="page-link" @click="goPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
+          <a class="page-link" @click="goPage(currentPage - 1)">上一页</a>
+        </li>
+        <li v-for="p in pageNumbers" :key="'b'+p" class="page-item" :class="{ active: p === currentPage }">
+          <a class="page-link" @click="goPage(p)">{{ p }}</a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+          <a class="page-link" @click="goPage(currentPage + 1)">下一页</a>
+        </li>
+        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
+          <a class="page-link" @click="goPage(totalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
+        </li>
+      </ul>
+    </nav>
 
     <!-- Product Form Modal -->
     <Teleport to="body">

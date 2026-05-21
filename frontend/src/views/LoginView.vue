@@ -97,11 +97,11 @@ onMounted(async () => {
     <div v-if="!isRegister" class="card-modern" style="max-width:400px;width:100%">
       <h4 class="text-center mb-3"><i class="bi bi-lock me-2"></i>登录报价系统</h4>
       <div class="mb-2">
-        <input class="form-control" v-model="loginUser" placeholder="用户名" autocomplete="username"
+        <input class="form-control login-input" v-model="loginUser" placeholder="用户名" autocomplete="username"
           @keyup.enter="doLogin">
       </div>
       <div class="mb-3">
-        <input class="form-control" type="password" v-model="loginPass" placeholder="密码"
+        <input class="form-control login-input" type="password" v-model="loginPass" placeholder="密码"
           @keyup.enter="doLogin">
       </div>
       <button class="btn btn-primary btn-modern w-100" @click="doLogin">登录</button>
@@ -115,13 +115,13 @@ onMounted(async () => {
     <div v-else class="card-modern" style="max-width:400px;width:100%">
       <h4 class="text-center mb-3"><i class="bi bi-person-plus me-2"></i>注册账号</h4>
       <div class="mb-2">
-        <input class="form-control" v-model="regUser" placeholder="用户名">
+        <input class="form-control login-input" v-model="regUser" placeholder="用户名">
       </div>
       <div class="mb-2">
-        <input class="form-control" type="password" v-model="regPass" placeholder="密码">
+        <input class="form-control login-input" type="password" v-model="regPass" placeholder="密码">
       </div>
       <div class="mb-3">
-        <input class="form-control" v-model="regEmail" placeholder="邮箱（选填）">
+        <input class="form-control login-input" v-model="regEmail" placeholder="邮箱（选填）">
       </div>
       <button class="btn btn-primary btn-modern w-100" @click="doRegister">注册</button>
       <div v-if="regError" class="text-danger small mt-2">{{ regError }}</div>
@@ -131,3 +131,13 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.login-input {
+  border-color: #adb5bd;
+}
+.login-input:focus {
+  border-color: #86b7fe;
+  box-shadow: 0 0 0 0.2rem rgba(134, 183, 254, 0.25);
+}
+</style>

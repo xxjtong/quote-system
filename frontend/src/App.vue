@@ -23,6 +23,7 @@ const showSidebar = computed(() => isLoggedIn() && route.name !== 'login')
 // ─── Sidebar ───
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
+
 function toggleSidebar() { sidebarOpen.value = !sidebarOpen.value }
 function closeSidebar() { sidebarOpen.value = false }
 function toggleCollapse() { sidebarCollapsed.value = !sidebarCollapsed.value }
@@ -96,6 +97,12 @@ watch(authToken, (val) => {
   if (!val && route.name !== 'login') {
     router.push({ name: 'login' })
   }
+})
+
+// ─── Responsive: collapse sidebar on mobile by default ───
+if (window.innerWidth < 768) sidebarCollapsed.value = true
+window.addEventListener('resize', () => {
+  if (window.innerWidth < 768) sidebarCollapsed.value = true
 })
 
 // ─── Check session on mount ───
