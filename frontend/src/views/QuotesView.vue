@@ -184,7 +184,7 @@ function closePreview() {
 <template>
   <div>
     <div class="page-header justify-content-between">
-      <h5><i class="bi bi-file-text"></i>报价单管理</h5>
+      <h5><i class="bi bi-file-text"></i>报价管理</h5>
       <button class="btn btn-primary btn-modern" @click="router.push({name:'newquote'})">
         <i class="bi bi-plus-lg"></i> 新建报价单
       </button>
@@ -326,28 +326,7 @@ function closePreview() {
       </ul>
     </nav>
 
-    <!-- Bottom Pagination -->
-    <nav v-if="totalPages > 1" class="mt-3">
-      <ul class="pagination pagination-modern justify-content-center mb-0">
-        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
-          <a class="page-link" @click="goPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
-        </li>
-        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
-          <a class="page-link" @click="goPage(currentPage - 1)">上一页</a>
-        </li>
-        <li v-for="p in pageNumbers" :key="'b'+p" class="page-item" :class="{ active: p === currentPage }">
-          <a class="page-link" @click="goPage(p)">{{ p }}</a>
-        </li>
-        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
-          <a class="page-link" @click="goPage(currentPage + 1)">下一页</a>
-        </li>
-        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
-          <a class="page-link" @click="goPage(totalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
-        </li>
-      </ul>
-    </nav>
-
-    <!-- Preview Modal (shared component) -->
+        <!-- Preview Modal (shared component) -->
     <QuotePreviewModal v-model:show="showPreview" :quote-id="previewQuoteId" :quote-title="previewTitle" />
   </div>
 </template>

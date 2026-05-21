@@ -678,28 +678,7 @@ onMounted(() => {
       </nav>
     </div>
 
-    <!-- Bottom Pagination -->
-    <nav v-if="totalPages > 1" class="mt-3">
-      <ul class="pagination pagination-modern justify-content-center mb-0">
-        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
-          <a class="page-link" @click="goPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
-        </li>
-        <li class="page-item" :class="{ disabled: currentPage <= 1 }">
-          <a class="page-link" @click="goPage(currentPage - 1)">上一页</a>
-        </li>
-        <li v-for="p in pageNumbers" :key="'b'+p" class="page-item" :class="{ active: p === currentPage }">
-          <a class="page-link" @click="goPage(p)">{{ p }}</a>
-        </li>
-        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
-          <a class="page-link" @click="goPage(currentPage + 1)">下一页</a>
-        </li>
-        <li class="page-item" :class="{ disabled: currentPage >= totalPages }">
-          <a class="page-link" @click="goPage(totalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
-        </li>
-      </ul>
-    </nav>
-
-    <!-- Product Form Modal -->
+        <!-- Product Form Modal -->
     <Teleport to="body">
       <div v-if="showForm" class="modal-backdrop show"></div>
       <div v-if="showForm" class="modal d-block modern-modal" tabindex="-1">
