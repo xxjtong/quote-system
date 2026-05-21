@@ -141,6 +141,56 @@ def _get_ai_system_prompt():
     return prompt
 
 
+# ─── Generate quick replies via LLM ──────────────────────────
+def _generate_quick_replies(reply_text):
+    """用 deepseek-v4-flash 分析 AI 回复，生成 2-4 个快捷回复按钮。返回列表或 []。"""
+    import urllib.request, json as _json
+    # 截取最后800字（问题通常在末尾）
+    snippet = reply_text.strip()[-800:]
+    prompt = (
+        '你是一个快捷回复生成器。根据AI助手的回复，推测用户最可能想说的2-4个简短回复。\n'
+        '规则：\n'
+        '- 每个回复5-15字，简洁自然，像用户口头说的\n'
+        '- 如果AI问了"还是"选择题，提取两个选项\n'
+        '- 如果AI推荐了产品，生成"详细对比这两款""查看更多同类产品"\n'
+        '- 如果AI问了是否创建报价单，生成"创建报价单""先不用"\n'
+        '- 如果AI给了价格，生成"有更便宜的替代吗""查看参数对比"\n'
+        '- 如果AI列了方案，生成"用方案一""用方案二"\n'
+        '- 如果不确定，生成通用的"继续推荐""换个方向"\n'
+        '- 返回纯JSON数组如["创建报价单","先看看参数"],不要markdown、不要解释\n'
+        f'AI回复摘要："""{snippet}"""'
+    )
+    try:
+        body = _json.dumps({
+            'model': 'deepseek-v4-flash',
+            'input': prompt,
+            'max_output_tokens': 100,
+        })
+        req = urllib.request.Request(
+            f'{_gateway_url}/v1/responses',
+            data=body.encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        resp = urllib.request.urlopen(req, timeout=8)
+        result = _json.loads(resp.read())
+        reply = ''
+        for o in result.get('output', []):
+            if o.get('type') == 'message':
+                content = o.get('content', [])
+                if content:
+                    reply = content[0].get('text', '')
+                break
+        reply = reply.strip()
+        if reply.startswith('['):
+            arr = _json.loads(reply)
+            if isinstance(arr, list) and 1 <= len(arr) <= 6:
+                return [str(x).strip() for x in arr if 2 <= len(str(x).strip()) <= 30][:4]
+    except Exception:
+        pass
+    return []
+
+
 # ─── Extract choices via LLM ────────────────────────────────
 def _extract_choices_via_llm(text):
     """用 LLM 从「是A还是B」问句中提取两个选项。返回 [a, b] 或 []。"""
@@ -245,6 +295,12 @@ def _parse_reply_actions(reply_text):
     if not result['quick_replies'] and len(result['products']) >= 2:
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
             result['quick_replies'] = [p['name'] for p in result['products'][:6]]
+
+    # 兜底：如果规则提取不到quick_replies，用LLM生成
+    if not result['quick_replies']:
+        llm_replies = _generate_quick_replies(reply_text)
+        if llm_replies:
+            result['quick_replies'] = llm_replies
 
     dl_match = re.search(r'(https://bwh\.ddns\.mobi/quote/api/quotes/(\d+)/export-excel)', reply_text)
     if dl_match:
