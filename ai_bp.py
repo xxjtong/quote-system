@@ -302,11 +302,12 @@ def _parse_reply_actions(reply_text):
     seen = set()
     for name, price in prod_pattern1[:6]:
         name = name.strip()
-        if name in seen or len(name) < 4:
+        norm = name.replace(' ', '')
+        if norm in seen or len(name) < 4:
             continue
         if re.match(r'^[\d\s\-+.,]+$', name):
             continue
-        seen.add(name)
+        seen.add(norm)
         try:
             result['products'].append({
                 'name': name,
@@ -314,6 +315,41 @@ def _parse_reply_actions(reply_text):
             })
         except ValueError:
             pass
+
+    # Pattern 2: 产品型号（描述）—— 方案行中的产品名
+    if len(result['products']) < 6:
+        for m in re.finditer(r'(?:^|[\s>：:）)])\s*([A-Z][A-Z0-9\-/]{2,20})[（(]', reply_text, re.MULTILINE):
+            name = m.group(1).strip()
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3:
+                seen.add(norm)
+                result['products'].append({'name': name, 'price': 0})
+
+    # Pattern 3: "产品名 N台/个 ¥价格" 或 "产品名 N台/个 × ¥价格"
+    if len(result['products']) < 6:
+        for m in re.finditer(r'([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\- ]{2,30}?)\s*\d+\s*[台个只套件]\s*[×x]?\s*(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3:
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': name, 'price': 0})
+
+    # Pattern 4: 型号 + ¥价格 紧凑格式（如 "UG63 ¥990"）
+    if len(result['products']) < 6:
+        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})\s+(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3:
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': name, 'price': 0})
 
     if not result['quick_replies'] and len(result['products']) >= 2:
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
