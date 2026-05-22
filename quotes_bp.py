@@ -810,10 +810,11 @@ def preview_quote_html(quote_id):
         guide_price = round(cost * 1.5, 2) if cost else 0
         min_retail = round(cost * 1.15, 2) if cost else 0
 
-        # 图片列：使用 /api/products/<id>/image 端点
+        # 图片列：使用 /api/products/<id>/image 端点（附带 token 供 img 标签鉴权）
         img_cell = ''
         if image_url:
-            src = f'/quote/api/products/{item.product_id}/image'
+            _preview_token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            src = f'/quote/api/products/{item.product_id}/image?token={_preview_token}'
             img_cell = f'<img src="{src}" style="max-width:100px;max-height:48px;object-fit:contain;display:block;margin:0 auto">'
         else:
             img_cell = '—'
