@@ -37,7 +37,7 @@ UPLOAD_DIR = BASE_DIR / 'uploads'
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Gateway URL（deepseek_parse_product 用）
-_gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8643')
+_gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8642')
 
 
 # ─── Lazy imports（避免循环依赖） ─────────────────────────────

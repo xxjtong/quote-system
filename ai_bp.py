@@ -18,7 +18,7 @@ admin_ai_bp = Blueprint('admin_ai', __name__)  # /api/admin/ai-usage
 
 # ─── 配置 ──────────────────────────────────────────────────
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
-_gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8643')
+_gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8642')
 
 _AVAILABLE_MODELS = [
     {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash', 'desc': '快速响应，适合日常问答'},
