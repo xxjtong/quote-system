@@ -38,13 +38,26 @@
 - 组件: `<script setup>` + Composition API
 - 状态: `reactive()`/composables，不用 Pinia
 - 搜索: IME安全 + 500ms防抖 + oninput无需回车
+- 拼音搜索: 覆盖 `name` + `spec` 字段（v2.2.0）
+- 产品选择器上限: 12 个产品（v2.2.0，原6）
 - Vue 自动 XSS 转义（`{{ }}` = `v-text`），不跨页面用 `v-html`
+- 导航栏当前页点击刷新（App.vue，v2.2.0）
 
 ### 后端（Flask）
 - 产品名 XSS 拦截: `<script>/<img>/onerror=/onclick=/onload=/javascript:`
 - 产品名截断: 20字
+- 普通用户可见admin创建的产品（products_bp 不再按 created_by 过滤，v2.2.0）
+- 导出文件名: ASCII文件名 + `filename*=UTF-8` 编码（v2.2.0）
 - pytest 测试: venv 在 `/opt/quote-system/venv/`
 - ⚠️ 依赖: `flask flask-sqlalchemy flask-cors pyjwt openpyxl pypinyin Pillow`（`pypinyin` 是 lazy import，`import app` 检测不到遗漏；`Pillow` 是 openpyxl 处理图片所需）
+
+### AI 对话
+- 价格解析: 7 种 Pattern 全面支持 ¥ 和 元 格式（v2.2.0）
+- Pattern 6: (ID=N) 产品 ID 引用，返回 product_id 字段
+- Pattern 7: 价格回溯——先找 ¥/元价格，向上 2 行找型号
+- 一键创建报价单: 前端优先传 product_ids 参数，autoAddProductsById
+- 方案 quick_replies: 支持「方案A（描述）」格式，去掉重复括号
+- SSE 日志写入: 在 generator 外部（请求上下文内），避免流式传输中误计使用次数
 
 ### 本地开发环境
 - 仓库: `/tmp/quote-system`，venv: `/tmp/quote-system/venv`

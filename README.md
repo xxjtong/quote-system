@@ -2,7 +2,7 @@
 
 > Flask + SQLite + Vue 3 SPA — 产品管理、报价单生成、Excel 导入导出、火山引擎豆包智能识别、AI 对话助手、多用户认证、拼音搜索
 
-[![Version](https://img.shields.io/badge/version-2.1.0-blue)](version.txt)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue)](version.txt)
 [![Python](https://img.shields.io/badge/python-3.11+-green)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
@@ -32,15 +32,15 @@
 | 模块 | 功能 |
 |------|------|
 | 🔐 **认证系统** | JWT 登录/注册、管理员面板、字段可见性控制、注册开关、个人信息修改、全站鉴权门 |
-| 📦 **产品管理** | CRUD、拼音/缩写智能搜索、分类/厂商筛选、批量删除、图片上传预览、产品上线/下线、图片 Blob 内嵌存储 |
+| 📦 **产品管理** | CRUD、拼音/缩写智能搜索（覆盖name+spec）、分类/厂商筛选、批量删除、图片上传预览、产品上线/下线、图片 Blob 内嵌存储、创建人列显示、普通用户可见admin创建的产品、产品上限12 |
 | 📊 **概览仪表盘** | 产品总数/报价单/下载/总金额统计卡片、最近报价单、快速操作 |
 | 📝 **报价单** | 创建/编辑/删除、搜索过滤、分页、批量删除、状态流转、每行备注、利润概览、客户聚合、台湾税率支持、折扣率 |
 | 📥 **Excel 导入** | 多 Sheet 导入、列名智能映射、嵌入图片提取、自动同步 SKU/规格、6 子函数低耦合实现 |
-| 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、自定义公司名/页脚、下载计数统计 |
-| 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权） |
+| 📤 **Excel 导出** | 格式化报价单导出、图片嵌入、自定义公司名/页脚、下载计数统计、ASCII文件名+UTF-8 filename*编码、文件名去重 |
+| 👁️ **预览** | HTML 预览报价单（Blob URL + token 鉴权）、备注移入表格内总价行下一行9pt左对齐 |
 | 📧 **邮件** | SMTP 配置，一键发送报价单 Excel 附件 |
 | 🔍 **智能识别** | 粘贴文本自动解析产品信息、豆包 Vision 图片识别、DeepSeek V4 Flash 文本解析、可编辑识别结果、发票 OCR → 批量更新成本价 |
-| 🤖 **AI 助手** | Dashboard 内嵌 AI 产品助手，SSE 流式输出、快捷回复（规则+LLM 异步补发）、产品卡片、对比表、一键创建报价单（含产品条目自动填入）、对话历史、模型选择与切换、自定义 Prompt |
+| 🤖 **AI 助手** | Dashboard 内嵌 AI 产品助手，SSE 流式输出、快捷回复（规则+LLM 异步补发，支持方案A（描述）格式）、产品卡片、对比表（7种Pattern全面支持¥/元格式，价格回溯Pattern7）、一键创建报价单（前端优先传product_ids，按ID查产品autoAddProductsById）、对话历史、模型选择与切换、自定义 Prompt、试试问我按钮场景化文案、导航栏当前页点击刷新 |
 | 🎨 **UI** | 统一页面风格、组件化架构（5 个独立子组件）、一致样式体系 |
 | ⚡ **性能优化** | 缓存优先渲染、产品选择器版本指纹、前端本地拼音过滤、DB-based 速率限制（多 worker 共享） |
 
@@ -255,7 +255,7 @@ sudo systemctl enable --now quote-system
 ## 版本号管理
 
 ```bash
-echo "2.1.0" > version.txt
+echo "2.2.0" > version.txt
 sudo systemctl restart quote-system
 ```
 
@@ -375,10 +375,32 @@ AI 回复底部自动生成快捷回复按钮，两层策略：
 
 AI 对话中提及产品时，前端提取 `product_ids`，底部出现「一键创建报价单」按钮：
 
+- **前端优先传 product_ids 参数**：跳转新建报价单页面并传递 product_ids，NewQuoteView 直接用 ID 查产品（autoAddProductsById）
 - **有产品条目** → 跳转新建报价单页面并自动填入匹配产品作为 items
 - **无产品条目** → 跳转空白新建报价单页面（无产品添加）
 
 条件：AI 回复中必须包含可提取的产品引用（`product_id` 在系统中存在），否则跳转后无条目。
+
+### AI 价格解析 Pattern
+
+AI 对话对比列表价格提取支持 7 种 Pattern，全面兼容 ¥ 和 元 格式：
+
+| Pattern | 格式 | 说明 |
+|---------|------|------|
+| 1b/1c | `¥价格` / `价格元` | 基础价格格式 |
+| 2 | `名称 ¥价格` | 名称+价格同行 |
+| 3b | `名称: ¥价格` | 冒号分隔 |
+| 4b/4c | `产品名称 ¥价格` / `产品名称 价格元` | 产品名+价格 |
+| 5 | `序号. 产品 ¥价格` | 编号列表格式 |
+| 6 | `(ID=N)产品ID引用` | 返回 product_id 字段，支持直接ID引用 |
+| 7 | 价格回溯 | 先找 ¥/元价格，向上 2 行找型号（支持中文括号/星号/破折号格式） |
+
+### 快捷回复（quick_replies）
+
+AI 回复底部自动生成快捷回复按钮，两层策略：
+
+1. **规则提取（同步）**：正则匹配「方案A/B/C」格式（支持 `方案A（描述）` 格式，去掉重复括号）、\"还是\"关键词、问句 pattern
+2. **LLM 异步补发**：规则未提取到时，调用 LLM 生成选项，通过 SSE `quick_replies` 事件补发
 
 ---
 
@@ -403,7 +425,7 @@ AI 对话中提及产品时，前端提取 `product_ids`，底部出现「一键
 
 ### 产品管理
 
-**列表页（ProductTable 组件）：** 表格 + 搜索 + 分类/厂商筛选 + 分页 + 排序 + 批量删除 + 图片预览
+**列表页（ProductTable 组件）：** 表格 + 搜索 + 分类/厂商筛选 + 分页 + 排序 + 批量删除 + 图片预览 + 创建人列
 
 **新增/编辑（ProductFormModal 组件）：** 完整表单 + 内嵌 SmartRecognition 组件 + 图片上传/粘贴
 
@@ -591,7 +613,7 @@ frontend/src/
 |------|------|
 | `function_desc` ≠ `remark` | 前者对客户可见（导出），后者仅内部 |
 | `sku` = `spec` | 写入时自动同步 |
-| 搜索匹配 | `name` + `spec` + `supplier` + `function_desc` + 拼音（DB LIKE `pinyin_search`） |
+| 搜索匹配 | `name` + `spec` + `supplier` + `function_desc` + 拼音（DB LIKE `pinyin_search`，覆盖spec字段） |
 | 搜索防抖 | 500ms，IME 组字中不触发 |
 | API 调用 | 统一通过 `useApi.js` 的 `api()` 封装 |
 | 修改 Vue 组件 | `cd frontend && npm run build && sudo systemctl restart quote-system` |
@@ -616,7 +638,7 @@ flask db migrate -m "add new column"
 flask db upgrade
 
 # 更新版本号
-echo "2.1.0" > version.txt && sudo systemctl restart quote-system
+echo "2.2.0" > version.txt && sudo systemctl restart quote-system
 
 # 推送到 GitHub
 cd /opt/quote-system

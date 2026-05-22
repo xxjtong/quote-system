@@ -1,5 +1,34 @@
 # 更新日志
 
+## v2.2.0 (2026-05-22)
+### 🔧 功能增强 + Bug 修复
+
+**产品管理：**
+- 产品列表添加创建人列（ProductTable.vue）
+- 普通用户可见 admin 创建的产品（products_bp.py 查询不再按 created_by 过滤）
+- 拼音搜索覆盖 spec 字段（pinyin_search 索引含 spec 内容）
+- 产品选择器上限 6 → 12
+
+**导出/预览文件名修复：**
+- 导出文件名 xlsx.xlsx 修复：后端使用 ASCII 文件名 + 前端优先解析 filename*=UTF-8
+- 预览下载文件名双下划线修复：优先 filename* 解码 + title 以 client 开头时去重
+- AI 下载 Excel 文件名公司名重复修复：title 包含 client 时去重
+
+**AI 对话增强：**
+- AI 对比列表价格提取全面支持 ¥ 和 元 格式（Pattern 1b/1c/2/3b/4b/4c/5/6/7）
+- Pattern 6：(ID=N) 产品 ID 引用，返回 product_id 字段
+- Pattern 7：价格回溯——先找 ¥/元 价格，向上 2 行找型号（支持中文括号/星号/破折号格式）
+- 一键创建报价单：前端优先传 product_ids 参数，NewQuoteView 直接用 ID 查产品（autoAddProductsById）
+- 方案 quick_replies：支持「方案A（描述）」格式，去掉重复括号
+- AI 对话框试试问我按钮文案：甲醛空气质量检测仪 / 张经理创客空间项目200个共享工位要占用检测 / 华为的任总需要园区能耗分析方案
+- AI 使用次数不变：SSE 日志改在 generator 外部写入（请求上下文内），避免流式传输中误计
+
+**报价单预览：**
+- 备注移入表格内，总价行下一行，9pt 左对齐固定文案
+
+**导航：**
+- 导航栏当前页点击刷新（App.vue）
+
 ## v2.1.0 (2026-05-22)
 ### 🏗️ 架构重构 v2.1 — Blueprint 拆分 + 安全修复 + 组件化
 

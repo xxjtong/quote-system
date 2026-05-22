@@ -2,7 +2,7 @@
 
 > 写给 AI：本文档涵盖该报价系统的全部功能与交互细节。照着做就能复刻。
 
-**当前版本**: v1.7.9 | **最后更新**: 2026-05-21
+**当前版本**: v2.2.0 | **最后更新**: 2026-05-22
 
 ---
 
@@ -114,10 +114,11 @@ Base: `http://127.0.0.1:5001` | 公网: `https://bwh.ddns.mobi/quote`
 | `POST` | `/api/products/ocr` | 图片 OCR 识别 |
 | `POST` | `/api/products/recognize` | 文本智能识别解析 |
 
-**搜索行为（v1.3.6）：** `search` 参数模糊匹配 `name`、`spec`、`supplier`、`function_desc`。
+**搜索行为（v2.2.0）：** `search` 参数模糊匹配 `name`、`spec`、`supplier`、`function_desc`。
 - 纯中文搜索 → SQL ILIKE
-- 纯 ASCII 搜索 → 拼音匹配（全拼 `hongwai`、首字母 `hw`、部分 `zn`）
+- 纯 ASCII 搜索 → 拼音匹配（全拼 `hongwai`、首字母 `hw`、部分 `zn`），拼音索引覆盖 `name` + `spec` 字段
 - 响应包含 `_py` 和 `_py_initials` 字段供客户端过滤
+- 普通用户可见 admin 创建的产品（不再按 created_by 过滤）
 **响应包含：** `{products, total, page, per_page, categories, suppliers, version: {count, max_updated_at}}`
 
 ### 3.2 报价单 API
@@ -194,7 +195,7 @@ Gunicorn 缓存 Jinja2 模板，每次修改 `index.html` 后需重启服务。�
 ### 4.3 产品管理页
 
 #### 产品列表
-- 表格显示：复选框、图片缩略图、产品名称、分类、规格型号、厂商、单价、操作
+- 表格显示：复选框、图片缩略图、产品名称、分类、规格型号、厂商、单价、**创建人**、操作
 - 分页，每页默认 20 条
 - 支持排序（ID/名称/价格/分类，升序/降序）
 
@@ -377,6 +378,7 @@ Gunicorn 缓存 Jinja2 模板，每次修改 `index.html` 后需重启服务。�
 - 功能描述列使用 `function_desc`（不是 `remark`）
 - 产品图片嵌入预览中（v1.6.0 新增图片列）
 - 三行表头：公司名+客户信息行 → 黄色标题行 → 表头行
+- **备注移入表格内**：总价行下一行，9pt 左对齐固定文案（v2.2.0）
 
 #### Excel 导出
 - `GET /api/quotes/<id>/export-excel`
@@ -387,6 +389,8 @@ Gunicorn 缓存 Jinja2 模板，每次修改 `index.html` 后需重启服务。�
 - 产品图片嵌入第 12 列图片单元格内居中
 - 电话列包含在导出中
 - 每次导出递增 `download_count`
+- **文件名编码（v2.2.0）**：后端使用 ASCII 文件名 + `filename*=UTF-8` 编码，前端优先解析 `filename*`，避免 xlsx.xlsx 和双下划线问题
+- **文件名去重（v2.2.0）**：title 包含 client 时自动去重，避免公司名重复
 
 **邮件发送（v1.4.0）：**
 - `POST /api/quotes/<id>/send-email`，body: `{to_email, subject?, body?}`
@@ -517,7 +521,7 @@ sudo systemctl restart quote-system
 |------|------|
 | `function_desc` ≠ `remark` | 前者对客户可见（导出到报价单），后者仅内部可见 |
 | `sku` = `spec` | 始终同步 |
-| 搜索匹配字段 | `name` + `spec` + `supplier` + `function_desc` |
+| 搜索匹配字段 | `name` + `spec` + `supplier` + `function_desc`（拼音索引覆盖 name+spec） |
 | 中文搜索用 Enter | 不用 `oninput`，避免拼音干扰 |
 | 修改 Vue 组件 | `cd frontend && npm run build && sudo systemctl restart quote-system` |
 | 修改后端 Python | `sudo systemctl restart quote-system` |
@@ -534,3 +538,8 @@ sudo systemctl restart quote-system
 | 编辑报价毛利回退 | 缓存未命中时用后端 `item.profit` 而非 0 |
 | 系统设置存储 | `SystemSetting` key-value 表，API `admin/settings` |
 | UI 样式体系 | Token 变量 + `.page-header` + `.form-label-modern` + 上下布局 |
+| 产品创建人列 | ProductTable 显示创建人（v2.2.0） |
+| 普通用户可见admin产品 | products_bp 不再按 created_by 过滤（v2.2.0） |
+| 产品选择器上限 | 12 个产品（v2.2.0，原6） |
+| AI价格解析Pattern | 7种Pattern全面支持¥/元格式 + ID引用 + 价格回溯（v2.2.0） |
+| 导航栏点击刷新 | 当前页导航链接点击触发页面刷新（v2.2.0） |
