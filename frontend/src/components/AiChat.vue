@@ -452,11 +452,11 @@ onMounted(() => { loadHistory(); fetchModels() })
         💡 试试问我：
         <div class="d-flex flex-wrap justify-content-center gap-2 mt-2">
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
-            @click="sendMessage('20间会议室安装人数感应器')">20间会议室安装人数感应器</button>
+            @click="sendMessage('王总a公司一层楼10个会议室要会议展板和灯光联动')">王总a公司一层楼10个会议室要会议展板和灯光联动</button>
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
-            @click="sendMessage('推荐最便宜的网关')">推荐最便宜的网关</button>
+            @click="sendMessage('张经理创客空间项目200个共享工位要占用检测')">张经理创客空间项目200个共享工位要占用检测</button>
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
-            @click="sendMessage('比较星纵VS121和VS321')">比较星纵VS121和VS321</button>
+            @click="sendMessage('任总为华公司园区要能耗方案')">任总为华公司园区要能耗方案</button>
         </div>
       </div>
 
