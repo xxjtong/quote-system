@@ -491,6 +491,35 @@ def _parse_reply_actions(reply_text):
                 seen.add(norm)
                 result['products'].append({'name': name, 'price': price, 'product_id': pid})
 
+    # Pattern 7: 价格回溯 — 先找价格(¥/元)，再向上找最近的型号
+    # 处理"产品名（型号）— 品牌\n价格：¥N" 或 "价格：N元" 跨行格式
+    if len(result['products']) < 12:
+        for m in re.finditer(r'(?:价格[：:]\s*)?(?:¥|￥)\s*([\d,]+\.?\d*)|([\d,]+\.?\d*)\s*元', reply_text):
+            price_str = m.group(1) or m.group(2)
+            try: price = float(price_str.replace(',', ''))
+            except ValueError: continue
+            if price <= 0:
+                continue
+            # 向上回溯2行找型号
+            line_start = reply_text.rfind('\n', 0, m.start()) + 1
+            prev_line_end = line_start - 1
+            prev_line_start = reply_text.rfind('\n', 0, max(0, prev_line_end)) + 1
+            context = reply_text[prev_line_start:m.start()]
+            # 优先找中文括号内的型号: （AM319-470M-HCHO-IR）
+            name_m = re.search(r'[（(]([A-Z][A-Z0-9\-/]{2,30})[）)]', context)
+            if not name_m:
+                # 找星号包裹的型号: **LD-AQS** 或 **N. LD-AQS**
+                name_m = re.search(r'\*\*[\d.、]*\s*([A-Z][A-Z0-9\-/]{2,20})\s*\*\*', context)
+            if not name_m:
+                # 找行首型号: 型号 — 品牌
+                name_m = re.search(r'(?:^|[\s>：:])([A-Z][A-Z0-9\-/]{2,20})\s*[—\-]', context, re.MULTILINE)
+            if name_m:
+                name = name_m.group(1).strip()
+                norm = name.replace(' ', '')
+                if norm not in seen and len(name) >= 3:
+                    seen.add(norm)
+                    result['products'].append({'name': name, 'price': price})
+
     if not result['quick_replies'] and len(result['products']) >= 2:
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
             result['quick_replies'] = [p['name'] for p in result['products'][:6]]

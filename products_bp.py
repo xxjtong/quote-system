@@ -149,7 +149,9 @@ def list_products():
     if is_pinyin:
         q_lower = search.lower().strip()
         like = f'%{q_lower}%'
-        query = query.filter(Product.pinyin_search.like(like))
+        query = query.filter(
+            db.or_(Product.pinyin_search.like(like), Product.spec.ilike(like))
+        )
         query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
         total = query.count()
         products = query.offset((page - 1) * per_page).limit(per_page).all()
