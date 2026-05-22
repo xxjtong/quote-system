@@ -52,9 +52,14 @@ async function exportAll() {
     if (!r.ok) { toast('导出失败 (' + r.status + ')', 'danger'); return }
     const blob = await r.blob()
     const cd = r.headers.get('Content-Disposition') || ''
-    let fname = isAdmin.value ? '全部产品导出.xlsx' : '我的产品导出.xlsx'
-    const m = cd.match(/filename[^;=\n]*=["']?((?:[^"';\n]|\\")*)["']?/)
-    if (m && m[1]) fname = m[1].replace(/\\"/g, '')
+    let fname = 'products_export.xlsx'
+    const mStar = cd.match(/filename\*=UTF-8''(.+?)(?:;|$)/)
+    if (mStar && mStar[1]) {
+      fname = decodeURIComponent(mStar[1])
+    } else {
+      const m = cd.match(/filename="?([^";\n]+)"?/)
+      if (m && m[1] && m[1] !== '.xlsx') fname = m[1].replace(/\\"/g, '')
+    }
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = fname

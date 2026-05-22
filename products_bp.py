@@ -899,7 +899,7 @@ def export_all_products():
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    fname = '全部产品导出.xlsx' if is_admin else '我的产品导出.xlsx'
+    fname = 'products_export.xlsx' if is_admin else 'my_products_export.xlsx'
     return send_file(output, download_name=fname, as_attachment=True)
 
 

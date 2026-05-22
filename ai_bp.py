@@ -325,7 +325,22 @@ def _parse_reply_actions(reply_text):
             norm = name.replace(' ', '')
             if norm not in seen and len(name) >= 3:
                 seen.add(norm)
-                result['products'].append({'name': name, 'price': 0})
+                # 尝试从同一行或下一行查找价格
+                line_start = reply_text.rfind('\n', 0, m.start()) + 1
+                line_end = reply_text.find('\n', m.end())
+                context_line = reply_text[line_start:line_end] if line_end > 0 else reply_text[line_start:]
+                price_m = re.search(r'(?:¥|￥)\s*([\d,]+\.?\d*)', context_line)
+                price = 0
+                if price_m:
+                    try: price = float(price_m.group(1).replace(',', ''))
+                    except ValueError: pass
+                # 如果上下文没价格，尝试从已有产品列表查找
+                if price == 0:
+                    for existing in result['products']:
+                        if name in existing['name'] or existing['name'] in name:
+                            price = existing.get('price', 0)
+                            break
+                result['products'].append({'name': name, 'price': price})
 
     # Pattern 3: "产品名 N台/个 ¥价格" 或 "产品名 N台/个 × ¥价格"
     if len(result['products']) < 6:

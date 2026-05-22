@@ -673,6 +673,10 @@ def export_quote_excel(quote_id):
         date_str = datetime.now().strftime('%Y%m%d')
     parts = [quote.client, quote.title, quote.contact]
     name_body = '_'.join(p.strip() for p in parts if p and p.strip())
+    # 去重：如果 title 以 client 开头，去掉 client
+    if quote.client and quote.title and quote.title.startswith(quote.client.strip()):
+        parts = [quote.title, quote.contact]
+        name_body = '_'.join(p.strip() for p in parts if p and p.strip())
     dl_name = (name_body + '_' + date_str if name_body else date_str) + '.xlsx'
 
     # 记录下载日志

@@ -76,8 +76,16 @@ async function downloadQuote() {
     a.href = URL.createObjectURL(blob)
     // Use server Content-Disposition filename, or fallback to quote title
     const cd = r.headers.get('Content-Disposition') || ''
-    const m = cd.match(/filename[^;=\n]*=["']?((?:[^"';\n]|\\")*)["']?/)
-    a.download = (m && m[1]) ? m[1].replace(/\\"/g, '') : (props.quoteTitle || '报价单') + '.xlsx'
+    let fname = ''
+    // 优先解析 filename*=UTF-8'' （完整UTF-8编码文件名）
+    const mStar = cd.match(/filename\*=UTF-8''(.+?)(?:;|$)/)
+    if (mStar && mStar[1]) {
+      fname = decodeURIComponent(mStar[1])
+    } else {
+      const m = cd.match(/filename="?([^";\n]+)"?/)
+      if (m && m[1]) fname = m[1].replace(/\\"/g, '')
+    }
+    a.download = fname || (props.quoteTitle || '报价单') + '.xlsx'
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

@@ -251,12 +251,13 @@ onMounted(() => {
             <th>分类</th>
             <th>厂商</th>
             <th>销售单价</th>
+            <th>创建人</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="products.length === 0">
-            <td colspan="8">
+            <td colspan="9">
               <div class="empty-state">
                 <i class="bi bi-inbox"></i>
                 <p>暂无产品</p>
@@ -294,6 +295,7 @@ onMounted(() => {
             </td>
             <td class="td-name" style="max-width:100px">{{ p.supplier || '—' }}</td>
             <td class="text-end fw-medium">{{ formatMoney(p.price) }}</td>
+            <td class="small text-muted">{{ p.created_by_name || '系统' }}</td>
             <td v-if="isAdmin() || p.created_by === currentUser?.id">
               <div class="d-flex gap-1">
                 <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="$emit('edit', p)" title="编辑">
