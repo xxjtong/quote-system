@@ -14,7 +14,7 @@ from flask import Blueprint, request, jsonify, g, Response, send_file
 from sqlalchemy import func
 
 from extensions import db
-from models import Product, AIUsageLog
+from models import Product, AIUsageLog, User
 from auth import require_auth, require_admin
 
 from utils import _debug_log, _log_ai_usage, _safe_number, _compute_pinyin_search
@@ -134,10 +134,10 @@ def list_products():
     query = Product.query
     is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
     if not is_admin:
-        # 普通用户：只看管理员创建的(None) + 自己创建的
         uid = g.current_user.id if hasattr(g, 'current_user') and g.current_user else None
+        admin_ids = [u.id for u in User.query.filter_by(role='admin').all()]
         query = query.filter(
-            db.or_(Product.created_by.is_(None), Product.created_by == uid)
+            db.or_(Product.created_by.is_(None), Product.created_by.in_(admin_ids), Product.created_by == uid)
         )
     if category:
         query = query.filter(Product.category.ilike(f'%{category}%'))

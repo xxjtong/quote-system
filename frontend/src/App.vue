@@ -141,7 +141,7 @@ onMounted(async () => {
            class="nav-link"
            :class="{ active: route.name === tab.id }"
            :style="tab.adminOnly && !isAdmin() ? {display:'none'} : {}"
-           @click="router.push({name: tab.id})">
+           @click="route.name === tab.id ? router.go(0) : router.push({name: tab.id})">
           <i :class="tab.icon"></i> {{ tab.label }}
           <span v-if="tab.badge" class="badge" @click.stop="router.push({name:'newquote'})">{{ tab.badge }}</span>
         </a>
