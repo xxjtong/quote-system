@@ -852,7 +852,7 @@ def preview_quote_html(quote_id):
 .pv-table .total-row td:first-child{{border-left:1px solid #ccc}}
 .pv-table .total-row td:last-child{{border-right:1px solid #ccc}}
 .pv-table .total-amount{{font-size:10pt}}
-.pv-note{{font-size:10pt;padding:3px 8px;border:1px solid #ccc;border-top:none}}
+.pv-note{{font-size:9pt;padding:3px 8px;border:1px solid #ccc;border-top:none}}
 </style>
 <div style="overflow-x:auto">
 <table class="pv-table">

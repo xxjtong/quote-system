@@ -509,15 +509,10 @@ def _ai_chat_sse(body, t0, user_id=None):
     """SSE 流式 — 透传 Gateway stream，前端 EventSource 接收"""
     import time, urllib.request, json as _json
 
-    # 在 generator 外部提前记录使用（确保写入），SSE 结束后更新 elapsed
-    _usage_logged = {'done': False}
-
-    def _ensure_log(success=True, error='', elapsed=0):
-        if not _usage_logged['done']:
-            _usage_logged['done'] = True
-            from utils import _log_ai_usage
-            _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''),
-                          elapsed=elapsed, success=success, error=error[:200] if error else '')
+    # 在 generator 外部（请求上下文内）立即记录使用 — 确保写入
+    from utils import _log_ai_usage
+    _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''),
+                  elapsed=0, success=True, error='')
 
     def generate():
         t_connect = time.time()
@@ -564,8 +559,6 @@ def _ai_chat_sse(body, t0, user_id=None):
                     yield f'data: {_json.dumps({"type": "tool"})}\n\n'
 
             parsed = _parse_reply_actions(accumulated)
-            _ensure_log(success=True, elapsed=time.time()-t0)
-            # 先发 done（含规则提取的 quick_replies），不阻塞等 LLM
             yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
             # 异步：如果规则没提取到 quick_replies，用 LLM 生成后补发
             if not parsed.get('quick_replies'):
@@ -577,13 +570,9 @@ def _ai_chat_sse(body, t0, user_id=None):
                     pass
 
         except Exception as e:
-            _ensure_log(success=False, error=str(e), elapsed=time.time()-t0)
             yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
 
-        finally:
-            # 兜底：如果 try 和 except 都没记录，在这里确保记录
-            _ensure_log(success=False, error='stream_interrupted', elapsed=time.time()-t0)
-            yield f'data: [DONE]\n\n'
+        yield f'data: [DONE]\n\n'
 
     return Response(
         generate(),
