@@ -297,6 +297,10 @@ def _parse_reply_actions(reply_text):
                 result['quick_replies'] = replies
                 break
 
+    # 价格匹配通用前缀：¥ ￥ 或 数字前的"元"后缀
+    _PRICE_RE = r'(?:¥|￥)\s*([\d,]+\.?\d*)'   # ¥1,500 or ¥1500.00
+    _PRICE_YUAN = r'([\d,]+\.?\d*)\s*元'         # 1500元 or 1,500.00元
+
     prod_pattern1 = re.findall(
         r'(?:\d+[.、．]\s*)?([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-+ ]{3,50}?)[ ]+[-–—][ ]+(?:¥|￥|[Rr][Mm][Bb])?\s*([\d,]+\.?\d*)',
         reply_text
@@ -318,18 +322,46 @@ def _parse_reply_actions(reply_text):
         except ValueError:
             pass
 
+    # Pattern 1b: 型号（描述） N元/台 或 N元/个 — "WA1058T（易乐看） 1500元/台"
+    if len(result['products']) < 12:
+        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})[（(][^）)]*[）)]\s*([\d,]+\.?\d*)\s*元', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3:
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': name, 'price': 0})
+
+    # Pattern 1c: "中文名 型号 N元/台" — "威思客10寸会议屏 M101A07A 3300元/台"
+    if len(result['products']) < 12:
+        for m in re.finditer(r'([\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9\- ]{2,30}?)\s+([A-Z][A-Z0-9\-/]{2,20})\s+([\d,]+\.?\d*)\s*元', reply_text):
+            full_name = m.group(2).strip()  # 用型号做产品名
+            price_str = m.group(3)
+            norm = full_name.replace(' ', '')
+            if norm not in seen and len(full_name) >= 3:
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': full_name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': full_name, 'price': 0})
+
     # Pattern 2: 产品型号（描述）—— 方案行中的产品名
-    if len(result['products']) < 6:
+    if len(result['products']) < 12:
         for m in re.finditer(r'(?:^|[\s>：:）)])\s*([A-Z][A-Z0-9\-/]{2,20})[（(]', reply_text, re.MULTILINE):
             name = m.group(1).strip()
             norm = name.replace(' ', '')
             if norm not in seen and len(name) >= 3:
                 seen.add(norm)
-                # 尝试从同一行或下一行查找价格
+                # 尝试从同一行或下一行查找价格（支持 ¥ 和 元）
                 line_start = reply_text.rfind('\n', 0, m.start()) + 1
                 line_end = reply_text.find('\n', m.end())
                 context_line = reply_text[line_start:line_end] if line_end > 0 else reply_text[line_start:]
                 price_m = re.search(r'(?:¥|￥)\s*([\d,]+\.?\d*)', context_line)
+                if not price_m:
+                    price_m = re.search(r'([\d,]+\.?\d*)\s*元', context_line)
                 price = 0
                 if price_m:
                     try: price = float(price_m.group(1).replace(',', ''))
@@ -342,8 +374,8 @@ def _parse_reply_actions(reply_text):
                             break
                 result['products'].append({'name': name, 'price': price})
 
-    # Pattern 3: "产品名 N台/个 ¥价格" 或 "产品名 N台/个 × ¥价格"
-    if len(result['products']) < 6:
+    # Pattern 3: "产品名 N台/个 ¥价格" 或 "产品名 N台/个 × ¥价格" (同时支持元)
+    if len(result['products']) < 12:
         for m in re.finditer(r'([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\- ]{2,30}?)\s*\d+\s*[台个只套件]\s*[×x]?\s*(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
             name = m.group(1).strip()
             price_str = m.group(2)
@@ -355,8 +387,21 @@ def _parse_reply_actions(reply_text):
                 except ValueError:
                     result['products'].append({'name': name, 'price': 0})
 
+    # Pattern 3b: "产品名 N台/个 N元" — "展板：WA1058T ×10台 = 15,000元"
+    if len(result['products']) < 12:
+        for m in re.finditer(r'([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\- ]{2,30}?)\s*[×x]\s*\d+\s*[台个只套件路]\s*=\s*([\d,]+\.?\d*)\s*元', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3:
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': name, 'price': 0})
+
     # Pattern 4: 型号 + ¥价格 紧凑格式（如 "UG63 ¥990"）
-    if len(result['products']) < 6:
+    if len(result['products']) < 12:
         for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})\s+(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
             name = m.group(1).strip()
             price_str = m.group(2)
@@ -368,8 +413,36 @@ def _parse_reply_actions(reply_text):
                 except ValueError:
                     result['products'].append({'name': name, 'price': 0})
 
+    # Pattern 4b: 型号 + N元 — "WS558-470M 607.5元"
+    if len(result['products']) < 12:
+        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})\s+([\d,]+\.?\d*)\s*元', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3:
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': name, 'price': 0})
+
+    # Pattern 4c: 型号 品牌 N元/个 — "WS202-470M 星纵 270元/个"
+    # 过滤纯品牌短词：BOE, AOC, HIS 等
+    _brand_blacklist = {'BOE', 'AOC', 'HIS', 'LED', 'OEM', 'SDK', 'API'}
+    if len(result['products']) < 12:
+        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})\s+[\u4e00-\u9fffA-Za-z]{1,10}\s+([\d,]+\.?\d*)\s*元', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3 and name not in _brand_blacklist:
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': name, 'price': 0})
+
     # Pattern 5: markdown 表格行 | 型号 | ¥价格 | 或 | 产品名 | 型号 | ¥价格 |
-    if len(result['products']) < 6:
+    if len(result['products']) < 12:
         for m in re.finditer(r'\|\s*([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-/ ]{2,50}?)\s*\|\s*(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
             name = m.group(1).strip()
             price_str = m.group(2)
