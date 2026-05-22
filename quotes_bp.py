@@ -671,7 +671,9 @@ def export_quote_excel(quote_id):
         date_str = download_date
     else:
         date_str = datetime.now().strftime('%Y%m%d')
-    dl_name = f'{quote.client or ""}_{quote.title or ""}_{quote.contact or ""}_{date_str}'.strip('_').replace(' ','') + '.xlsx'
+    parts = [quote.client, quote.title, quote.contact]
+    name_body = '_'.join(p.strip() for p in parts if p and p.strip())
+    dl_name = (name_body + '_' + date_str if name_body else date_str) + '.xlsx'
 
     # 记录下载日志
     user_name = g.current_user.username if hasattr(g, 'current_user') and g.current_user else request.args.get('user_name', '').strip()
@@ -723,7 +725,9 @@ def send_quote_email(quote_id):
         part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         part.set_payload(f.read())
         encoders.encode_base64(part)
-        part.add_header('Content-Disposition', 'attachment', filename=f'{quote.client or ""}_{quote.title or ""}.xlsx')
+        email_parts = [p.strip() for p in [quote.client, quote.title] if p and p.strip()]
+        email_name = '_'.join(email_parts) + '.xlsx' if email_parts else '报价单.xlsx'
+        part.add_header('Content-Disposition', 'attachment', filename=email_name)
         msg.attach(part)
     try:
         if smtp_use_tls:

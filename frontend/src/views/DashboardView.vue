@@ -16,7 +16,7 @@ const loading = ref(true)
 
 async function fetchDashboard() {
   try {
-    const [p, q, ai] = await Promise.all([api('/api/products?per_page=1'), api('/api/quotes'), api('/api/ai/my-usage').catch(() => ({my_count:0,total_count:0}))])
+    const [p, q, ai] = await Promise.all([api('/api/products?per_page=1'), api('/api/quotes'), api('/api/ai/my-usage?t=' + Date.now()).catch(() => ({my_count:0,total_count:0}))])
     const quotes = q.quotes || []
     stats.value = {
       prodCount: p.total || 0, quoteCount: quotes.length,
