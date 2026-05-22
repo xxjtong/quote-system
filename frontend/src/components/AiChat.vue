@@ -465,7 +465,7 @@ onMounted(() => { loadHistory(); fetchModels() })
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
             @click="sendMessage('张经理创客空间项目200个共享工位要占用检测')">张经理创客空间项目200个共享工位要占用检测</button>
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
-            @click="sendMessage('任总为华公司园区要能耗方案')">任总为华公司园区要能耗方案</button>
+            @click="sendMessage('华为的任总需要园区能耗分析方案')">华为的任总需要园区能耗分析方案</button>
         </div>
       </div>
 
