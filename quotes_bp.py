@@ -781,8 +781,6 @@ def preview_quote_html(quote_id):
         return _html.escape(str(s)) if s else ''
 
     info_parts = []
-    company = _get_setting('company_name', '').strip()
-    if company: info_parts.append(f'公司：{e(company)}')
     if quote.client: info_parts.append(f'客户：{e(quote.client)}')
     if quote.contact: info_parts.append(f'联系人：{e(quote.contact)}')
     if quote.phone: info_parts.append(f'电话：{e(quote.phone)}')
@@ -822,7 +820,7 @@ def preview_quote_html(quote_id):
         items_html += f'''
         <tr>
             <td>{i}</td>
-            <td><strong>{e(item.product_name)}</strong></td>
+            <td>{e(item.product_name)}</td>
             <td>{e(item.product_spec or '')}</td>
             <td>{e(item.product_sku or supplier_sku)}</td>
             <td>{e(prod_function_desc or '')}</td>

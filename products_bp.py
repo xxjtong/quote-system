@@ -836,12 +836,10 @@ def export_all_products():
     is_admin = g.current_user.role == 'admin'
     uid = g.current_user.id
 
-    # 权限过滤：普通用户只导出管理员创建的(None) + 自己创建的
+    # 权限过滤：普通用户只导出自己创建的产品
     query = Product.query
     if not is_admin:
-        query = query.filter(
-            db.or_(Product.created_by.is_(None), Product.created_by == uid)
-        )
+        query = query.filter(Product.created_by == uid)
     products = query.order_by(Product.id.asc()).all()
 
     wb = openpyxl.Workbook()

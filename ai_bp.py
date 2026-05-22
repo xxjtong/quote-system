@@ -109,7 +109,7 @@ _GW_SYSTEM_PROMPT = (
     '  报价单 quotes(id, title, client, contact, phone, quote_date, valid_days, status, total_amount, created_by)\n'
     '  报价明细 quote_items(id, quote_id, product_id, product_name, product_sku, quantity, unit_price, amount)\n'
     '- API：[内部服务]\n'
-    '  创建报价：POST /api/quotes\n'
+    '  查询报价单：GET /api/quotes?per_page=50\n'
     '  导出Excel：GET /api/quotes/<id>/export-excel\n\n'
     '=== 严格权限规则 ===\n'
     '1. 只能查看/操作当前用户自己的报价单（created_by=当前用户ID），绝不查看他人报价单。\n'
@@ -117,21 +117,23 @@ _GW_SYSTEM_PROMPT = (
     '3. 禁止执行任何导出操作（产品导出、批量导出等），报价单Excel导出除外。\n'
     '4. 禁止删除或修改产品数据，只能查询和推荐。\n'
     '5. 禁止修改系统设置、用户管理、字段配置等管理操作。\n'
-    '6. 只推荐 is_active=1 的在线产品，绝不推荐已下线产品。\n\n'
+    '6. 只推荐 is_active=1 的在线产品，绝不推荐已下线产品。\n'
+    '7. 禁止用curl POST创建报价单（太慢，会超时）。创建报价单必须通过quick_replies引导用户点击前端按钮跳转。\n\n'
     '=== 业务范围 ===\n'
     '- 产品查询：搜索产品、对比产品、推荐选型、查看参数/价格/供应商\n'
-    '- 报价单：查看自己的报价单列表、创建报价单、预览、导出Excel\n'
+    '- 报价单：查看自己的报价单列表、预览、导出Excel。创建报价单通过quick_replies引导用户操作\n'
     '- 超出范围的请求（闲聊、写代码、翻译、查天气等）一律拒绝，提示"我只能处理产品和报价相关问题"\n\n'
     '=== 报价单规则 ===\n'
     '1. 查询报价单用 curl 调 API（自动按用户权限过滤）：\n'
     '   curl -s -H "Authorization: Bearer *** [内部服务]/api/quotes?per_page=50\n'
     '   如果必须用 sqlite3，务必加 AND created_by=<当前用户ID>。\n'
     '2. 排除测试数据：标题含「测试」「test」「sdf」「asdf」或客户名含「pro报价测试」「qhk」「qwe」要跳过。\n'
-    '3. 生成报价单前，先检查上下文：如已创建过报价单，主动询问沿用还是新客户。\n'
+    '3. 创建报价单：不要用curl POST /api/quotes（太慢会超时）。改用quick_replies引导用户点击前端按钮跳转到新建报价单页面，产品ID通过product参数传递。\n'
     '4. 导出后给下载链接：https://bwh.ddns.mobi/quote/api/quotes/{id}/export-excel\n'
     '5. 每个用户的对话完全独立，不使用/查询全局记忆。\n'
-    '6. 产品搜索务必加 AND is_active=1：\n'
-    '   "SELECT name,price FROM products WHERE name LIKE \'%关键词%\' AND is_active=1 ORDER BY price"\n'
+    '6. 产品搜索务必加 AND is_active=1，且必须包含price字段：\n'
+    '   "SELECT name,price,cost_price,supplier FROM products WHERE name LIKE \'%关键词%\' AND is_active=1 ORDER BY price"\n'
+    '7. 展示产品信息时，始终显示单价(price)字段。如果price为0或null，显示成本价(cost_price)。\n'
 )
 
 
@@ -492,6 +494,16 @@ def _ai_chat_sse(body, t0, user_id=None):
     """SSE 流式 — 透传 Gateway stream，前端 EventSource 接收"""
     import time, urllib.request, json as _json
 
+    # 在 generator 外部提前记录使用（确保写入），SSE 结束后更新 elapsed
+    _usage_logged = {'done': False}
+
+    def _ensure_log(success=True, error='', elapsed=0):
+        if not _usage_logged['done']:
+            _usage_logged['done'] = True
+            from utils import _log_ai_usage
+            _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''),
+                          elapsed=elapsed, success=success, error=error[:200] if error else '')
+
     def generate():
         t_connect = time.time()
         accumulated = ''
@@ -537,8 +549,7 @@ def _ai_chat_sse(body, t0, user_id=None):
                     yield f'data: {_json.dumps({"type": "tool"})}\n\n'
 
             parsed = _parse_reply_actions(accumulated)
-            from utils import _log_ai_usage
-            _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0)
+            _ensure_log(success=True, elapsed=time.time()-t0)
             # 先发 done（含规则提取的 quick_replies），不阻塞等 LLM
             yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
             # 异步：如果规则没提取到 quick_replies，用 LLM 生成后补发
@@ -551,11 +562,13 @@ def _ai_chat_sse(body, t0, user_id=None):
                     pass
 
         except Exception as e:
-            from utils import _log_ai_usage
-            _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0, success=False, error=str(e)[:200])
+            _ensure_log(success=False, error=str(e), elapsed=time.time()-t0)
             yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
 
-        yield f'data: [DONE]\n\n'
+        finally:
+            # 兜底：如果 try 和 except 都没记录，在这里确保记录
+            _ensure_log(success=False, error='stream_interrupted', elapsed=time.time()-t0)
+            yield f'data: [DONE]\n\n'
 
     return Response(
         generate(),
