@@ -4,7 +4,7 @@ import { useApi, BASE_URL } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
 import QuotePreviewModal from './QuotePreviewModal.vue'
 
-const emit = defineEmits(['navigate', 'create-quote'])
+const emit = defineEmits(['navigate', 'create-quote', 'chat-completed'])
 
 const { api, authToken } = useApi()
 const toast = inject('toast')
@@ -222,6 +222,7 @@ async function sendMessage(textOverride) {
             chatMessages.value[msgIndex].parsed = data.parsed
             chatMessages.value[msgIndex].elapsed = parseFloat(data.elapsed) || elapsedSeconds.value
             currentPhase.value = phases.length - 1
+            emit('chat-completed')
           } else if (data.type === 'quick_replies') {
             // LLM 异步补发的 quick_replies，追加到 parsed
             if (data.items?.length && chatMessages.value[msgIndex]?.parsed) {

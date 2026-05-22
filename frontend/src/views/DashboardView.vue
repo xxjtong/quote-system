@@ -117,7 +117,7 @@ onMounted(() => { fetchDashboard() })
     </div>
 
     <!-- AI Chat (extracted component) -->
-    <AiChat @navigate="onAiChatNavigate" @create-quote="onAiChatCreateQuote" />
+    <AiChat @navigate="onAiChatNavigate" @create-quote="onAiChatCreateQuote" @chat-completed="fetchDashboard" />
 
     <!-- Recent Quotes -->
     <div class="card-modern anim-in">
