@@ -461,7 +461,7 @@ onMounted(() => { loadHistory(); fetchModels() })
         💡 试试问我：
         <div class="d-flex flex-wrap justify-content-center gap-2 mt-2">
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
-            @click="sendMessage('王总a公司一层楼10个会议室要会议展板和灯光联动')">王总a公司一层楼10个会议室要会议展板和灯光联动</button>
+            @click="sendMessage('甲醛空气质量检测仪')">甲醛空气质量检测仪</button>
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
             @click="sendMessage('张经理创客空间项目200个共享工位要占用检测')">张经理创客空间项目200个共享工位要占用检测</button>
           <button class="btn btn-outline-light btn-sm" style="font-size:.78rem;color:var(--primary);border-color:var(--primary)"
