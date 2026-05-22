@@ -1,5 +1,39 @@
 # 更新日志
 
+## v2.1.0 (2026-05-22)
+### 🏗️ 架构重构 v2.1 — Blueprint 拆分 + 安全修复 + 组件化
+
+**P0 安全/运维修复：**
+- XSS 修复：`renderTable` 使用 `escHtml` 转义
+- 管理员密码脱硬编码：空值 → 随机生成写入 `.admin_password`
+- AI prompt 脱敏：系统路径/内部服务替换为 `[系统路径]/[内部服务]`
+- SQLite 备份 crontab 03:00 UTC（Python `sqlite3.backup()`）
+- logrotate crontab 03:15 UTC
+
+**P1-1: 12 个重复函数提取：**
+- 新建 `utils.py`（64 行）：`_debug_log`, `_log_ai_usage`, `_safe_number`, `_compute_pinyin_search`
+- 新建 `product_utils.py`（516 行）：8 个识别/图片/解析/压缩函数
+- app.py 净减 ~500 行，products_bp.py 净减 ~500 行
+
+**P1-2: import_products 拆分（CC=83 → 6 个子函数，各 CC<15）：**
+- `_FIELD_MAP` + `_find_col`、`_parse_excel_header`、`_detect_supplier_col`、`_extract_embedded_image`、`_process_import_row`、`_import_all_sheets`
+
+**P1-3: Flask-Migrate 替代手动 ALTER TABLE：**
+- `Migrate(app, db)` 初始化 + migrations/ 目录
+- 过渡期保留 `_auto_migrate_columns` 兜底
+
+**P1-4: 前端巨型组件拆分：**
+- ProductsView 981→110 行 → 4 子组件：ProductTable(350) + ProductFormModal(302) + SmartRecognition(292) + ProductDetailModal(71)
+- DashboardView 765→138 行 → 1 子组件：AiChat(660)
+
+**P1-5~8: 短期改进：**
+- BASE_URL 提取到 useApi.js 统一导出（消除 8 处重复）
+- 裸 fetch 统一为 api() 封装，localStorage.getItem→authToken.value
+- 拼音搜索删除死代码回退路径，移除回填 limit 500
+- AI 速率限制从进程级变量改为 DB 查询（AIUsageLog，多 worker 共享）
+
+**依赖：** requirements.txt 新增 `flask-migrate>=4.0`
+
 ## v1.7.9 (2026-05-21)
 ### 📝 文档全面更新 + 测试增强
 - **全量文档同步**：README、REQUIREMENTS、TEST_REPORT、tests/README 全部更新至当前 API 196 项测试覆盖
