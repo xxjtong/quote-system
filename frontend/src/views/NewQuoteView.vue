@@ -12,6 +12,7 @@ const { api } = useApi()
 const editId = ref(route.query.edit || null)
 const autoProduct = ref(route.query.product ? decodeURIComponent(route.query.product) : '')
 const autoProducts = ref(route.query.products ? decodeURIComponent(route.query.products).split(',').filter(Boolean) : [])
+const autoProductIds = ref(route.query.product_ids ? route.query.product_ids.split(',').filter(Boolean).map(Number) : [])
 const isEditing = computed(() => !!editId.value)
 
 // ─── Form state ───
@@ -201,9 +202,36 @@ async function saveQuote() {
 
 onMounted(() => {
   loadQuote()
-  if (autoProducts.value.length > 0) autoAddProducts()
+  if (autoProductIds.value.length > 0) autoAddProductsById()
+  else if (autoProducts.value.length > 0) autoAddProducts()
   else if (autoProduct.value) autoAddProduct()
 })
+
+// 通过产品ID直接添加（AI对话用ID=引用时最可靠）
+async function autoAddProductsById() {
+  const ids = autoProductIds.value
+  let added = 0
+  for (const pid of ids) {
+    try {
+      const data = await api(`/api/products/${pid}`)
+      if (data.error || !data.id) continue
+      const existing = items.find(i => i.product_id === data.id)
+      if (existing) continue
+      items.push({
+        product_id: data.id, name: data.name, spec: data.spec || '',
+        unit: data.unit || '', price: data.price || 0,
+        quantity: 1, discount: 100, remark: '',
+      })
+      added++
+    } catch {}
+  }
+  if (added > 0) {
+    form.title = form.title || '报价单'
+    toast(`已添加 ${added} 个产品`)
+  } else {
+    toast('未找到匹配产品，请手动添加', 'warning')
+  }
+}
 
 async function autoAddProduct() {
   // Search for products matching the name from AI chat

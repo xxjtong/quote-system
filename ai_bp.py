@@ -287,9 +287,10 @@ def _parse_reply_actions(reply_text):
 
     # 检测多方案选择（"方案A/方案B/方案C"）并自动生成快捷按钮
     if not result['quick_replies']:
-        scheme_re = re.findall(r'方案([A-Z])[：:）)]\s*(.{2,30}?)(?:[（(]|$)', reply_text, re.MULTILINE)
+        scheme_re = re.findall(r'方案([A-Z])[：:）)（(]\s*(.{2,30}?)[）)]?(?:[（(]|$)', reply_text, re.MULTILINE)
         if len(scheme_re) >= 2:
-            result['quick_replies'] = [f'方案{letter}（{desc.strip()}）' for letter, desc in scheme_re]
+            descs = [desc.strip().rstrip('）)') for _, desc in scheme_re]
+            result['quick_replies'] = [f'方案{letter}（{desc}）' for (letter, _), desc in zip(scheme_re, descs)]
 
     if not result['quick_replies']:
         for pat, replies in question_patterns:
@@ -466,6 +467,29 @@ def _parse_reply_actions(reply_text):
                 if price > 0:
                     seen.add(norm)
                     result['products'].append({'name': name, 'price': price})
+
+    # Pattern 6: (ID=N) 产品ID引用 — AI明确引用产品库ID，最可靠
+    if len(result['products']) < 12:
+        for m in re.finditer(r'([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-/ ]{2,40}?)\s*\(ID=(\d+)\)', reply_text):
+            name = m.group(1).strip()
+            pid = int(m.group(2))
+            # 提取行内+下一行价格
+            line_start = reply_text.rfind('\n', 0, m.start()) + 1
+            line_end = reply_text.find('\n', m.end())
+            next_line_end = reply_text.find('\n', line_end + 1) if line_end > 0 else len(reply_text)
+            context = reply_text[line_start:next_line_end] if next_line_end > line_start else reply_text[line_start:]
+            price = 0
+            price_m = re.search(r'(?:¥|￥)\s*([\d,]+\.?\d*)', context)
+            if not price_m:
+                price_m = re.search(r'([\d,]+\.?\d*)\s*元', context)
+            if price_m:
+                try: price = float(price_m.group(1).replace(',', ''))
+                except ValueError: pass
+            # 价格可能是总价(如¥33,000)，而非单价。如果有product_id，优先用DB价格
+            norm = f'id:{pid}'
+            if norm not in seen:
+                seen.add(norm)
+                result['products'].append({'name': name, 'price': price, 'product_id': pid})
 
     if not result['quick_replies'] and len(result['products']) >= 2:
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):

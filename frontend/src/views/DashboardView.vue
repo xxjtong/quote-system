@@ -46,7 +46,10 @@ function onAiChatCreateQuote(payload) {
   if (payload.type === 'single') {
     router.push({ name: 'newquote', query: { product: payload.product } })
   } else if (payload.type === 'multi') {
-    router.push({ name: 'newquote', query: { products: payload.products.join(',') } })
+    const query = {}
+    if (payload.product_ids) query.product_ids = payload.product_ids
+    if (payload.products) query.products = payload.products
+    router.push({ name: 'newquote', query })
   }
 }
 

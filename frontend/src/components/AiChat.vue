@@ -295,8 +295,17 @@ async function createQuoteFromProduct(productName) {
 }
 
 function createQuoteFromProducts(products) {
-  const names = (products || []).map(p => p.name).filter(Boolean)
-  emit('create-quote', { type: 'multi', products: names })
+  // 优先传递 product_id（AI用ID=引用时最可靠），否则传 name
+  const ids = (products || []).filter(p => p.product_id).map(p => p.product_id)
+  const names = (products || []).filter(p => !p.product_id).map(p => p.name).filter(Boolean)
+  const query = {}
+  if (ids.length > 0) query.product_ids = ids.join(',')
+  if (names.length > 0) query.products = names.join(',')
+  if (Object.keys(query).length === 0 && products?.length > 0) {
+    // fallback: 全部用name
+    query.products = (products || []).map(p => p.name).filter(Boolean).join(',')
+  }
+  emit('create-quote', { type: 'multi', ...query })
 }
 
 // Handle quick reply button
