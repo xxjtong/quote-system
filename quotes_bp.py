@@ -886,7 +886,7 @@ def preview_quote_html(quote_id):
       <td class="total-amount">¥{fmt(quote.total_amount or 0)}</td>
     </tr>
     <tr>
-      <td colspan="13" style="font-size:9pt;padding:3px 2px;border:1px solid #ccc;border-top:none;text-align:left">{e(quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。')}</td>
+      <td colspan="13" style="font-size:9pt;padding:3px 2px;border:1px solid #ccc;border-top:none;text-align:left">注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。</td>
     </tr>
   </tfoot>
 </table>
