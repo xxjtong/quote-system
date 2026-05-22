@@ -852,7 +852,6 @@ def preview_quote_html(quote_id):
 .pv-table .total-row td:first-child{{border-left:1px solid #ccc}}
 .pv-table .total-row td:last-child{{border-right:1px solid #ccc}}
 .pv-table .total-amount{{font-size:10pt}}
-.pv-note{{font-size:9pt;padding:3px 8px;border:1px solid #ccc;border-top:none}}
 </style>
 <div style="overflow-x:auto">
 <table class="pv-table">
@@ -886,8 +885,10 @@ def preview_quote_html(quote_id):
       <td colspan="11" style="text-align:right">合计（大写）：<strong>{number_to_cn(quote.total_amount or 0)}</strong></td>
       <td class="total-amount">¥{fmt(quote.total_amount or 0)}</td>
     </tr>
+    <tr>
+      <td colspan="13" style="font-size:9pt;padding:3px 2px;border:1px solid #ccc;border-top:none">{e(quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。')}</td>
+    </tr>
   </tfoot>
 </table>
-</div>
-<div class="pv-note">{e(quote.remark or '注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。')}</div>'''
+</div>'''
     return html
