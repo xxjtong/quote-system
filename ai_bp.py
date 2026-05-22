@@ -368,6 +368,32 @@ def _parse_reply_actions(reply_text):
                 except ValueError:
                     result['products'].append({'name': name, 'price': 0})
 
+    # Pattern 5: markdown 表格行 | 型号 | ¥价格 | 或 | 产品名 | 型号 | ¥价格 |
+    if len(result['products']) < 6:
+        for m in re.finditer(r'\|\s*([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-/ ]{2,50}?)\s*\|\s*(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3 and not re.match(r'^[\d\-#]+$', name):
+                seen.add(norm)
+                try:
+                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
+                except ValueError:
+                    result['products'].append({'name': name, 'price': 0})
+        # 也匹配 | 型号 | ¥价格 | 格式（型号在单独列）
+        for m in re.finditer(r'\|\s*([A-Z][A-Z0-9\-/]{2,20})\s*\|\s*(?:¥|￥)?\s*([\d,]+\.?\d*)', reply_text):
+            name = m.group(1).strip()
+            price_str = m.group(2)
+            norm = name.replace(' ', '')
+            if norm not in seen and len(name) >= 3:
+                try:
+                    price = float(price_str.replace(',', ''))
+                except ValueError:
+                    price = 0
+                if price > 0:
+                    seen.add(norm)
+                    result['products'].append({'name': name, 'price': price})
+
     if not result['quick_replies'] and len(result['products']) >= 2:
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
             result['quick_replies'] = [p['name'] for p in result['products'][:6]]
