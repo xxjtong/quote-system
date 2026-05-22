@@ -825,6 +825,86 @@ def _import_all_sheets(wb):
     return imported, errors
 
 
+@products_bp.route('/export-all', methods=['GET'])
+@require_auth
+def export_all_products():
+    """导出全部产品为 Excel（按模板格式，管理员增加创建者列）"""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.utils import get_column_letter
+
+    is_admin = g.current_user.role == 'admin'
+    uid = g.current_user.id
+
+    # 权限过滤：普通用户只导出管理员创建的(None) + 自己创建的
+    query = Product.query
+    if not is_admin:
+        query = query.filter(
+            db.or_(Product.created_by.is_(None), Product.created_by == uid)
+        )
+    products = query.order_by(Product.id.asc()).all()
+
+    wb = openpyxl.Workbook()
+    # 按 category 分 Sheet，未分类放「未分类」
+    sheet_map = {}
+    for p in products:
+        cats = [c.strip() for c in (p.category or '').split(',') if c.strip()] or ['未分类']
+        for cat in cats:
+            if cat not in sheet_map:
+                sheet_map[cat] = []
+            sheet_map[cat].append(p)
+
+    header_font = Font(bold=True, size=11)
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    data_align = Alignment(vertical='center', wrap_text=True)
+
+    for sheet_name, prods in sheet_map.items():
+        ws = wb.create_sheet(title=sheet_name[:31])
+        headers = ['产品名称', '规格型号', '功能描述', '备注', '供应商', '单价', '成本价', '单位']
+        if is_admin:
+            headers.append('创建者')
+        ws.append(headers)
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=col)
+            cell.font = header_font
+            cell.alignment = center_align
+        widths = [20, 25, 30, 20, 15, 10, 10, 8]
+        if is_admin:
+            widths.append(10)
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        for p in prods:
+            row_data = [
+                p.name or '',
+                p.spec or '',
+                p.function_desc or '',
+                p.remark or '',
+                p.supplier or '',
+                p.price or 0,
+                p.cost_price or 0,
+                p.unit or '',
+            ]
+            if is_admin:
+                creator = ''
+                if p.created_by:
+                    from models import User
+                    u = db.session.get(User, p.created_by)
+                    creator = u.username if u else str(p.created_by)
+                row_data.append(creator)
+            ws.append(row_data)
+
+    # 删除默认空 Sheet
+    if 'Sheet' in wb.sheetnames and len(wb.sheetnames) > 1:
+        del wb['Sheet']
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    fname = '全部产品导出.xlsx' if is_admin else '我的产品导出.xlsx'
+    return send_file(output, download_name=fname, as_attachment=True)
+
+
 @products_bp.route('/export-template', methods=['GET'])
 def export_product_template():
     """下载原始报价规格库模板（包含所有分类Sheet）"""

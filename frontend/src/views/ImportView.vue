@@ -1,13 +1,16 @@
 <script setup>
-import { ref, inject, onMounted } from 'vue'
+import { ref, inject, computed } from 'vue'
 import { useApi, BASE_URL } from '../composables/useApi'
 
 const toast = inject('toast')
-const { api, authToken } = useApi()
+const { api, authToken, isAdmin } = useApi()
 
 const uploading = ref(false)
+const exporting = ref(false)
 const result = ref(null)
 const fileInput = ref(null)
+
+const exportLabel = computed(() => isAdmin.value ? '导出全部产品' : '导出我的产品')
 
 async function handleFile(e) {
   const file = e.target.files?.[0]
@@ -38,15 +41,49 @@ function exportTemplate() {
   a.click()
   document.body.removeChild(a)
 }
+
+async function exportAll() {
+  exporting.value = true
+  try {
+    const token = authToken.value
+    const r = await fetch(BASE_URL + '/api/products/export-all', {
+      headers: { Authorization: 'Bearer ' + token }
+    })
+    if (!r.ok) { toast('导出失败 (' + r.status + ')', 'danger'); return }
+    const blob = await r.blob()
+    const cd = r.headers.get('Content-Disposition') || ''
+    let fname = isAdmin.value ? '全部产品导出.xlsx' : '我的产品导出.xlsx'
+    const m = cd.match(/filename[^;=\n]*=["']?((?:[^"';\n]|\\")*)["']?/)
+    if (m && m[1]) fname = m[1].replace(/\\"/g, '')
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = fname
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(a.href)
+    toast('导出成功')
+  } catch (err) {
+    toast('导出失败', 'danger')
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
   <div>
     <div class="page-header">
-      <h5><i class="bi bi-upload"></i>导入产品</h5>
-      <button class="btn btn-outline-primary btn-modern" @click="exportTemplate">
-        <i class="bi bi-download"></i> 下载模板
-      </button>
+      <h5><i class="bi bi-arrow-left-right"></i> 导入 / 导出产品</h5>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline-primary btn-modern" @click="exportTemplate">
+          <i class="bi bi-download"></i> 下载模板
+        </button>
+        <button class="btn btn-success btn-modern" @click="exportAll" :disabled="exporting">
+          <span v-if="exporting" class="spinner-border spinner-border-sm me-1"></span>
+          <i v-else class="bi bi-box-arrow-down me-1"></i>{{ exportLabel }}
+        </button>
+      </div>
     </div>
 
     <div class="card-modern">
