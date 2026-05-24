@@ -232,7 +232,7 @@ sudo systemctl restart quote-system
 | QUOTE_GATEWAY_URL | Hermes Gateway地址 | http://127.0.0.1:8643 |
 | QUOTE_AI_MODEL | AI模型选择 | deepseek-v4-flash |
 | VOLCENGINE_API_KEY | 火山引擎API Key | 空 |
-| OCR_SPACE_API_KEY | OCR.space API Key | helloworld |
+| OCR_SPACE_API_KEY | OCR.space API Key | **v2.3.0 已删除硬编码默认值** |
 
 **问题**:
 - 敏感默认值: `QUOTE_ADMIN_PASSWORD`默认`admin123`(严重安全隐患)

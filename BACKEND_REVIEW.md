@@ -1,8 +1,9 @@
 # 报价系统后端架构与代码质量评估报告
 
-**评估日期**: 2026-05-21  
-**代码库路径**: /tmp/quote-system  
+**评估日期**: 2026-05-24（更新）  
+**代码库路径**: ~/quote-system  
 **技术栈**: Flask + SQLAlchemy + SQLite + JWT  
+**当前版本**: v2.3.0（已重构）  
 
 ---
 
@@ -30,12 +31,9 @@ API路由总数: **52**
 
 **优点**:
 - 按业务域拆分为4个主要Blueprint: auth, products, quotes, ai
-- 额外拆出独立前缀的辅助Blueprint(upload, download_img, download_logs, admin_ai, download)
-
-**问题**:
-- **过度碎片化**: 9个Blueprint中有多个仅包含1-2个路由(如download_bp仅1个路由, chat_bp仅2个, admin_ai_bp仅1个), 增加了注册复杂度
-- **app.py仍是"神类"**: 888行, 29个函数, 保留了AI/OCR/解析等大量业务逻辑(行292-754), 与注释"已移至products_bp.py"矛盾——实际代码仍然存在
-- **循环依赖严重**: 各Blueprint通过`from app import ...`延迟导入, 形成网状依赖(app.py ← products_bp ← app.py; app.py ← quotes_bp ← app.py; app.py ← ai_bp ← app.py; admin_bp ← app.py)
+- **v2.3.0 已修复**: Blueprint 从 11 个合并为 5 个（auth/products/quotes/admin/ai）, 辅助蓝图已合并到主蓝图
+- **v2.3.0 已修复**: 共享函数提取到 `helpers.py`, `app.py` 不再被任何模块 import, 循环依赖已消除
+- **v2.3.0 已修复**: app.py 仅保留应用入口/中间件/DB初始化职责
 
 ### 1.2 路由组织 (评分: 7/10)
 
@@ -48,7 +46,7 @@ API路由总数: **52**
 - **无DI机制**: 所有依赖通过模块级import或函数内延迟import获取
 - db实例全局单例(extensions.py), 无注入点
 - 配置通过`current_app.config`散布, 无集中配置层
-- Blueprint间通过`from app import ...`相互引用, 耦合紧密
+- **v2.3.0 已修复**: Blueprint 间循环依赖已通过 helpers.py 消除
 
 ---
 
@@ -240,7 +238,7 @@ API路由总数: **52**
 - **AI system prompt泄露数据库路径**: `_GW_SYSTEM_PROMPT`(ai_bp.py行107)包含`/opt/quote-system/quote.db`, `127.0.0.1:5001`
 - AI回复中尝试替换敏感路径(行262-264), 但仅限reply_text, 不影响prompt本身
 - SMTP密码明文存储: SystemSetting中smtp_password以明文存储(admin_bp.py用于邮件发送)
-- OCR API key默认值`'helloworld'`(products_bp.py行302, 948, 1085) — 免费key但不应硬编码
+- OCR API key默认值`'helloworld'` — **v2.3.0 已修复**：已删除硬编码默认值（3 处）
 - gunicorn-error.log写到项目目录(app.py行392), 可能包含敏感调试信息
 
 ### 5.6 SSRF防护 (评分: 8/10)

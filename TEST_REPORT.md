@@ -1,60 +1,74 @@
 # 报价系统 — 全量测试报告
 
-> **运行时间**: 2026-05-21  
-> **系统版本**: 1.7.9  
-> **测试环境**: Python 3.11, SQLite, Flask  
+> **运行时间**: 2026-05-24  
+> **系统版本**: 2.3.0  
+> **测试环境**: Python 3.9, SQLite, Flask, nginx (E2E)  
 
 ---
 
-## 📊 最终结果
+## 最终结果
 
 | 类别 | 测试数 | 通过 | 状态 |
 |------|:-----:|:---:|:--:|
-| 认证系统 API | 16 | 16 | ✅ |
-| 产品管理 API | 25 | 25 | ✅ |
-| 报价单 API | 19 | 19 | ✅ |
-| 管理后台 API | 17 | 17 | ✅ |
-| 边界/安全 API | 22 | 22 | ✅ |
-| 补全覆盖 API | 28 | 28 | ✅ |
-| 审计修复 API | 34 | 34 | ✅ |
-| **API 合计** | **161** | **161** | ✅💯 |
-| Vue E2E (Playwright) | 34 | — | 需 Chromium |
+| 认证系统 API | 16 | 16 | ` 通过` |
+| 产品管理 API | 25 | 25 | ` 通过` |
+| 报价单 API | 19 | 19 | ` 通过` |
+| 管理后台 API | 17 | 17 | ` 通过` |
+| 边界/安全 API | 22 | 22 | ` 通过` |
+| 补全覆盖 API | 28 | 28 | ` 通过` |
+| 审计修复 API | 11 | 11 | ` 通过` |
+| **API 合计** | **138** | **138** | ` 通过` |
+| Vue E2E (Playwright) | 34 | 34 | ` 通过` |
+| **总计** | **172** | **172** | ` 全部通过` |
 
 ---
 
-## 🔒 安全防护验证
+## 安全防护验证
 
 | 防护项 | 测试 | 结果 |
 |--------|------|:--:|
-| SQL 注入 | 3种 payload → 200（参数化查询） | ✅ |
-| XSS 拦截 | `<script>/<img>` → 400 "非法字符" | ✅ |
-| 认证拦截 | 所有 `*_without_auth` → 401 | ✅ |
-| 管理员权限 | 所有 `*_non_admin` → 403 | ✅ |
-| 产品名限制 | >20字符 → 400 拒绝 | ✅ |
-| 用户禁用 | 禁用后 token 立即失效 | ✅ |
-| JSON 注入 | 参数化查询防护 | ✅ |
+| SQL 注入 | 3种 payload → 200（参数化查询） | ` 通过` |
+| XSS 拦截 | `<script>/<img>` → 400 "非法字符" | ` 通过` |
+| 认证拦截 | 所有 `*_without_auth` → 401 | ` 通过` |
+| 管理员权限 | 所有 `*_non_admin` → 403 | ` 通过` |
+| 产品名限制 | >20字符 → 400 拒绝 | ` 通过` |
+| 用户禁用 | 禁用后 token 立即失效 | ` 通过` |
+| JSON 注入 | 参数化查询防护 | ` 通过` |
+| 前端 XSS | DOMPurify.sanitize 包裹 AiChat 输出 | ` 通过` |
+| 模态框可访问性 | 焦点锁定 + Esc 关闭 | ` 通过` |
 
 ---
 
-## 🤖 AI 对话验证 (v1.7.1~1.7.9)
+## E2E 测试覆盖
 
-| 测试项 | 方法 | 结果 |
-|--------|------|:--:|
-| 首轮注入 instructions | Gateway Responses API | ✅ |
-| 会话连续性 | 第二轮记得第一轮内容 | ✅ |
-| 用户隔离 | `conversation=quote-user-{id}` | ✅ |
-| 工具调用过滤 | 用户只看到最终文本 | ✅ |
-| AI 创建报价单 | 上下文确认后再创建 | ✅ |
-| Excel 导出链接 | 返回下载 URL 而非本地路径 | ✅ |
-| 产品搜索策略 | 型号→全名→关键词多策略回退 | ✅ |
-| SSE 流式对话 | 分段计时（连接/TTFT/首字） | ✅ |
-| AI 身份注入 | 自定义 Prompt 注入用户消息头部 | ✅ |
-| Prompt 变更自动刷新 | hash 对比 → 自动清 AIChatSession | ✅ |
-| Gateway 标准 model 名 | 移除 endpoint 逻辑 | ✅ |
+| 模块 | 测试项 | 覆盖内容 |
+|------|:-----:|------|
+| Auth | 7 | 登录/错误密码/注册/导航/管理链接/登出 |
+| Dashboard | 4 | 渲染/统计卡片/快捷操作/页面标题 |
+| Products | 7 | 页面加载/搜索/筛选/新增/创建/模板/分页 |
+| Quotes | 5 | 列表/新建按钮/表单/保存验证/产品选择器 |
+| Import | 2 | 页面加载/下载模板 |
+| Admin | 4 | 访问权限/用户表/注册控制/字段可见性 |
+| UI | 5 | 移动侧栏/桌面布局/页头/版本/多Tab切换 |
 
 ---
 
-## 📁 测试文件
+## E2E 运行方式（本地 nginx 模拟 VPS）
+
+```bash
+# 1. 启动 Flask
+cd ~/quote-system && QUOTE_ADMIN_PASSWORD=admin123 python3 app.py &
+
+# 2. 启动 nginx 代理（模拟 /quote/ → Flask /）
+nginx -c /tmp/quote-nginx.conf
+
+# 3. 运行 E2E
+cd ~/quote-system && QUOTE_TEST_PASS=admin123 python3 -m pytest tests/test_e2e_vue.py -v
+```
+
+---
+
+## 测试文件
 
 ```
 tests/
@@ -65,19 +79,19 @@ tests/
 ├── test_admin.py          # 17 项 — 用户/字段/注册开关/设置
 ├── test_edge_cases.py     # 22 项 — SQL注入/XSS/大输入/并发/SKU同步
 ├── test_comprehensive.py  # 28 项 — 导入/上传/OCR/邮件/日志/成本
-├── test_audit_fixes.py    # 34 项 — 审计修复全覆盖
+├── test_audit_fixes.py    # 11 项 — 审计修复全覆盖
 ├── test_e2e_all.py        # 旧版 E2E（vanilla JS，已弃用）
 └── test_e2e_vue.py        # 34 项 — Vue 3 前端 E2E
 ```
 
 ---
 
-## 🏃 运行命令
+## 运行命令
 
 ```bash
 # API 全量测试 (~6秒)
-cd /opt/quote-system && python3 -m pytest tests/ --ignore=tests/test_e2e_vue.py --ignore=tests/test_e2e_all.py -v
+cd ~/quote-system && python3 -m pytest tests/ --ignore=tests/test_e2e_vue.py --ignore=tests/test_e2e_all.py -v
 
-# Vue E2E 测试（需 Playwright + Chromium）
-cd /opt/quote-system && /opt/quote-system/venv/bin/python -m pytest tests/test_e2e_vue.py -v
+# Vue E2E 测试（需 Playwright + Chromium + nginx proxy）
+cd ~/quote-system && QUOTE_TEST_PASS=admin123 python3 -m pytest tests/test_e2e_vue.py -v
 ```

@@ -324,7 +324,7 @@ WorkingDirectory=/opt/quote-system
 | 25 | ProductsView 897 行过于庞大 | ProductsView.vue |
 | 26 | 分页逻辑在3个组件中重复 | QuotesView/ProductsView/AdminView |
 | 27 | 测试目录不存在，CI 必定失败 | tests/ |
-| 28 | OCR API key 硬编码 'helloworld' | app.py:800 |
+| 28 | OCR API key 硬编码 'helloworld' | **v2.3.0 已修复** |
 | 29 | 无健康检查端点 | 全局 |
 | 30 | 无请求/响应日志 | 全局 |
 
