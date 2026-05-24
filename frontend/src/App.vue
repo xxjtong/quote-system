@@ -1,8 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useApi, BASE_URL } from './composables/useApi'
-import { escHtml } from './composables/useUtils'
+import { useApi } from './composables/useApi'
 import ToastMessage from './components/ToastMessage.vue'
 
 const { api, authToken, currentUser, fieldVisibility, registrationOpen, setToken, isLoggedIn, isAdmin } = useApi()

@@ -1,6 +1,7 @@
 <script setup>
-import { computed } from 'vue'
-import { useApi, BASE_URL } from '../composables/useApi'
+import { ref, watch, nextTick, computed } from 'vue'
+import { useApi } from '../composables/useApi'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { formatMoney } from '../composables/useUtils'
 
 const props = defineProps({
@@ -12,9 +13,16 @@ const emit = defineEmits(['update:show', 'edit'])
 
 const { authToken, isAdmin, currentUser } = useApi()
 
+const modalRef = ref(null)
 function close() {
   emit('update:show', false)
 }
+const { activate, deactivate } = useFocusTrap(modalRef, close)
+
+watch(() => props.show, (val) => {
+  if (val) nextTick(() => activate())
+  else deactivate()
+})
 
 function detailImageSrc(p) {
   if (!p || (!p.has_image && !p.image_url)) return ''
@@ -32,7 +40,7 @@ function onEdit() {
 <template>
   <Teleport to="body">
     <div v-if="show && product" class="modal-backdrop show" @click="close"></div>
-    <div v-if="show && product" class="modal d-block modern-modal" tabindex="-1" @click.self="close">
+    <div v-if="show && product" ref="modalRef" class="modal d-block modern-modal" tabindex="-1" @click.self="close">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">

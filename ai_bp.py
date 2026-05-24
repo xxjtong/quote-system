@@ -12,9 +12,8 @@ from extensions import db
 from models import User, AIUsageLog, AIChatSession
 
 # ─── Blueprint 定义 ──────────────────────────────────────────
-ai_bp = Blueprint('ai', __name__, url_prefix='/api/ai')
-chat_bp = Blueprint('chat', __name__)  # /api/chat 不在 /api/ai 前缀下
-admin_ai_bp = Blueprint('admin_ai', __name__)  # /api/admin/ai-usage
+# 所有 AI 相关路由共用此蓝图（chat 不在 /api/ai 下，用完整路径）
+ai_bp = Blueprint('ai', __name__)
 
 # ─── 配置 ──────────────────────────────────────────────────
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
@@ -27,7 +26,7 @@ _AVAILABLE_MODELS = [
 
 
 # ─── AI Token ────────────────────────────────────────────────
-@ai_bp.route('/token', methods=['GET'])
+@ai_bp.route('/api/ai/token', methods=['GET'])
 @require_auth
 def ai_token():
     """AI 助手获取当前用户的 JWT token（用于 API 操作）。"""
@@ -37,59 +36,17 @@ def ai_token():
 
 
 # ─── Chat Models ─────────────────────────────────────────────
-@chat_bp.route('/api/chat/models', methods=['GET'])
+@ai_bp.route('/api/chat/models', methods=['GET'])
 def get_chat_models():
     """返回可用 AI 模型列表"""
     return jsonify({'models': _AVAILABLE_MODELS, 'default': _ai_model})
 
 
-# ─── Admin AI Usage ─────────────────────────────────────────
-@admin_ai_bp.route('/api/admin/ai-usage', methods=['GET'])
-@require_admin
-def ai_usage_stats():
-    """AI 使用统计 — 管理员查看"""
-    from sqlalchemy import func
-    days = min(int(request.args.get('days', 7)), 90)
-    since = datetime.now() - __import__('datetime').timedelta(days=days)
-
-    total = AIUsageLog.query.filter(AIUsageLog.created_at >= since).count()
-    success = AIUsageLog.query.filter(AIUsageLog.created_at >= since, AIUsageLog.success == True).count()
-    avg_elapsed = db.session.query(func.avg(AIUsageLog.elapsed)).filter(
-        AIUsageLog.created_at >= since, AIUsageLog.success == True
-    ).scalar() or 0
-
-    by_action = db.session.query(
-        AIUsageLog.action, func.count(), func.avg(AIUsageLog.elapsed)
-    ).filter(AIUsageLog.created_at >= since).group_by(AIUsageLog.action).all()
-
-    by_user = db.session.query(
-        AIUsageLog.user_id, User.username, func.count()
-    ).join(User, AIUsageLog.user_id == User.id).filter(
-        AIUsageLog.created_at >= since
-    ).group_by(AIUsageLog.user_id, User.username).order_by(func.count().desc()).limit(10).all()
-
-    by_date = db.session.query(
-        func.date(AIUsageLog.created_at), func.count(),
-        func.avg(AIUsageLog.elapsed)
-    ).filter(AIUsageLog.created_at >= since).group_by(
-        func.date(AIUsageLog.created_at)
-    ).order_by(func.date(AIUsageLog.created_at).desc()).limit(days).all()
-
-    recent = AIUsageLog.query.filter(AIUsageLog.created_at >= since).order_by(
-        AIUsageLog.created_at.desc()
-    ).limit(50).all()
-
-    return jsonify({
-        'summary': {'total': total, 'success': success, 'fail': total - success, 'avg_elapsed': round(avg_elapsed, 2), 'days': days},
-        'by_action': [{'action': a, 'count': c, 'avg_elapsed': round(e, 2)} for a, c, e in by_action],
-        'by_user': [{'user_id': uid, 'username': u, 'count': c} for uid, u, c in by_user],
-        'by_date': [{'date': str(d), 'count': c, 'avg_elapsed': round(e, 2)} for d, c, e in by_date],
-        'recent': [r.to_dict() for r in recent],
-    })
+# ─── Admin AI Usage — 已移至 admin_bp.py ────────────────────
 
 
 # ─── My AI Usage ─────────────────────────────────────────────
-@ai_bp.route('/my-usage', methods=['GET'])
+@ai_bp.route('/api/ai/my-usage', methods=['GET'])
 @require_auth
 def my_ai_usage():
     """当前用户的AI使用次数（首页卡片用）"""
@@ -147,7 +104,7 @@ def _get_ai_system_prompt():
     if _prompt_cache['value'] is not None and now < _prompt_cache['exp']:
         return _prompt_cache['value']
     try:
-        from app import get_setting
+        from helpers import get_setting
         custom = get_setting('ai_system_prompt', '')
         prompt = custom.strip() if custom.strip() else _GW_SYSTEM_PROMPT
     except Exception:
@@ -549,7 +506,7 @@ def _check_ai_rate_limit(user_id):
 
 
 # ─── Chat endpoint ──────────────────────────────────────────
-@chat_bp.route('/api/chat', methods=['POST'])
+@ai_bp.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
     """AI 对话 — 通过 Hermes Gateway Responses API。支持 SSE 流式。"""

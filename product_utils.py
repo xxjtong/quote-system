@@ -78,7 +78,7 @@ def _ocr_fallback(image_path):
                 files={'file': fp},
                 data={'language': 'chs', 'isOverlayRequired': False,
                       'detectOrientation': True, 'scale': True,
-                      'apikey': os.environ.get('OCR_SPACE_API_KEY', 'helloworld')},
+                      'apikey': os.environ.get('OCR_SPACE_API_KEY', '')},
                 timeout=30,
             )
         if r.status_code != 200:

@@ -5,6 +5,7 @@ Quotes Blueprint — 报价单相关 API 路由
 
 import io
 import re
+import secrets
 from datetime import datetime
 from pathlib import Path
 
@@ -17,12 +18,12 @@ from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
 from openpyxl.utils import get_column_letter
 
 from extensions import db
-from models import Product, Quote, QuoteItem, User, DownloadLog
+from models import Product, Quote, QuoteItem, User, DownloadLog, DownloadTicket
 from auth import require_auth
 
 # ─── Blueprint 定义 ──────────────────────────────────────────
-quotes_bp = Blueprint('quotes', __name__, url_prefix='/api/quotes')
-download_logs_bp = Blueprint('download_logs', __name__)
+# 所有报价单相关路由共用此蓝图（download-logs 用完整路径）
+quotes_bp = Blueprint('quotes', __name__)
 
 # 项目根目录（用于文件操作）
 BASE_DIR = Path(__file__).parent
@@ -30,23 +31,23 @@ EXPORT_DIR = BASE_DIR / 'exports'
 EXPORT_DIR.mkdir(exist_ok=True)
 
 
-# ─── Lazy imports（避免循环依赖） ─────────────────────────────
+# ─── 辅助函数包装（已验证模块） ─────────────────────────────
 
 def _check_quote_owner(quote_id):
-    """指向 app.py 的 check_quote_owner"""
-    from app import check_quote_owner
+    """指向 helpers.py 的 check_quote_owner"""
+    from helpers import check_quote_owner
     return check_quote_owner(quote_id)
 
 
 def _preload_products_for_quote(quote):
-    """指向 app.py 的 preload_products_for_quote"""
-    from app import preload_products_for_quote
+    """指向 helpers.py 的 preload_products_for_quote"""
+    from helpers import preload_products_for_quote
     return preload_products_for_quote(quote)
 
 
 def _get_setting(key, default=''):
-    """读取单个系统设置（指向 app.py 的实现）"""
-    from app import get_setting
+    """读取单个系统设置（指向 helpers.py 的实现）"""
+    from helpers import get_setting
     return get_setting(key, default)
 
 
@@ -257,7 +258,7 @@ def _build_excel(quote, pmap, filepath):
 
 # ─── Quotes API 路由 ──────────────────────────────────────
 
-@quotes_bp.route('', methods=['GET'])
+@quotes_bp.route('/api/quotes', methods=['GET'])
 def list_quotes():
     """报价单列表，支持分页、状态筛选、关键词搜索（含拼音）"""
     import re
@@ -325,7 +326,7 @@ def list_quotes():
     })
 
 
-@quotes_bp.route('/stats', methods=['GET'])
+@quotes_bp.route('/api/quotes/stats', methods=['GET'])
 def quote_stats():
     """按客户统计报价单（客户维度聚合）"""
     qf = Quote.client.isnot(None), Quote.client != ''
@@ -351,7 +352,7 @@ def quote_stats():
     return jsonify({'customers': sorted(customers.values(), key=lambda x: x['total_amount'], reverse=True)})
 
 
-@quotes_bp.route('/<int:quote_id>/status', methods=['PATCH'])
+@quotes_bp.route('/api/quotes/<int:quote_id>/status', methods=['PATCH'])
 def update_quote_status(quote_id):
     """修改报价单状态"""
     quote, err, status = _check_quote_owner(quote_id)
@@ -367,7 +368,7 @@ def update_quote_status(quote_id):
     return jsonify({'quote': quote.to_dict()})
 
 
-@quotes_bp.route('', methods=['POST'])
+@quotes_bp.route('/api/quotes', methods=['POST'])
 def create_quote():
     data = request.get_json()
     if not data:
@@ -420,7 +421,7 @@ def create_quote():
     return jsonify({'quote': quote.to_dict()}), 201
 
 
-@quotes_bp.route('/<int:quote_id>', methods=['GET'])
+@quotes_bp.route('/api/quotes/<int:quote_id>', methods=['GET'])
 def get_quote(quote_id):
     quote, err, status = _check_quote_owner(quote_id)
     if not quote:
@@ -429,7 +430,7 @@ def get_quote(quote_id):
     return jsonify({'quote': quote.to_dict(pmap)})
 
 
-@quotes_bp.route('/<int:quote_id>', methods=['PUT'])
+@quotes_bp.route('/api/quotes/<int:quote_id>', methods=['PUT'])
 def update_quote(quote_id):
     quote, err, status = _check_quote_owner(quote_id)
     if not quote:
@@ -481,7 +482,7 @@ def update_quote(quote_id):
     return jsonify({'quote': quote.to_dict()})
 
 
-@quotes_bp.route('/<int:quote_id>', methods=['DELETE'])
+@quotes_bp.route('/api/quotes/<int:quote_id>', methods=['DELETE'])
 def delete_quote(quote_id):
     quote, err, status = _check_quote_owner(quote_id)
     if not quote:
@@ -491,7 +492,7 @@ def delete_quote(quote_id):
     return jsonify({'message': '已删除'})
 
 
-@quotes_bp.route('/batch', methods=['DELETE'])
+@quotes_bp.route('/api/quotes/batch', methods=['DELETE'])
 @require_auth
 def batch_delete_quotes():
     """批量删除报价单（仅限自己创建的或管理员删除全部）"""
@@ -525,7 +526,7 @@ def batch_delete_quotes():
     })
 
 
-@quotes_bp.route('/<int:quote_id>/export-excel', methods=['GET'])
+@quotes_bp.route('/api/quotes/<int:quote_id>/export-excel', methods=['GET'])
 def export_quote_excel(quote_id):
     """导出报价单 — 样式精确克隆模板.xlsx"""
     quote, err, status = _check_quote_owner(quote_id)
@@ -690,7 +691,7 @@ def export_quote_excel(quote_id):
 
 
 # ─── 邮件发送 (v1.4.0) ───
-@quotes_bp.route('/<int:quote_id>/send-email', methods=['POST'])
+@quotes_bp.route('/api/quotes/<int:quote_id>/send-email', methods=['POST'])
 def send_quote_email(quote_id):
     quote, err, status = _check_quote_owner(quote_id)
     if not quote:
@@ -748,13 +749,13 @@ def send_quote_email(quote_id):
 
 
 # ─── 下载日志 API ───
-@download_logs_bp.route('/api/download-logs', methods=['GET'])
+@quotes_bp.route('/api/download-logs', methods=['GET'])
 def list_download_logs():
     logs = DownloadLog.query.order_by(DownloadLog.downloaded_at.desc()).limit(200).all()
     return jsonify({'logs': [log.to_dict() for log in logs]})
 
 
-@download_logs_bp.route('/api/download-logs/stats', methods=['GET'])
+@quotes_bp.route('/api/download-logs/stats', methods=['GET'])
 def download_logs_stats():
     """按用户汇总下载次数"""
     rows = db.session.query(
@@ -763,8 +764,30 @@ def download_logs_stats():
     return jsonify({'users': [{'user_name': name, 'count': cnt} for name, cnt in rows]})
 
 
+# ─── 下载 Ticket ─────────────────────────────────────────────
+_TICKET_TTL = 120  # 秒
+
+
+@quotes_bp.route('/api/download-ticket', methods=['POST'])
+def create_download_ticket():
+    """已认证用户获取短期下载ticket（2分钟有效）"""
+    if not hasattr(g, 'current_user') or not g.current_user:
+        return jsonify({'error': '请先登录'}), 401
+    from models import DownloadTicket as DT
+    ticket = secrets.token_urlsafe(32)
+    db.session.add(DT(
+        ticket=ticket,
+        user_id=g.current_user.id,
+        expires_at=datetime.now().timestamp() + _TICKET_TTL,
+    ))
+    now = datetime.now().timestamp()
+    DT.query.filter(DT.expires_at < now).delete()
+    db.session.commit()
+    return jsonify({'ticket': ticket})
+
+
 # ─── 报价单 HTML 预览 ───
-@quotes_bp.route('/<int:quote_id>/preview', methods=['GET'])
+@quotes_bp.route('/api/quotes/<int:quote_id>/preview', methods=['GET'])
 def preview_quote_html(quote_id):
     """返回报价单的HTML预览（17列格式匹配原模板）"""
     import html as _html  # 用于转义用户输入防XSS

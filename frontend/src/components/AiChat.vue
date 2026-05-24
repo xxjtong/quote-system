@@ -1,12 +1,13 @@
 <script setup>
 import { ref, computed, onMounted, inject, nextTick } from 'vue'
-import { useApi, BASE_URL } from '../composables/useApi'
+import { useApi } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
+import DOMPurify from 'dompurify'
 import QuotePreviewModal from './QuotePreviewModal.vue'
 
 const emit = defineEmits(['navigate', 'create-quote', 'chat-completed'])
 
-const { api, authToken } = useApi()
+const { api, apiStream, authToken } = useApi()
 const toast = inject('toast')
 
 // ─── Quote Preview Modal ──────────────────────────────────
@@ -161,13 +162,9 @@ async function sendMessage(textOverride) {
   await nextTick(); scrollChat()
 
   try {
-    // Use SSE streaming — need raw fetch for ReadableStream
-    const token = authToken.value
-
-    const resp = await fetch(BASE_URL + '/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ input: text, stream: true, model: selectedModel.value, conversation_id: currentSessionId.value }),
+    // SSE streaming via apiStream
+    const resp = await apiStream('/api/chat', {
+      input: text, stream: true, model: selectedModel.value, conversation_id: currentSessionId.value,
     })
 
     if (!resp.ok) {
@@ -358,7 +355,7 @@ function renderContent(msg) {
   if (tableRows.length >= 2) parts.push({ html: true, value: renderTable(tableRows) })
   flushText()
 
-  return parts.map(p => p.value).join('\n')
+  return DOMPurify.sanitize(parts.map(p => p.value).join('\n'), { ALLOWED_ATTR: ['style', 'class', 'href', 'data-qid'] })
 }
 
 function renderTable(rows) {

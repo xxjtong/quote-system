@@ -25,11 +25,8 @@ from product_utils import (
 )
 
 # ─── Blueprint 定义 ──────────────────────────────────────────
-products_bp = Blueprint('products', __name__, url_prefix='/api/products')
-
-# 独立前缀的路由需要单独 Blueprint
-upload_bp = Blueprint('upload', __name__)
-download_bp = Blueprint('download_img', __name__)
+# 所有产品相关路由共用此蓝图（upload/download-image 用完整路径）
+products_bp = Blueprint('products', __name__)
 
 # 项目根目录（用于文件操作）
 BASE_DIR = Path(__file__).parent
@@ -40,23 +37,23 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 _gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8642')
 
 
-# ─── Lazy imports（避免循环依赖） ─────────────────────────────
+# ─── 辅助函数包装（已验证模块） ─────────────────────────────
 
 def _get_setting(key, default=''):
-    """读取单个系统设置（本地包装，指向 app.py 的实现）"""
-    from app import get_setting
+    """读取单个系统设置（本地包装，指向 helpers.py 的实现）"""
+    from helpers import get_setting
     return get_setting(key, default)
 
 
 def _filter_fields_for_user(data_dict, is_admin):
-    """过滤非管理员不可见字段（指向 app.py 的实现）"""
-    from app import filter_fields_for_user
+    """过滤非管理员不可见字段（指向 helpers.py 的实现）"""
+    from helpers import filter_fields_for_user
     return filter_fields_for_user(data_dict, is_admin)
 
 
 def _get_field_visibility():
-    """获取字段可见性（指向 app.py 的实现）"""
-    from app import get_field_visibility
+    """获取字段可见性（指向 helpers.py 的实现）"""
+    from helpers import get_field_visibility
     return get_field_visibility()
 
 
@@ -109,7 +106,7 @@ def add_pinyin_field(p_dict):
 
 # ─── 产品路由 ────────────────────────────────────────────────
 
-@products_bp.route('', methods=['GET'])
+@products_bp.route('/api/products', methods=['GET'])
 def list_products():
     """产品列表，支持搜索（含拼音）和分类筛选"""
     import re
@@ -180,8 +177,15 @@ def list_products():
     latest = db.session.query(func.max(Product.updated_at)).scalar()
     total_all = Product.query.count()
 
+    # 预加载创建者用户名，避免 N+1 查询
+    creator_ids = list(set(p.created_by for p in products if p.created_by))
+    users_map = {}
+    if creator_ids:
+        creator_users = User.query.filter(User.id.in_(creator_ids)).all()
+        users_map = {u.id: u.username for u in creator_users}
+
     return jsonify({
-        'products': [add_pinyin_field(p.to_dict()) for p in products],
+        'products': [add_pinyin_field(p.to_dict(users_map=users_map)) for p in products],
         'total': total,
         'page': page,
         'per_page': per_page,
@@ -191,7 +195,7 @@ def list_products():
     })
 
 
-@products_bp.route('', methods=['POST'])
+@products_bp.route('/api/products', methods=['POST'])
 def create_product():
     data = request.get_json()
     if not data or not data.get('name'):
@@ -231,7 +235,7 @@ def create_product():
     return jsonify({'product': product.to_dict()}), 201
 
 
-@products_bp.route('/<int:product_id>', methods=['GET'])
+@products_bp.route('/api/products/<int:product_id>', methods=['GET'])
 def get_product(product_id):
     product = db.session.get(Product, product_id)
     if not product:
@@ -239,7 +243,7 @@ def get_product(product_id):
     return jsonify({'product': product.to_dict()})
 
 
-@products_bp.route('/<int:product_id>/image', methods=['GET'])
+@products_bp.route('/api/products/<int:product_id>/image', methods=['GET'])
 def get_product_image(product_id):
     """返回产品图片二进制数据（支持 query param token 认证）"""
     # 不用 @require_auth，手动验证（img 标签无法设 header）
@@ -263,7 +267,7 @@ def get_product_image(product_id):
     return Response(product.image_data, mimetype=product.image_mime or 'image/jpeg')
 
 
-@products_bp.route('/<int:product_id>', methods=['PUT'])
+@products_bp.route('/api/products/<int:product_id>', methods=['PUT'])
 def update_product(product_id):
     product = db.session.get(Product, product_id)
     if not product:
@@ -301,7 +305,7 @@ def update_product(product_id):
     return jsonify({'product': product.to_dict()})
 
 
-@products_bp.route('/<int:product_id>', methods=['DELETE'])
+@products_bp.route('/api/products/<int:product_id>', methods=['DELETE'])
 def delete_product(product_id):
     product = db.session.get(Product, product_id)
     if not product:
@@ -315,7 +319,7 @@ def delete_product(product_id):
     return jsonify({'message': '已删除'})
 
 
-@products_bp.route('/batch-delete', methods=['POST'])
+@products_bp.route('/api/products/batch-delete', methods=['POST'])
 def batch_delete_products():
     data = request.get_json()
     ids = data.get('ids', [])
@@ -342,7 +346,7 @@ def batch_delete_products():
     return jsonify({'message': f'已删除 {len(ids)} 个产品'})
 
 
-@products_bp.route('/version', methods=['GET'])
+@products_bp.route('/api/products/version', methods=['GET'])
 def products_version():
     count = Product.query.count()
     latest = db.session.query(func.max(Product.updated_at)).scalar()
@@ -354,7 +358,7 @@ def products_version():
 
 # ─── 图片OCR识别接口 ─────────────────────────────────────────
 
-@products_bp.route('/ocr', methods=['POST'])
+@products_bp.route('/api/products/ocr', methods=['POST'])
 def ocr_image():
     """上传图片进行OCR识别，返回识别文本"""
     file = request.files.get('file')
@@ -380,7 +384,7 @@ def ocr_image():
                     'isOverlayRequired': False,
                     'detectOrientation': True,
                     'scale': True,
-                    'apikey': os.environ.get('OCR_SPACE_API_KEY', 'helloworld'),
+                    'apikey': os.environ.get('OCR_SPACE_API_KEY', ''),
                 },
                 timeout=30,
             )
@@ -402,7 +406,7 @@ def ocr_image():
         except Exception: pass
 
 
-@products_bp.route('/recognize', methods=['POST'])
+@products_bp.route('/api/products/recognize', methods=['POST'])
 def recognize_product():
     """智能识别粘贴内容（文字或图片），提取产品信息。
     每次只识别1个产品。
@@ -498,7 +502,7 @@ def recognize_product():
 
 # ─── 发票OCR → 成本价匹配 ─────────────────────────────────────
 
-@products_bp.route('/ocr-costs', methods=['POST'])
+@products_bp.route('/api/products/ocr-costs', methods=['POST'])
 @require_admin
 def ocr_costs():
     """上传进货发票图片，OCR识别 + 自动匹配产品成本价"""
@@ -517,7 +521,7 @@ def ocr_costs():
             r = http_req.post(
                 'https://api.ocr.space/parse/image',
                 files={'file': fp},
-                data={'language': 'chs', 'isOverlayRequired': False, 'detectOrientation': True, 'scale': True, 'apikey': os.environ.get('OCR_SPACE_API_KEY', 'helloworld')},
+                data={'language': 'chs', 'isOverlayRequired': False, 'detectOrientation': True, 'scale': True, 'apikey': os.environ.get('OCR_SPACE_API_KEY', '')},
                 timeout=30,
             )
         if r.status_code != 200:
@@ -588,7 +592,7 @@ def ocr_costs():
         except Exception: pass
 
 
-@products_bp.route('/batch-costs', methods=['POST'])
+@products_bp.route('/api/products/batch-costs', methods=['POST'])
 @require_admin
 def batch_update_costs():
     """批量更新产品成本价 {updates: [{id, cost_price}, ...]}"""
@@ -608,7 +612,7 @@ def batch_update_costs():
     return jsonify({'updated': updated, 'message': f'已更新{updated}个产品成本价'})
 
 
-@products_bp.route('/<int:product_id>/toggle-active', methods=['PUT'])
+@products_bp.route('/api/products/<int:product_id>/toggle-active', methods=['PUT'])
 @require_admin
 def toggle_product_active(product_id):
     product = db.session.get(Product, product_id)
@@ -620,7 +624,7 @@ def toggle_product_active(product_id):
     return jsonify({'id': product.id, 'is_active': product.is_active})
 
 
-@products_bp.route('/import', methods=['POST'])
+@products_bp.route('/api/products/import', methods=['POST'])
 def import_products():
     """从Excel导入产品 — 支持多Sheet、自动识别分类、提取嵌入图片"""
     import openpyxl
@@ -827,7 +831,7 @@ def _import_all_sheets(wb):
     return imported, errors
 
 
-@products_bp.route('/export-all', methods=['GET'])
+@products_bp.route('/api/products/export-all', methods=['GET'])
 @require_auth
 def export_all_products():
     """导出全部产品为 Excel（按模板格式，管理员增加创建者列）"""
@@ -905,7 +909,7 @@ def export_all_products():
     return send_file(output, download_name=fname, as_attachment=True)
 
 
-@products_bp.route('/export-template', methods=['GET'])
+@products_bp.route('/api/products/export-template', methods=['GET'])
 def export_product_template():
     """下载原始报价规格库模板（包含所有分类Sheet）"""
     from openpyxl.styles import Font, Alignment
@@ -935,7 +939,7 @@ def export_product_template():
 
 # ─── 独立前缀路由（不在 /api/products 下） ────────────────────
 
-@upload_bp.route('/api/upload/image', methods=['POST'])
+@products_bp.route('/api/upload/image', methods=['POST'])
 def upload_image():
     """上传产品图片"""
     file = request.files.get('file')
@@ -975,7 +979,7 @@ def upload_image():
     return jsonify({'url': image_url, 'filename': fname, 'image_data': img_b64, 'image_mime': 'image/jpeg'})
 
 
-@download_bp.route('/api/download-image', methods=['POST'])
+@products_bp.route('/api/download-image', methods=['POST'])
 def download_image():
     """从URL下载图片并保存到本地（防SSRF）"""
     import ipaddress

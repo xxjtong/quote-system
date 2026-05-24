@@ -208,7 +208,7 @@ def session_info():
     except Exception:
         pass
     # Lazy import to avoid circular dependency
-    from app import get_field_visibility
+    from helpers import get_field_visibility
     resp = jsonify({
         'user': g.current_user.to_dict(),
         'field_visibility': get_field_visibility() if not is_admin else {},

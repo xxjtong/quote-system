@@ -60,10 +60,11 @@
 - SSE 日志写入: 在 generator 外部（请求上下文内），避免流式传输中误计使用次数
 
 ### 本地开发环境
-- 仓库: `/tmp/quote-system`，venv: `/tmp/quote-system/venv`
+- 仓库: `~/quote-system`
 - macOS AirPlay Receiver 占 5000 端口 → 改用 5001
-- Vite 代理需 rewrite `/quote/` 前缀（见 skill doc）
+- Vite 代理需 rewrite `/quote/` 前缀
 - 启动: 终端1 `python app.py` + 终端2 `cd frontend && npx vite --host`
+- E2E 测试需 nginx 代理: `nginx -c /tmp/quote-nginx.conf` (模拟 VPS `/quote/` → Flask `/`)
 
 ### 通用
 - 中文回复，表格式数据用 bullet 不用 pipe table

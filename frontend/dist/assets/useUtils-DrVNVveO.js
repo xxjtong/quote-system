@@ -1,0 +1,1 @@
+function e(e){return`¥`+Number(e||0).toLocaleString(`zh-CN`,{minimumFractionDigits:2,maximumFractionDigits:2})}function t(e){let t=document.createElement(`div`);return t.textContent=e||``,t.innerHTML}export{e as n,t};

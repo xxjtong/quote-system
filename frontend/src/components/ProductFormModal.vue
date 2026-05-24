@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, inject } from 'vue'
-import { useApi, BASE_URL } from '../composables/useApi'
+import { useApi } from '../composables/useApi'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import SmartRecognition from './SmartRecognition.vue'
 
 const props = defineProps({
@@ -31,10 +32,13 @@ const imageDownloading = ref(false)
 const imageUploading = ref(false)
 
 const smartRecognitionRef = ref(null)
+const modalRef = ref(null)
+const { activate, deactivate } = useFocusTrap(modalRef, closeForm)
 
 // ─── Watch product prop → populate form ───
 watch(() => props.show, (visible) => {
-  if (!visible) return
+  if (!visible) { deactivate(); return }
+  nextTick(() => activate())
   if (props.product) {
     formData.name = props.product.name || ''
     formData.category = props.product.category || ''
@@ -205,7 +209,7 @@ async function saveProduct() {
 <template>
   <Teleport to="body">
     <div v-if="show" class="modal-backdrop show"></div>
-    <div v-if="show" class="modal d-block modern-modal" tabindex="-1">
+    <div v-if="show" ref="modalRef" class="modal d-block modern-modal" tabindex="-1">
       <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">

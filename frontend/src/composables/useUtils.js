@@ -11,6 +11,3 @@ export function escHtml(s) {
   return d.innerHTML
 }
 
-export function escAttr(s) {
-  return escHtml(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ').replace(/\r/g, '')
-}

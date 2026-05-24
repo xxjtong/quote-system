@@ -9,8 +9,9 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, g, current_app
 
 from extensions import db
-from models import User, FieldSetting, SystemSetting, AIChatSession
+from models import User, FieldSetting, SystemSetting, AIChatSession, AIUsageLog
 from auth import require_admin, hash_password, _is_registration_open
+from helpers import get_setting, get_all_settings
 
 # ─── Blueprint 定义 ──────────────────────────────────────────
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
@@ -59,25 +60,13 @@ def set_registration():
     return jsonify({'registration_open': _is_registration_open()})
 
 
-# ─── 系统设置 API ───────────────────────────────────────────
-# get_setting / get_all_settings 留在 app.py，此处延迟导入避免循环
-
-def _get_setting(key, default=''):
-    """读取单个系统设置（本地包装，指向 app.py 的实现）"""
-    from app import get_setting
-    return get_setting(key, default)
-
-
-def _get_all_settings():
-    """读取所有系统设置（本地包装，指向 app.py 的实现）"""
-    from app import get_all_settings
-    return get_all_settings()
+# get_setting / get_all_settings 从 helpers.py 直接导入（见文件顶部）
 
 
 @admin_bp.route('/settings', methods=['GET'])
 @require_admin
 def get_settings():
-    return jsonify({'settings': _get_all_settings()})
+    return jsonify({'settings': get_all_settings()})
 
 
 @admin_bp.route('/settings', methods=['PUT'])
@@ -93,7 +82,7 @@ def update_settings():
         else:
             db.session.add(SystemSetting(key=key, value=str(value) if value else ''))
     db.session.commit()
-    return jsonify({'settings': _get_all_settings()})
+    return jsonify({'settings': get_all_settings()})
 
 
 # ─── AI Prompt 管理 ──────────────────────────────────────────
@@ -245,29 +234,51 @@ def delete_user(user_id):
     return jsonify({'message': f'用户 {user.username} 已删除'})
 
 
-# ─── 下载 Ticket（不在 /api/admin 前缀下，单独注册） ───────
-# 这个路由不使用 admin_bp 的 url_prefix，需要在 app.py 中单独注册
-# 或使用不带前缀的子蓝图。此处用 full-path route 注册到 admin_bp：
-# 由于 Blueprint url_prefix 为 /api/admin，此路由需要不同的前缀，
-# 所以在 app.py 中将此部分单独注册。
-
-download_bp = Blueprint('download', __name__)
+# ─── 下载 Ticket ───────────────────────────────────────────
+# create_download_ticket 路由已移至 quotes_bp.py
+# _validate_download_ticket 保留在此供 app.py check_auth() 使用
 
 
-@download_bp.route('/api/download-ticket', methods=['POST'])
-def create_download_ticket():
-    """已认证用户获取短期下载ticket（2分钟有效）"""
-    if not hasattr(g, 'current_user') or not g.current_user:
-        return jsonify({'error': '请先登录'}), 401
-    from models import DownloadTicket
-    ticket = secrets.token_urlsafe(32)
-    db.session.add(DownloadTicket(
-        ticket=ticket,
-        user_id=g.current_user.id,
-        expires_at=datetime.now().timestamp() + _TICKET_TTL,
-    ))
-    # 清理过期ticket
-    now = datetime.now().timestamp()
-    DownloadTicket.query.filter(DownloadTicket.expires_at < now).delete()
-    db.session.commit()
-    return jsonify({'ticket': ticket})
+# ─── AI 使用统计 ─────────────────────────────────────────────
+@admin_bp.route('/ai-usage', methods=['GET'])
+@require_admin
+def ai_usage_stats():
+    """AI 使用统计 — 管理员查看（从 ai_bp.py 迁入）"""
+    from sqlalchemy import func
+    days = min(int(request.args.get('days', 7)), 90)
+    since = datetime.now() - __import__('datetime').timedelta(days=days)
+
+    total = AIUsageLog.query.filter(AIUsageLog.created_at >= since).count()
+    success = AIUsageLog.query.filter(AIUsageLog.created_at >= since, AIUsageLog.success == True).count()
+    avg_elapsed = db.session.query(func.avg(AIUsageLog.elapsed)).filter(
+        AIUsageLog.created_at >= since, AIUsageLog.success == True
+    ).scalar() or 0
+
+    by_action = db.session.query(
+        AIUsageLog.action, func.count(), func.avg(AIUsageLog.elapsed)
+    ).filter(AIUsageLog.created_at >= since).group_by(AIUsageLog.action).all()
+
+    by_user = db.session.query(
+        AIUsageLog.user_id, User.username, func.count()
+    ).join(User, AIUsageLog.user_id == User.id).filter(
+        AIUsageLog.created_at >= since
+    ).group_by(AIUsageLog.user_id, User.username).order_by(func.count().desc()).limit(10).all()
+
+    by_date = db.session.query(
+        func.date(AIUsageLog.created_at), func.count(),
+        func.avg(AIUsageLog.elapsed)
+    ).filter(AIUsageLog.created_at >= since).group_by(
+        func.date(AIUsageLog.created_at)
+    ).order_by(func.date(AIUsageLog.created_at).desc()).limit(days).all()
+
+    recent = AIUsageLog.query.filter(AIUsageLog.created_at >= since).order_by(
+        AIUsageLog.created_at.desc()
+    ).limit(50).all()
+
+    return jsonify({
+        'summary': {'total': total, 'success': success, 'fail': total - success, 'avg_elapsed': round(avg_elapsed, 2), 'days': days},
+        'by_action': [{'action': a, 'count': c, 'avg_elapsed': round(e, 2)} for a, c, e in by_action],
+        'by_user': [{'user_id': uid, 'username': u, 'count': c} for uid, u, c in by_user],
+        'by_date': [{'date': str(d), 'count': c, 'avg_elapsed': round(e, 2)} for d, c, e in by_date],
+        'recent': [r.to_dict() for r in recent],
+    })

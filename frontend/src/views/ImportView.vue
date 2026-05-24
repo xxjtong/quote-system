@@ -1,9 +1,9 @@
 <script setup>
 import { ref, inject, computed } from 'vue'
-import { useApi, BASE_URL } from '../composables/useApi'
+import { useApi } from '../composables/useApi'
 
 const toast = inject('toast')
-const { api, authToken, isAdmin } = useApi()
+const { api, apiRaw, authToken, isAdmin } = useApi()
 
 const uploading = ref(false)
 const exporting = ref(false)
@@ -32,24 +32,28 @@ async function handleFile(e) {
   }
 }
 
-function exportTemplate() {
-  const token = authToken.value
-  const url = BASE_URL + '/api/products/export-template' + (token ? '?token=' + encodeURIComponent(token) : '')
-  const a = document.createElement('a')
-  a.href = url
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+async function exportTemplate() {
+  try {
+    const r = await apiRaw('/api/products/export-template')
+    if (!r) return
+    const blob = await r.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = '产品导入模板.xlsx'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(a.href)
+  } catch (err) {
+    toast('下载模板失败', 'danger')
+  }
 }
 
 async function exportAll() {
   exporting.value = true
   try {
-    const token = authToken.value
-    const r = await fetch(BASE_URL + '/api/products/export-all', {
-      headers: { Authorization: 'Bearer ' + token }
-    })
-    if (!r.ok) { toast('导出失败 (' + r.status + ')', 'danger'); return }
+    const r = await apiRaw('/api/products/export-all')
+    if (!r || !r.ok) { toast('导出失败', 'danger'); return }
     const blob = await r.blob()
     const cd = r.headers.get('Content-Disposition') || ''
     let fname = 'products_export.xlsx'

@@ -1,5 +1,32 @@
 # 更新日志
 
+## v2.3.0 (2026-05-24)
+
+### 后端重构 — 消除循环依赖 + Blueprint 合并
+
+- 新建 `helpers.py`：提取 `get_setting`/`get_all_settings`/`get_field_visibility`/`filter_fields_for_user`/`preload_products_for_quote`/`check_quote_owner`，`app.py` 不再被任何模块 import
+- Blueprint 从 11 个合并为 5 个（auth/products/quotes/admin/ai），消除 `download_bp` 命名冲突
+- 修复硬编码 `helloworld` OCR API Key 默认值（3 处）
+- Float → `Numeric(asdecimal=False)` 迁移（7 个货币字段），保持 jsonify 兼容
+- `Product.to_dict()` N+1 查询修复：`users_map` 预加载
+- `DownloadLog.quote` 级联删除修复：审计日志不再随报价单删除
+- 新增 DB 索引：`products.sku`、`products.supplier`、`ai_usage_logs(user_id, created_at)` 复合索引
+
+### 前端优化
+
+- API 调用统一：`useApi.js` 新增 `apiRaw`/`apiStream`，消除 6 处原生 `fetch()` 调用，401 自动处理覆盖率 100%
+- XSS 防护：`AiChat.vue` `renderContent` 输出加 `DOMPurify.sanitize`
+- 新增 `useFocusTrap` composable：3 个模态框支持焦点锁定 + Esc 关闭
+- 死代码清理：删除 `static/js/`（2089 行）、删除未用 import/export
+- E2E 测试选择器更新：测试适配当前 UI（nginx 代理模式）
+
+### 测试
+
+- API 测试：138/138 通过
+- E2E 测试：34/34 通过
+
+---
+
 ## v2.2.0 (2026-05-22)
 ### 🔧 功能增强 + Bug 修复
 

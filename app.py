@@ -29,6 +29,7 @@ from openpyxl.utils import get_column_letter
 from extensions import db
 from models import Product, Quote, QuoteItem, User, DownloadLog, FieldSetting, SystemSetting, AIChatSession, AIUsageLog
 from auth import auth_bp, hash_password, verify_password, create_token, require_auth, require_admin, _is_registration_open
+from helpers import get_setting, get_all_settings, get_field_visibility, filter_fields_for_user, preload_products_for_quote, check_quote_owner
 
 app = Flask(__name__)
 # CORS 限制：仅允许同源和已知域名
@@ -44,26 +45,16 @@ else:
     ]
 CORS(app, **cors_kwargs)
 
-# Register auth blueprint
+# Register all blueprints
 app.register_blueprint(auth_bp)
-# Admin + download blueprints (lazy import to avoid circular dependency)
-import admin_bp as _admin_bp_mod
-app.register_blueprint(_admin_bp_mod.admin_bp)
-app.register_blueprint(_admin_bp_mod.download_bp)
-# Products + upload + download_img blueprints
-import products_bp as _products_bp_mod
-app.register_blueprint(_products_bp_mod.products_bp)
-app.register_blueprint(_products_bp_mod.upload_bp)
-app.register_blueprint(_products_bp_mod.download_bp)
-# Quotes + download_logs blueprints
-import quotes_bp as _quotes_bp_mod
-app.register_blueprint(_quotes_bp_mod.quotes_bp)
-app.register_blueprint(_quotes_bp_mod.download_logs_bp)
-# AI + chat blueprints
-import ai_bp as _ai_bp_mod
-app.register_blueprint(_ai_bp_mod.ai_bp)
-app.register_blueprint(_ai_bp_mod.chat_bp)
-app.register_blueprint(_ai_bp_mod.admin_ai_bp)
+from products_bp import products_bp
+app.register_blueprint(products_bp)
+from quotes_bp import quotes_bp
+app.register_blueprint(quotes_bp)
+from admin_bp import admin_bp
+app.register_blueprint(admin_bp)
+from ai_bp import ai_bp
+app.register_blueprint(ai_bp)
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'uploads'
@@ -92,44 +83,6 @@ db.init_app(app)
 # Flask-Migrate (Alembic) — 替代手动 ALTER TABLE
 from flask_migrate import Migrate
 migrate = Migrate(app, db)
-
-# ─── Helpers ─────────────────────────────────────────────────────
-# _store_image_blob, add_pinyin_field — still in products_bp.py
-# 12 shared helpers — moved to utils.py and product_utils.py
-
-
-def preload_products_for_quote(quote):
-    """批量加载报价单所有明细关联的产品，返回 {product_id: Product}"""
-    pids = [item.product_id for item in quote.items if item.product_id]
-    if not pids:
-        return {}
-    products = Product.query.filter(Product.id.in_(pids)).all()
-    return {p.id: p for p in products}
-
-# ─── JWT & Auth Helpers (moved to auth.py) ──────────────────
-
-def check_quote_owner(quote_id):
-    """非管理员只能操作自己的报价单。返回 (quote_or_error, status_code)."""
-    quote = db.session.get(Quote, quote_id)
-    if not quote:
-        return None, jsonify({'error': '报价单不存在'}), 404
-    if g.current_user.role != 'admin' and quote.created_by != g.current_user.id:
-        return None, jsonify({'error': '无权操作此报价单'}), 403
-    return quote, None, None
-
-
-# ─── Admin API (moved to admin_bp.py) ───────────────────────
-# Admin routes are now in admin_bp.py; register blueprint below.
-
-# ─── 系统设置 Helper（仍被 app.py 其他路由使用） ───────
-def get_setting(key, default=''):
-    """读取单个系统设置"""
-    s = SystemSetting.query.filter_by(key=key).first()
-    return s.value if s else default
-
-def get_all_settings():
-    """读取所有系统设置 (返回dict)"""
-    return {s.key: s.value for s in SystemSetting.query.all()}
 
 def _get_ai_system_prompt():
     """获取 AI 系统提示词 — 委托给 ai_bp 实现（单一来源）"""
@@ -210,27 +163,7 @@ def check_auth():
         return jsonify({'error': '下载凭证无效或已过期'}), 401
     return jsonify({'error': '请先登录'}), 401
 
-# 字段可见性缓存
-_field_cache = None
-_field_cache_time = None
-
-def get_field_visibility():
-    global _field_cache, _field_cache_time
-    now = datetime.now()
-    if _field_cache and _field_cache_time and (now - _field_cache_time).seconds < 300:
-        return _field_cache
-    _field_cache = {f.field_name: f.user_visible for f in FieldSetting.query.all()}
-    _field_cache_time = now
-    return _field_cache
-
-def filter_fields_for_user(data_dict, is_admin):
-    if is_admin:
-        return data_dict
-    visibility = get_field_visibility()
-    for field in ['cost_price', 'remark', 'supplier', 'function_desc']:
-        if field in data_dict and not visibility.get(field, True):
-            data_dict[field] = '(无权限查看)'
-    return data_dict
+# 字段可见性缓存 — 已移至 helpers.py（from helpers import get_field_visibility, filter_fields_for_user）
 
 # ----- Products (moved to products_bp.py) -----
 # All product route handlers have been moved to products_bp.py

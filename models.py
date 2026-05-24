@@ -7,13 +7,13 @@ class Product(db.Model):
     __tablename__ = 'products'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False, index=True)
-    sku = db.Column(db.String(100), nullable=True)
+    sku = db.Column(db.String(100), nullable=True, index=True)
     category = db.Column(db.String(100), nullable=True, index=True)
     spec = db.Column(db.String(500), nullable=True)
     unit = db.Column(db.String(20), nullable=True)
-    price = db.Column(db.Float, nullable=True)
-    cost_price = db.Column(db.Float, nullable=True)
-    supplier = db.Column(db.String(200), nullable=True)
+    price = db.Column(db.Numeric(10, 2, asdecimal=False), nullable=True)
+    cost_price = db.Column(db.Numeric(10, 2, asdecimal=False), nullable=True)
+    supplier = db.Column(db.String(200), nullable=True, index=True)
     function_desc = db.Column(db.Text, nullable=True)
     remark = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(500), nullable=True)
@@ -25,11 +25,14 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
-    def to_dict(self):
+    def to_dict(self, users_map=None):
         creator_name = None
         if self.created_by:
-            creator = db.session.get(User, self.created_by)
-            creator_name = creator.username if creator else None
+            if users_map is not None:
+                creator_name = users_map.get(self.created_by)
+            else:
+                creator = db.session.get(User, self.created_by)
+                creator_name = creator.username if creator else None
         return {
             'id': self.id,
             'name': self.name,
@@ -62,11 +65,11 @@ class Quote(db.Model):
     quote_date = db.Column(db.String(20), nullable=True)
     valid_days = db.Column(db.Integer, default=15)
     status = db.Column(db.String(20), default='draft', index=True)
-    total_amount = db.Column(db.Float, default=0)
+    total_amount = db.Column(db.Numeric(12, 2, asdecimal=False), default=0)
     download_count = db.Column(db.Integer, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
     remark = db.Column(db.Text, nullable=True)
-    tax_rate = db.Column(db.Float, default=0)
+    tax_rate = db.Column(db.Numeric(5, 2, asdecimal=False), default=0)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     items = db.relationship('QuoteItem', backref='quote', lazy='dynamic',
@@ -111,9 +114,9 @@ class QuoteItem(db.Model):
     product_spec = db.Column(db.String(500), nullable=True)
     product_unit = db.Column(db.String(20), nullable=True)
     quantity = db.Column(db.Integer, default=1)
-    unit_price = db.Column(db.Float, default=0)
-    amount = db.Column(db.Float, default=0)
-    discount_rate = db.Column(db.Float, default=100)  # 折扣率(%), 100=原价
+    unit_price = db.Column(db.Numeric(10, 2, asdecimal=False), default=0)
+    amount = db.Column(db.Numeric(12, 2, asdecimal=False), default=0)
+    discount_rate = db.Column(db.Numeric(5, 2, asdecimal=False), default=100)  # 折扣率(%), 100=原价
     remark = db.Column(db.String(500), nullable=True)
     sort_order = db.Column(db.Integer, default=0)
 
@@ -150,7 +153,7 @@ class DownloadLog(db.Model):
     quote_id = db.Column(db.Integer, db.ForeignKey('quotes.id', ondelete='CASCADE'), nullable=False)
     user_name = db.Column(db.String(100), nullable=False)
     downloaded_at = db.Column(db.DateTime, default=datetime.now)
-    quote = db.relationship('Quote', backref=db.backref('download_logs', cascade='all, delete-orphan'))
+    quote = db.relationship('Quote', backref=db.backref('download_logs'))  # 审计日志不随报价单删除
 
     def to_dict(self):
         return {
@@ -221,6 +224,9 @@ class AIChatSession(db.Model):
 class AIUsageLog(db.Model):
     """AI 调用统计 — 记录每次chat/recognize调用"""
     __tablename__ = 'ai_usage_logs'
+    __table_args__ = (
+        db.Index('ix_ai_usage_user_created', 'user_id', 'created_at'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     action = db.Column(db.String(30), nullable=False, index=True)  # 'chat' / 'recognize'

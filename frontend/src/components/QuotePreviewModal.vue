@@ -1,7 +1,8 @@
 <script setup>
-import { ref, watch, inject, computed } from 'vue'
+import { ref, watch, inject, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { useApi, BASE_URL } from '../composables/useApi'
+import { useApi } from '../composables/useApi'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import DOMPurify from 'dompurify'
 
 const props = defineProps({
@@ -13,7 +14,12 @@ const emit = defineEmits(['update:show'])
 
 const router = useRouter()
 const toast = inject('toast')
-const { api, authToken } = useApi()
+const { api, apiRaw, authToken } = useApi()
+
+const modalRef = ref(null)
+const emailModalRef = ref(null)
+const { activate, deactivate } = useFocusTrap(modalRef, close)
+const { activate: activateEmail, deactivate: deactivateEmail } = useFocusTrap(emailModalRef, () => { showEmailModal.value = false })
 
 const previewHtml = ref('')
 const safeHtml = computed(() => DOMPurify.sanitize(previewHtml.value, {
@@ -32,6 +38,9 @@ watch(() => props.show, (val) => {
   if (val && props.quoteId) {
     title.value = props.quoteTitle || '报价单预览'
     loadPreview()
+    nextTick(() => activate())
+  } else if (!val) {
+    deactivate()
   }
 })
 
@@ -39,11 +48,8 @@ async function loadPreview() {
   previewHtml.value = ''
   previewLoading.value = true
   try {
-    const token = authToken.value
-    const r = await fetch(BASE_URL + `/api/quotes/${props.quoteId}/preview`, {
-      headers: { Authorization: 'Bearer ' + token, Accept: 'text/html' }
-    })
-    if (r.status === 401) {
+    const r = await apiRaw(`/api/quotes/${props.quoteId}/preview`, 'GET', null, { Accept: 'text/html' })
+    if (!r) {
       previewHtml.value = '<p class="text-danger text-center py-4">会话已过期，请重新登录</p>'
     } else if (!r.ok) {
       previewHtml.value = `<p class="text-danger text-center py-4">加载失败 (${r.status})</p>`
@@ -58,18 +64,14 @@ async function loadPreview() {
 }
 
 async function downloadQuote() {
-  const token = authToken.value
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   try {
-    // 先获取短期下载ticket（避免JWT暴露在URL中）
-    const tr = await fetch(BASE_URL + '/api/download-ticket', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + token }
-    })
-    if (!tr.ok) { toast(`获取下载凭证失败 (${tr.status})`, 'danger'); return }
-    const { ticket } = await tr.json()
-    const url = BASE_URL + `/api/quotes/${props.quoteId}/export-excel?download_ticket=${encodeURIComponent(ticket)}&download_date=${dateStr}`
-    const r = await fetch(url)
+    const ticketResp = await api('/api/download-ticket', 'POST')
+    if (ticketResp.error) { toast(`获取下载凭证失败: ${ticketResp.error}`, 'danger'); return }
+    const ticket = ticketResp.ticket
+    const url = `/api/quotes/${props.quoteId}/export-excel?download_ticket=${encodeURIComponent(ticket)}&download_date=${dateStr}`
+    const r = await apiRaw(url)
+    if (!r) return
     if (!r.ok) { toast(`下载失败 (${r.status})`, 'danger'); return }
     const blob = await r.blob()
     const a = document.createElement('a')
@@ -98,6 +100,7 @@ async function downloadQuote() {
 function openEmailModal() {
   emailRecipient.value = ''
   showEmailModal.value = true
+  nextTick(() => activateEmail())
 }
 
 async function sendEmail() {
@@ -125,7 +128,7 @@ function editQuote() {
   <!-- Preview Modal -->
   <Teleport to="body">
     <div v-if="show" class="modal-backdrop show" @click="close()"></div>
-    <div v-if="show" class="modal d-block modern-modal" tabindex="-1">
+    <div v-if="show" ref="modalRef" class="modal d-block modern-modal" tabindex="-1">
       <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
@@ -152,7 +155,7 @@ function editQuote() {
   <!-- Email Modal -->
   <Teleport to="body">
     <div v-if="showEmailModal" class="modal-backdrop show" @click="showEmailModal = false"></div>
-    <div v-if="showEmailModal" class="modal d-block modern-modal" tabindex="-1">
+    <div v-if="showEmailModal" ref="emailModalRef" class="modal d-block modern-modal" tabindex="-1">
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">

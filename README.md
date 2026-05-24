@@ -57,7 +57,7 @@
                                              │                    │
                                         ┌────▼───────┐     ┌─────▼─────────┐
                                         │   Flask     │────▶│ Responses API  │
-                                        │ 4 Blueprints│     │ 会话存储       │
+                                        │ 5 Blueprints│     │ 会话存储       │
                                         │ JWT Auth    │     │ 工具调用过滤    │
                                         │ SQLAlchemy  │     └───────────────┘
                                         │ Migrate     │
@@ -73,7 +73,7 @@
 |---|------|------|
 | Web 服务器 | nginx | 反向代理，TLS 终端，路径 `/quote/` → Gunicorn |
 | 应用服务器 | Gunicorn | 2 worker 进程（`--preload`），绑定 `127.0.0.1:5001` |
-| 后端框架 | Flask + SQLAlchemy | 4 Blueprint 拆分（products / quotes / admin / ai）+ auth 独立模块 |
+| 后端框架 | Flask + SQLAlchemy | 5 Blueprint 拆分（auth / products / quotes / admin / ai）+ helpers 共享模块 |
 | DB 迁移 | Flask-Migrate (Alembic) | 替代手动 ALTER TABLE，版本化 schema 变更 |
 | AI 引擎 | Hermes Gateway | Responses API（`/v1/responses`），服务端会话存储，工具调用过滤 |
 | 认证 | JWT (PyJWT) | 无状态 token，bcrypt 密码哈希，自动续签 |
@@ -569,16 +569,17 @@ frontend/src/
 
 ```
 /opt/quote-system/
-├── app.py                     # Flask 应用（387行）4 Blueprint 注册 + DB 初始化
+├── app.py                     # Flask 应用入口 + 中间件 + DB 初始化
+├── helpers.py                 # 共享辅助函数（settings/field_visibility/quote_owner）
 ├── extensions.py              # db = SQLAlchemy() 单例
-├── models.py                  # 10 个数据模型（243行）
-├── products_bp.py             # 产品 Blueprint（971行）CRUD + 导入 + 识别
-├── quotes_bp.py               # 报价单 Blueprint（886行）CRUD + 导出 + 预览 + 邮件
-├── ai_bp.py                   # AI Blueprint（568行）SSE 对话 + 速率限制
-├── admin_bp.py                # 管理 Blueprint（273行）用户/设置/Prompt
-├── auth.py                    # 认证模块（219行）JWT 登录/注册/续签
-├── utils.py                   # 通用工具（64行）debug_log/log_ai_usage/safe_number/pinyin
-├── product_utils.py           # 产品工具（516行）识别/图片/解析/压缩
+├── models.py                  # 10 个数据模型（Numeric 货币字段 + 索引优化）
+├── products_bp.py             # 产品 Blueprint（CRUD + 导入 + 识别 + 图片上传/下载）
+├── quotes_bp.py               # 报价单 Blueprint（CRUD + 导出 + 预览 + 邮件 + 下载票据）
+├── ai_bp.py                   # AI Blueprint（SSE 对话 + AI token + 速率限制）
+├── admin_bp.py                # 管理 Blueprint（用户/设置/Prompt/AI 使用统计）
+├── auth.py                    # 认证模块（JWT 登录/注册/续签）
+├── utils.py                   # 通用工具（debug_log/log_ai_usage/safe_number/pinyin）
+├── product_utils.py           # 产品工具（识别/图片/解析/压缩）
 ├── migrations/                # Flask-Migrate (Alembic) 迁移目录
 ├── frontend/                  # Vue 3 SPA
 │   ├── src/                   # 源码
