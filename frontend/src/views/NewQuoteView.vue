@@ -426,8 +426,7 @@ async function autoAddProducts() {
       <div v-if="items.length === 0" class="border-top pt-2 mt-2">
         <div class="d-flex justify-content-end gap-4 small text-muted">
           <span>小计: ¥0</span>
-          <span>税: ¥0</span>
-          <span class="fw-bold">总计: ¥0</span>
+          <span class="fw-bold">合计: ¥0</span>
         </div>
       </div>
 

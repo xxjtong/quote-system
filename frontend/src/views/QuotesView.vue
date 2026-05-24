@@ -221,7 +221,7 @@ function closePreview() {
       </div>
 
       <!-- Batch action bar -->
-      <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 rounded mb-3" style="position:sticky;top:0;z-index:10;background:var(--bs-primary);color:#fff">
+      <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 rounded mb-3" style="position:sticky;top:0;z-index:10;background:var(--primary);color:#fff">
         <i class="bi bi-check2-square me-1"></i>
         <span class="small fw-medium">已选 {{ selectedIds.size }} 条报价单</span>
         <button class="btn btn-sm btn-light btn-modern ms-2" @click="batchDelete">
@@ -244,12 +244,12 @@ function closePreview() {
                 <input type="checkbox" class="form-check-input" v-model="selectAll" @change="toggleSelectAll">
               </th>
               <th>标题</th>
-              <th>客户</th>
+              <th class="d-none d-md-table-cell">客户</th>
               <th>状态</th>
               <th>金额</th>
-              <th>创建者</th>
-              <th>日期</th>
-              <th>下载</th>
+              <th class="d-none d-md-table-cell">创建者</th>
+              <th class="d-none d-md-table-cell">日期</th>
+              <th class="d-none d-md-table-cell">下载次数</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -264,7 +264,7 @@ function closePreview() {
               <td>
                 <span class="fw-medium" style="cursor:pointer;color:var(--primary)" @click="router.push({name:'quotes',params:{id:q.id}})">{{ q.title || '未命名' }}</span>
               </td>
-              <td>{{ q.client || '—' }}</td>
+              <td class="d-none d-md-table-cell">{{ q.client || '—' }}</td>
               <td>
                 <div class="dropdown">
                   <button class="btn btn-sm dropdown-toggle" style="font-size:.75rem;padding:.15rem .5rem"
@@ -284,9 +284,9 @@ function closePreview() {
                 </div>
               </td>
               <td class="fw-medium">{{ formatMoney(q.total_amount) }}</td>
-              <td>{{ q.created_by_name || '—' }}</td>
-              <td class="text-muted small">{{ q.quote_date || '—' }}</td>
-              <td>{{ q.download_count || 0 }}次</td>
+              <td class="d-none d-md-table-cell">{{ q.created_by_name || '—' }}</td>
+              <td class="text-muted small d-none d-md-table-cell">{{ q.quote_date || '—' }}</td>
+              <td class="d-none d-md-table-cell">{{ q.download_count || 0 }}次</td>
               <td>
                 <div class="d-flex flex-wrap gap-1">
                   <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="viewQuote(q.id, q.title)" title="预览">

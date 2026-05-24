@@ -95,7 +95,7 @@ onMounted(() => { fetchDashboard() })
             <div class="stat-icon" style="background:#fef3c7;color:var(--warning)"><i class="bi bi-download"></i></div>
             <div><div class="text-muted" style="font-size:.72rem">下载</div><div class="fw-bold fs-4">{{ stats.downloadTotal }}</div></div>
           </div>
-          <div class="mt-2 small text-muted">共 {{ stats.downloadTotal }} 次</div>
+          <div class="mt-2 small text-muted">报价单下载次数</div>
         </div>
       </div>
       <div class="col-6 col-md-3">

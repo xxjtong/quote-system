@@ -131,19 +131,20 @@ onMounted(async () => {
       <div class="sidebar-logo" style="position:relative">
         <h5><i class="bi bi-file-text me-2"></i>报价系统</h5>
         <small>硬件报价管理平台</small>
-        <button class="sidebar-collapse-btn d-none d-lg-block" @click="toggleCollapse" :title="sidebarCollapsed ? '展开菜单' : '收起菜单'">
+        <button class="sidebar-collapse-btn" @click="toggleCollapse" :title="sidebarCollapsed ? '展开菜单' : '收起菜单'">
           <i :class="sidebarCollapsed ? 'bi bi-chevron-right' : 'bi bi-chevron-left'"></i>
         </button>
       </div>
       <div class="sidebar-nav">
-        <a v-for="tab in tabs" :key="tab.id"
-           class="nav-link"
-           :class="{ active: route.name === tab.id }"
-           :style="tab.adminOnly && !isAdmin() ? {display:'none'} : {}"
-           @click="route.name === tab.id ? router.go(0) : router.push({name: tab.id})">
-          <i :class="tab.icon"></i> {{ tab.label }}
-          <span v-if="tab.badge" class="badge" @click.stop="router.push({name:'newquote'})">{{ tab.badge }}</span>
-        </a>
+        <template v-for="tab in tabs" :key="tab.id">
+          <a v-if="!tab.adminOnly || isAdmin()"
+             class="nav-link"
+             :class="{ active: route.name === tab.id }"
+             @click="route.name === tab.id ? router.go(0) : router.push({name: tab.id})">
+            <i :class="tab.icon"></i> {{ tab.label }}
+            <span v-if="tab.badge" class="badge" @click.stop="router.push({name:'newquote'})">{{ tab.badge }}</span>
+          </a>
+        </template>
         <hr style="border-color: rgba(255,255,255,.08); margin: .5rem 0;">
         <a class="nav-link" style="opacity:.6; font-size:.8rem; cursor:default">
           <i class="bi bi-info-circle"></i> <span>{{ version || 'v—' }}</span>

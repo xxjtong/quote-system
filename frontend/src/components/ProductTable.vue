@@ -218,7 +218,7 @@ onMounted(() => {
     </div>
 
     <!-- Batch action bar -->
-    <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 rounded mb-3" style="position:sticky;top:0;z-index:10;background:var(--bs-primary);color:#fff">
+    <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 rounded mb-3" style="position:sticky;top:0;z-index:10;background:var(--primary);color:#fff">
       <i class="bi bi-check2-square me-1"></i>
       <span class="small fw-medium">已选 {{ selectedIds.size }} 个产品</span>
       <button class="btn btn-sm btn-light btn-modern ms-2" @click="batchDelete">
@@ -246,12 +246,12 @@ onMounted(() => {
                 @change="toggleAll">
             </th>
             <th>产品名称</th>
-            <th>规格型号</th>
-            <th>图片</th>
-            <th>分类</th>
-            <th>厂商</th>
+            <th class="d-none d-md-table-cell">规格型号</th>
+            <th class="d-none d-md-table-cell">图片</th>
+            <th class="d-none d-md-table-cell">分类</th>
+            <th class="d-none d-md-table-cell">厂商</th>
             <th>销售单价</th>
-            <th>创建人</th>
+            <th class="d-none d-md-table-cell">创建人</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -276,10 +276,10 @@ onMounted(() => {
               <div class="text-truncate fw-medium" style="max-width:200px;color:var(--gray-800)">{{ p.name }}</div>
               <div v-if="p.function_desc" class="text-truncate small text-muted" style="max-width:200px">{{ p.function_desc }}</div>
             </td>
-            <td>
+            <td class="d-none d-md-table-cell">
               <span class="text-truncate d-inline-block" style="max-width:120px" :title="p.spec || ''">{{ p.spec || '—' }}</span>
             </td>
-            <td>
+            <td class="d-none d-md-table-cell">
               <div class="img-cell" style="position:relative;display:inline-block">
                 <img v-if="p.has_image || p.image_url" :src="imageSrc(p)" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer"
                   class="img-thumb"
@@ -288,14 +288,14 @@ onMounted(() => {
                 <i v-else class="bi bi-image text-muted" style="font-size:1.2rem;opacity:.4"></i>
               </div>
             </td>
-            <td>
+            <td class="d-none d-md-table-cell">
               <span v-for="(tag, i) in (p.category || '').split(',').filter(Boolean)" :key="i"
                 class="badge bg-light text-dark me-1" style="font-weight:400">{{ tag.trim() }}</span>
               <span v-if="!p.category" class="text-muted">—</span>
             </td>
-            <td class="td-name" style="max-width:100px">{{ p.supplier || '—' }}</td>
+            <td class="td-name d-none d-md-table-cell" style="max-width:100px">{{ p.supplier || '—' }}</td>
             <td class="text-end fw-medium">{{ formatMoney(p.price) }}</td>
-            <td class="small text-muted">{{ p.created_by_name || '系统' }}</td>
+            <td class="small text-muted d-none d-md-table-cell">{{ p.created_by_name || '系统' }}</td>
             <td v-if="isAdmin() || p.created_by === currentUser?.id">
               <div class="d-flex gap-1">
                 <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="$emit('edit', p)" title="编辑">

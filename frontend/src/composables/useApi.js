@@ -65,7 +65,7 @@ export function useApi() {
 
   // SSE 流式请求（不读 body，由调用方处理 ReadableStream）
   function apiStream(url, body) {
-    const headers = { Accept: 'text/event-stream' }
+    const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' }
     if (authToken.value) headers['Authorization'] = 'Bearer ' + authToken.value
     return fetch(BASE_URL + url, {
       method: 'POST',

@@ -52,12 +52,93 @@
 - ⚠️ 依赖: `flask flask-sqlalchemy flask-cors pyjwt openpyxl pypinyin Pillow`（`pypinyin` 是 lazy import，`import app` 检测不到遗漏；`Pillow` 是 openpyxl 处理图片所需）
 
 ### AI 对话
-- 价格解析: 7 种 Pattern 全面支持 ¥ 和 元 格式（v2.2.0）
-- Pattern 6: (ID=N) 产品 ID 引用，返回 product_id 字段
-- Pattern 7: 价格回溯——先找 ¥/元价格，向上 2 行找型号
-- 一键创建报价单: 前端优先传 product_ids 参数，autoAddProductsById
-- 方案 quick_replies: 支持「方案A（描述）」格式，去掉重复括号
-- SSE 日志写入: 在 generator 外部（请求上下文内），避免流式传输中误计使用次数
+
+#### 架构总览
+
+```
+浏览器 (AiChat.vue)                     Flask (ai_bp.py)                  Hermes Gateway (:8642)          DeepSeek API
+  │                                        │                                  │                              │
+  │─ SSE 流式请求 ──────────────────────>│                                  │                              │
+  │  POST /api/chat                       │─ POST /v1/chat/completions ────>│ (轻量消息, 带 auth key)      │
+  │  {input, stream:true,                 │  或                              │                              │
+  │   history, conversation_id}           │─ POST /v1/responses ───────────>│ (完整Agent, 带 auth key)     │
+  │                                        │                                  │─ agent.run ─────────────────>│
+  │                                        │                                  │<─ SSE text deltas ─────────│
+  │<─ SSE: connect ──────────────────────│<─ SSE stream ────────────────────│                              │
+  │<─ SSE: text delta ──────────────────│                                  │                              │
+  │<─ SSE: done + parsed ───────────────│                                  │                              │
+  │<─ SSE: quick_replies (并行) ────────│ (收到100字后后台启动LLM生成)       │                              │
+```
+
+#### 核心组件
+
+| 组件 | 文件 | 职责 |
+|------|------|------|
+| AiChat.vue | `frontend/src/components/AiChat.vue` | 对话UI、SSE消费、消息渲染、历史管理 |
+| ai_bp.py | `ai_bp.py` | 路由、输入验证、轻量判定、Gateway调用、回复解析 |
+| Hermes Gateway | `:8642` | Agent循环、工具调用(DB/API)、模型路由 |
+| DeepSeek API | `api.deepseek.com/v1` | LLM推理 |
+
+#### 请求流程
+
+1. **前端**: `sendMessage()` → `apiStream('/api/chat', {input, stream:true, history, conversation_id})`
+   - SSE流式需要 `Content-Type: application/json` 头（缺少则 Flask 无法解析 body → "请输入问题"）
+   - `history`: 最近3轮对话(6条)，每条截取200字，改善多轮连贯性
+   - `conversation_id`: 前端session ID，Gateway据此维护对话session
+
+2. **后端 ai_chat()**: 
+   - **速率限制**: 内存计数器（threading.Lock），每分钟5次（v2.4.0改为内存，原是DB COUNT）
+   - **轻量判定**: `_is_lightweight()` 正则匹配问候/确认/帮助类简单消息 → 走 `/v1/chat/completions`
+   - **正常消息**: 走 `/v1/responses`（Agent循环，有工具调用能力）
+   - **max_tokens 动态调整**: 列表/报价类2000，分析/推荐类1500，默认800
+   - System prompt 有30s TTL缓存（`_prompt_cache`），不变时不重复发送 instructions
+   - Gateway 调用需要 `Authorization: Bearer {QUOTE_GATEWAY_KEY}` 头
+
+3. **Gateway**: 
+   - Profile: `qoute`（`/home/tong/.hermes/profiles/qoute/config.yaml`）
+   - model.provider: `deepseek`，读取 `DEEPSEEK_API_KEY` 环境变量
+   - API Server key: `qs-65bf75614bdd4245`（`api_server.extra.key`）
+
+4. **SSE 流式** (`_ai_chat_sse`):
+   - 透传 Gateway `/v1/responses` SSE stream → 解析 `response.output_text.delta` 事件
+   - **并行 quick_reply**: 累积100字后后台线程启动 LLM 生成，主回复完成后 join(2s)
+   - 事件类型: `connect` → `first_token` → `text` → `done`(+parsed) → `quick_replies` → `[DONE]`
+
+#### 配置
+
+```bash
+# /opt/quote-system/.env
+QUOTE_GATEWAY_URL=http://127.0.0.1:8642
+QUOTE_GATEWAY_KEY=qs-65bf75614bdd4245
+DEEPSEEK_API_KEY=sk-...
+
+# Gateway systemd 需注入 DEEPSEEK_API_KEY
+# /home/tong/.config/systemd/user/hermes-gateway-qoute.service.d/override.conf
+Environment="DEEPSEEK_API_KEY=sk-..."
+```
+
+#### 价格解析: 8 种 Pattern + 黑名单
+
+Pattern 1-7 覆盖 ¥ 和 元 格式（v2.2.0），Pattern 4 已合并（v2.4.0）：
+- Pattern 1: "产品名 — ¥价格"
+- Pattern 2: 型号（描述）上下文内查找价格
+- Pattern 3: "产品名 N台 ¥价格" 或 × 格式
+- Pattern 4 (合并): 型号 + ¥/元 价格（紧凑格式/品牌/单位后缀）
+- Pattern 5: markdown 表格行
+- Pattern 6: (ID=N) 产品ID引用，返回 product_id 字段
+- Pattern 7: 价格回溯——先找 ¥/元价格，向上2行找型号
+
+非产品词黑名单（v2.4.0）：成本价、销售价、单价、合计、方案一/二/三 等，最终过滤。
+
+#### 一键创建报价单
+
+- AI 回复中提取的产品名/ID → `parsed.products` → 前端"一键创建报价单"按钮
+- 优先传 `product_ids` 参数 → `autoAddProductsById()` 按ID精确匹配
+- 否则传 `products` 参数（产品名）→ `autoAddProducts()` 按名称搜索匹配
+
+#### SSE 日志写入
+
+在 generator 外部（请求上下文内）记录使用，避免流式传输中误计使用次数。
 
 ### 本地开发环境
 - 仓库: `~/quote-system`

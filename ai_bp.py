@@ -4,6 +4,7 @@ AI Blueprint — AI 对话、使用统计相关 API 路由
 
 import os
 import re
+import threading
 from datetime import datetime, timedelta
 
 from flask import Blueprint, request, jsonify, g, Response
@@ -18,6 +19,7 @@ ai_bp = Blueprint('ai', __name__)
 # ─── 配置 ──────────────────────────────────────────────────
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
 _gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8642')
+_gateway_key = os.environ.get('QUOTE_GATEWAY_KEY', '')
 
 _AVAILABLE_MODELS = [
     {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash', 'desc': '快速响应，适合日常问答'},
@@ -133,7 +135,7 @@ def _call_flash_via_gateway(system_msg, user_msg, max_tokens=100, timeout=8):
     req = urllib.request.Request(
         f'{_gateway_url}/v1/chat/completions',
         data=body.encode('utf-8'),
-        headers={'Content-Type': 'application/json'},
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
         method='POST'
     )
     try:
@@ -223,6 +225,14 @@ def _parse_reply_actions(reply_text):
     reply_text = reply_text.replace('quote.db', '[数据库]')
 
     result = {'products': [], 'quote_refs': [], 'quick_replies': []}
+
+    # 非产品词黑名单
+    _NON_PRODUCT = {
+        '成本价', '销售价', '销售单价', '单价', '价格', '总价', '合计', '小计',
+        '折扣', '数量', '单位', '规格', '型号', '备注', '总计', '原价',
+        '方案一', '方案二', '方案三', '方案A', '方案B', '方案C',
+        '报价单', '产品名称', '产品', '报价明细',
+    }
 
     for m in re.finditer(r'(?:报价单|#)\s*(\d{1,5})', reply_text):
         result['quote_refs'].append(int(m.group(1)))
@@ -358,39 +368,22 @@ def _parse_reply_actions(reply_text):
                 except ValueError:
                     result['products'].append({'name': name, 'price': 0})
 
-    # Pattern 4: 型号 + ¥价格 紧凑格式（如 "UG63 ¥990"）
-    if len(result['products']) < 12:
-        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})\s+(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
-            name = m.group(1).strip()
-            price_str = m.group(2)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3:
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': name, 'price': 0})
-
-    # Pattern 4b: 型号 + N元 — "WS558-470M 607.5元"
-    if len(result['products']) < 12:
-        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})\s+([\d,]+\.?\d*)\s*元', reply_text):
-            name = m.group(1).strip()
-            price_str = m.group(2)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3:
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': name, 'price': 0})
-
-    # Pattern 4c: 型号 品牌 N元/个 — "WS202-470M 星纵 270元/个"
-    # 过滤纯品牌短词：BOE, AOC, HIS 等
+    # Pattern 4 (合并): 型号 + 价格 — 覆盖 ¥、元、N元/台 等多种格式
     _brand_blacklist = {'BOE', 'AOC', 'HIS', 'LED', 'OEM', 'SDK', 'API'}
     if len(result['products']) < 12:
-        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})\s+[\u4e00-\u9fffA-Za-z]{1,10}\s+([\d,]+\.?\d*)\s*元', reply_text):
+        for m in re.finditer(
+            r'([A-Z][A-Z0-9\-/]{2,20})'
+            r'(?:\s+[\u4e00-\u9fffA-Za-z]{1,10})?'  # 可选品牌名
+            r'\s+'
+            r'(?:'
+            r'(?:¥|￥)\s*([\d,]+\.?\d*)'          # ¥价格
+            r'|'
+            r'([\d,]+\.?\d*)\s*元(?:/[台个只套件路])?'  # N元 或 N元/台
+            r')',
+            reply_text
+        ):
             name = m.group(1).strip()
-            price_str = m.group(2)
+            price_str = m.group(2) or m.group(3)
             norm = name.replace(' ', '')
             if norm not in seen and len(name) >= 3 and name not in _brand_blacklist:
                 seen.add(norm)
@@ -481,7 +474,8 @@ def _parse_reply_actions(reply_text):
         if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
             result['quick_replies'] = [p['name'] for p in result['products'][:6]]
 
-    # 注意：LLM兜底生成quick_replies已移到SSE层异步执行，不阻塞_parse_reply_actions
+    # 过滤非产品词
+    result['products'] = [p for p in result['products'] if p['name'] not in _NON_PRODUCT]
 
     dl_match = re.search(r'(https://bwh\.ddns\.mobi/quote/api/quotes/(\d+)/export-excel)', reply_text)
     if dl_match:
@@ -492,17 +486,147 @@ def _parse_reply_actions(reply_text):
 
 # ─── AI 速率限制 ────────────────────────────────────────────
 _AI_RATE_LIMIT = 5  # 每分钟最多5次
+_rate_limit_cache = {}  # {user_id: [timestamp, ...]}
+_rate_lock = threading.Lock()
 
 def _check_ai_rate_limit(user_id):
-    """DB-based rate limit — works across gunicorn workers. Returns True if rate limited."""
-    from sqlalchemy import func as _func
-    cutoff = datetime.now() - timedelta(minutes=1)
-    recent = AIUsageLog.query.filter(
-        AIUsageLog.user_id == user_id,
-        AIUsageLog.action == 'chat',
-        AIUsageLog.created_at >= cutoff
-    ).count()
-    return recent >= _AI_RATE_LIMIT
+    """Memory-based rate limit with periodic cleanup."""
+    now = datetime.now()
+    cutoff = now - timedelta(minutes=1)
+    with _rate_lock:
+        timestamps = [t for t in _rate_limit_cache.get(user_id, []) if t > cutoff]
+        _rate_limit_cache[user_id] = timestamps
+        if len(timestamps) >= _AI_RATE_LIMIT:
+            return True
+        timestamps.append(now)
+        _rate_limit_cache[user_id] = timestamps
+        return False
+
+
+# ─── Lightweight message detection ──────────────────────────
+_LIGHT_PATTERNS = re.compile(
+    r'^(你好|hi|hello|嗨|在吗|在不在|早上好|下午好|晚上好|晚安|'
+    r'好的|ok|行|可以|对|是的|没错|嗯|哦|明白了|懂了|收到|'
+    r'谢谢|多谢|thank|thanks|辛苦了|'
+    r'你是谁|你叫什么|帮助|help|怎么用|使用说明|'
+    r'再见|拜拜|bye|回头见)[！!。.,，?？\s]*$',
+    re.IGNORECASE
+)
+
+def _is_lightweight(text):
+    """判断是否为简单消息（无需 Agent 工具调用的消息）"""
+    return bool(_LIGHT_PATTERNS.match(text.strip()))
+
+
+def _handle_lightweight_chat(user_input, stream, t0, user):
+    """轻量消息：直接用 chat/completions，跳过 Agent 循环"""
+    import time, urllib.request, json as _json
+
+    system_msg = (
+        '你是童小军的 AI 助手，负责威思客智能空间的产品选型和报价管理。'
+        '请用中文友好回复，简洁自然。如果是问候，简单回应并询问有什么需要帮助。'
+    )
+    if stream:
+        def generate():
+            try:
+                api_body = _json.dumps({
+                    'model': 'deepseek-chat',
+                    'messages': [
+                        {'role': 'system', 'content': system_msg},
+                        {'role': 'user', 'content': user_input},
+                    ],
+                    'max_tokens': 200,
+                    'temperature': 0.7,
+                    'stream': True,
+                })
+                req = urllib.request.Request(
+                    f'{_gateway_url}/v1/chat/completions',
+                    data=api_body.encode('utf-8'),
+                    headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
+                    method='POST'
+                )
+                resp = urllib.request.urlopen(req, timeout=30)
+                t_connected = time.time()
+                yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{t_connected - t0:.1f}s"})}\n\n'
+
+                accumulated = ''
+                first_delta = True
+                for line_bytes in resp:
+                    line = line_bytes.decode('utf-8', errors='replace').strip()
+                    if not line or not line.startswith('data: '):
+                        continue
+                    data_str = line[6:]
+                    if data_str == '[DONE]':
+                        break
+                    try:
+                        chunk = _json.loads(data_str)
+                    except Exception:
+                        continue
+                    choices = chunk.get('choices', [])
+                    if choices:
+                        delta = choices[0].get('delta', {}).get('content', '')
+                        if delta:
+                            if first_delta:
+                                first_delta = False
+                                yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{time.time() - t_connected:.1f}s"})}\n\n'
+                            accumulated += delta
+                            yield f'data: {_json.dumps({"type": "text", "text": delta})}\n\n'
+
+                parsed = _parse_reply_actions(accumulated)
+                yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
+                if not parsed.get('quick_replies'):
+                    try:
+                        replies = _generate_quick_replies(accumulated)
+                        if replies:
+                            yield f'data: {_json.dumps({"type": "quick_replies", "items": replies})}\n\n'
+                    except Exception:
+                        pass
+            except Exception as e:
+                yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
+            yield f'data: [DONE]\n\n'
+
+        return Response(
+            generate(),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'}
+        )
+
+    # Non-streaming lightweight
+    try:
+        api_body = _json.dumps({
+            'model': 'deepseek-chat',
+            'messages': [
+                {'role': 'system', 'content': system_msg},
+                {'role': 'user', 'content': user_input},
+            ],
+            'max_tokens': 200,
+            'temperature': 0.7,
+        })
+        req = urllib.request.Request(
+            f'{_gateway_url}/v1/chat/completions',
+            data=api_body.encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
+            method='POST'
+        )
+        resp = urllib.request.urlopen(req, timeout=30)
+        t2 = time.time()
+        result = _json.loads(resp.read())
+        reply = result['choices'][0]['message']['content'].strip()
+        parsed = _parse_reply_actions(reply)
+
+        from utils import _log_ai_usage
+        _log_ai_usage(user_id=user.id, action='chat', model='deepseek-chat', elapsed=t2-t0)
+
+        return jsonify({
+            'reply': reply,
+            'parsed': parsed,
+            'model': 'deepseek-chat',
+            'timings': {'API': f'{t2 - t0:.1f}s', '总耗时': f'{t2 - t0:.1f}s'}
+        })
+    except Exception as e:
+        from utils import _log_ai_usage
+        _log_ai_usage(user_id=user.id, action='chat', model='deepseek-chat', elapsed=time.time()-t0, success=False, error=str(e)[:200])
+        return jsonify({'error': f'AI 服务异常: {str(e)}', 'timings': {'总耗时': f'{time.time() - t0:.1f}s'}}), 503
 
 
 # ─── Chat endpoint ──────────────────────────────────────────
@@ -522,23 +646,45 @@ def ai_chat():
     if not user_input:
         return jsonify({'error': '请输入问题'}), 400
 
+    # 拼接对话历史作为上下文
+    history = data.get('history') or []
+    if history and isinstance(history, list):
+        history_context = '以下为对话历史，仅供参考：\n'
+        for h in history[-6:]:  # 最多最近3轮(6条)
+            role = '用户' if h.get('role') == 'user' else 'AI'
+            history_context += f'{role}：{h.get("content", "")}\n'
+        user_input = history_context + '\n当前问题：' + user_input
+
+    stream = data.get('stream', False)
+    user = g.current_user
+
+    # 轻量消息走 chat/completions（快，省 token），跳过 Agent 循环
+    if _is_lightweight(user_input.split('\n当前问题：')[-1] if '\n当前问题：' in user_input else user_input):
+        return _handle_lightweight_chat(user_input, stream, t0, user)
+
     prompt = _get_ai_system_prompt()
     for line in prompt.split('\n')[:3]:
         if '童小军' in line or '不是 Hermes' in line:
             user_input = f'[{line.strip()}] {user_input}'
             break
 
-    stream = data.get('stream', False)
-    user = g.current_user
     conv_id = data.get('conversation_id', '') or ''
     # 每个前端session独立conversation，+号新建时conversation_id变化
     conversation = f'quote-user-{user.id}-{conv_id}' if conv_id else f'quote-user-{user.id}'
+
+    # 根据意图动态调整 max_tokens
+    if any(kw in user_input for kw in ['报价单', '报价', '列表', '所有', '全部', '统计', '列出']):
+        max_tokens = 2000
+    elif any(kw in user_input for kw in ['对比', '比较', '分析', '方案', '推荐']):
+        max_tokens = 1500
+    else:
+        max_tokens = 800
 
     body = {
         'model': data.get('model') or _ai_model,
         'input': user_input,
         'conversation': conversation,
-        'max_output_tokens': 800,
+        'max_output_tokens': max_tokens,
     }
 
     import hashlib
@@ -576,7 +722,7 @@ def ai_chat():
         req = urllib.request.Request(
             f'{_gateway_url}/v1/responses',
             data=_json.dumps(body).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
+            headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
             method='POST'
         )
         resp = urllib.request.urlopen(req, timeout=60)
@@ -626,11 +772,13 @@ def _ai_chat_sse(body, t0, user_id=None):
     def generate():
         t_connect = time.time()
         accumulated = ''
+        qr_thread = None
+        qr_result = [None]  # mutable container for thread result
         try:
             req = urllib.request.Request(
                 f'{_gateway_url}/v1/responses',
                 data=_json.dumps(body).encode('utf-8'),
-                headers={'Content-Type': 'application/json'},
+                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
                 method='POST'
             )
             resp = urllib.request.urlopen(req, timeout=60)
@@ -664,19 +812,36 @@ def _ai_chat_sse(body, t0, user_id=None):
                     accumulated += delta_text
                     yield f'data: {_json.dumps({"type": "text", "text": delta_text})}\n\n'
 
+                    # 累积足够文本后，后台启动 quick_reply 生成
+                    if not qr_thread and len(accumulated) > 100:
+                        def _gen_qr(text):
+                            try:
+                                qr_result[0] = _generate_quick_replies(text)
+                            except Exception:
+                                pass
+                        qr_thread = threading.Thread(target=_gen_qr, args=(accumulated,))
+                        qr_thread.daemon = True
+                        qr_thread.start()
+
                 if event_type and 'tool' in event_type.lower():
                     yield f'data: {_json.dumps({"type": "tool"})}\n\n'
 
             parsed = _parse_reply_actions(accumulated)
             yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
-            # 异步：如果规则没提取到 quick_replies，用 LLM 生成后补发
+
+            # 使用后台线程结果或同步生成
             if not parsed.get('quick_replies'):
-                try:
-                    llm_replies = _generate_quick_replies(accumulated)
-                    if llm_replies:
-                        yield f'data: {_json.dumps({"type": "quick_replies", "items": llm_replies})}\n\n'
-                except Exception:
-                    pass
+                llm_replies = None
+                if qr_thread:
+                    qr_thread.join(timeout=2.0)
+                    llm_replies = qr_result[0]
+                if not llm_replies:
+                    try:
+                        llm_replies = _generate_quick_replies(accumulated)
+                    except Exception:
+                        pass
+                if llm_replies:
+                    yield f'data: {_json.dumps({"type": "quick_replies", "items": llm_replies})}\n\n'
 
         except Exception as e:
             yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'

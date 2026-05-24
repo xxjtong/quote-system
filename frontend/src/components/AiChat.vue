@@ -164,7 +164,11 @@ async function sendMessage(textOverride) {
   try {
     // SSE streaming via apiStream
     const resp = await apiStream('/api/chat', {
-      input: text, stream: true, model: selectedModel.value, conversation_id: currentSessionId.value,
+      input: text, stream: true, model: selectedModel.value,
+      conversation_id: currentSessionId.value,
+      history: chatMessages.value.slice(-6).map(m => ({
+        role: m.role, content: m.content?.slice(0, 200),
+      })),
     })
 
     if (!resp.ok) {
