@@ -227,15 +227,16 @@ def _build_excel(quote, pmap, filepath):
                 pass
     row += 1
     ws.row_dimensions[row].height = 22
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
     total_amt = quote.total_amount or 0
     tlabel = ws.cell(row=row, column=1, value=f'合计（大写）：{number_to_cn(total_amt)}')
     tlabel.font = s['total_font']; tlabel.alignment = Alignment(horizontal='right', vertical='center'); tlabel.border = s['thin_border']
-    for ci in range(2, 11):
+    for ci in range(2, 10):
         c = ws.cell(row=row, column=ci); c.font = s['total_font']; c.border = s['thin_border']
-    tc = ws.cell(row=row, column=11, value=total_amt)
+    tc = ws.cell(row=row, column=10, value=total_amt)
     tc.font = s['total_font']; tc.number_format = s['money_fmt']; tc.alignment = s['ca']; tc.border = s['thin_border']
-    ws.cell(row=row, column=12).border = s['thin_border']; ws.cell(row=row, column=12).font = s['total_font']
+    for ci in range(11, s['COL_COUNT'] + 1):
+        ws.cell(row=row, column=ci).border = s['thin_border']; ws.cell(row=row, column=ci).font = s['total_font']
     row += 1
     ws.row_dimensions[row].height = 18
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=s['COL_COUNT'])
@@ -618,7 +619,7 @@ def export_quote_excel(quote_id):
     # ── 合计行 ──
     row += 1
     ws.row_dimensions[row].height = 22
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
 
     total_amt = quote.total_amount or 0
     tlabel = ws.cell(row=row, column=1, value=f'合计（大写）：{number_to_cn(total_amt)}')
@@ -626,16 +627,17 @@ def export_quote_excel(quote_id):
     tlabel.alignment = Alignment(horizontal='right', vertical='center')
     tlabel.border = s['thin_border']
 
-    for ci in range(2, 11):
+    for ci in range(2, 10):
         c = ws.cell(row=row, column=ci)
         c.font = s['total_font']; c.border = s['thin_border']
 
-    tc = ws.cell(row=row, column=11, value=total_amt)
+    tc = ws.cell(row=row, column=10, value=total_amt)
     tc.font = s['total_font']; tc.number_format = s['money_fmt']; tc.alignment = s['ca']
     tc.border = s['thin_border']
 
-    ws.cell(row=row, column=12).border = s['thin_border']
-    ws.cell(row=row, column=12).font = s['total_font']
+    for ci in range(11, s['COL_COUNT'] + 1):
+        ws.cell(row=row, column=ci).border = s['thin_border']
+        ws.cell(row=row, column=ci).font = s['total_font']
 
     # ── 备注行 ──
     row += 1
@@ -905,8 +907,10 @@ def preview_quote_html(quote_id):
   </tbody>
   <tfoot>
     <tr class="total-row">
-      <td colspan="11" style="text-align:right">合计（大写）：<strong>{number_to_cn(quote.total_amount or 0)}</strong></td>
+      <td colspan="9" style="text-align:right">合计（大写）：<strong>{number_to_cn(quote.total_amount or 0)}</strong></td>
       <td class="total-amount">¥{fmt(quote.total_amount or 0)}</td>
+      <td></td>
+      <td></td>
     </tr>
     <tr>
       <td colspan="13" style="font-size:9pt;padding:3px 2px;border:1px solid #ccc;border-top:none;text-align:left">注：硬件默认自验收日起维保1年，硬件1年内享受免费寄修服务。</td>
