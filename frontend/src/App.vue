@@ -29,6 +29,17 @@ function toggleCollapse() { sidebarCollapsed.value = !sidebarCollapsed.value }
 // Close sidebar on route change (mobile)
 watch(() => route.name, () => { closeSidebar() })
 
+// Force re-render of router-view when clicking current page
+const refreshKey = ref(0)
+function navOrRefresh(tab) {
+  if (route.name === tab.id) {
+    refreshKey.value++
+    router.replace({ name: tab.id })
+  } else {
+    router.push({ name: tab.id })
+  }
+}
+
 // ─── Tabs ───
 const tabs = [
   { id: 'dashboard', label: '首页', icon: 'bi bi-speedometer2' },
@@ -140,7 +151,7 @@ onMounted(async () => {
           <a v-if="!tab.adminOnly || isAdmin()"
              class="nav-link"
              :class="{ active: route.name === tab.id }"
-             @click="route.name === tab.id ? router.go(0) : router.push({name: tab.id})">
+             href="#" @click.prevent="navOrRefresh(tab)">
             <i :class="tab.icon"></i> {{ tab.label }}
             <span v-if="tab.badge" class="badge" @click.stop="router.push({name:'newquote'})">{{ tab.badge }}</span>
           </a>
@@ -174,7 +185,7 @@ onMounted(async () => {
         <i class="bi bi-list"></i>
       </button>
       <div class="main-content" :style="!sidebarOpen ? {paddingTop:'2.8rem'} : {}">
-        <router-view v-slot="{ Component }">
+        <router-view v-slot="{ Component }" :key="refreshKey">
           <template v-if="Component">
             <component :is="Component" />
           </template>

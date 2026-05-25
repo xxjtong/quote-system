@@ -247,3 +247,27 @@ class AIUsageLog(db.Model):
             'error': self.error or '',
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
         }
+
+
+class LoginLog(db.Model):
+    """用户登录记录 — 记录登录时间、IP、区域"""
+    __tablename__ = 'login_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    username = db.Column(db.String(50), nullable=False)
+    ip_address = db.Column(db.String(45), nullable=True)
+    region = db.Column(db.String(100), nullable=True)
+    user_agent = db.Column(db.String(300), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+    user = db.relationship('User', backref=db.backref('login_logs', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'username': self.username,
+            'ip_address': self.ip_address or '',
+            'region': self.region or '',
+            'user_agent': self.user_agent or '',
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
+        }

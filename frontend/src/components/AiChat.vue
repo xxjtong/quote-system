@@ -315,8 +315,11 @@ function quickReply(text) {
 }
 
 function cleanContent(msg) {
-  if (!msg.parsed?.created_quote) return msg.content
-  return msg.content.replace(/https:\/\/bwh\.ddns\.mobi\/quote\/api\/quotes\/\d+\/export-excel\s*/g, '').trim()
+  let text = msg.content
+  if (msg.parsed?.created_quote) {
+    text = text.replace(/https:\/\/bwh\.ddns\.mobi\/quote\/api\/quotes\/\d+\/export-excel\s*/g, '')
+  }
+  return text.trimStart()
 }
 
 // Pipe table → HTML + #N clickable links (防止溢出)

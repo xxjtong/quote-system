@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, g, current_app
 
 from extensions import db
-from models import User, FieldSetting, SystemSetting, AIChatSession, AIUsageLog
+from models import User, FieldSetting, SystemSetting, AIChatSession, AIUsageLog, LoginLog
 from auth import require_admin, hash_password, _is_registration_open
 from helpers import get_setting, get_all_settings
 
@@ -196,6 +196,8 @@ def update_user(user_id):
     if not user:
         return jsonify({'error': '用户不存在'}), 404
     data = request.get_json()
+    if user_id == 1 and 'role' in data and data['role'] != 'admin':
+        return jsonify({'error': '主管理员不能被降级'}), 403
     if 'is_active' in data:
         user.is_active = bool(data['is_active'])
     if 'role' in data and data['role'] in ('admin', 'user'):
@@ -232,6 +234,25 @@ def delete_user(user_id):
     db.session.delete(user)
     db.session.commit()
     return jsonify({'message': f'用户 {user.username} 已删除'})
+
+
+# ─── 登录记录 ───────────────────────────────────────────────
+@admin_bp.route('/login-logs', methods=['GET'])
+@require_admin
+def login_logs():
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 200)
+    user_id = request.args.get('user_id', type=int)
+    query = LoginLog.query.order_by(LoginLog.created_at.desc())
+    if user_id:
+        query = query.filter(LoginLog.user_id == user_id)
+    paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+    return jsonify({
+        'logs': [log.to_dict() for log in paginated.items],
+        'total': paginated.total,
+        'page': page,
+        'pages': paginated.pages,
+    })
 
 
 # ─── 下载 Ticket ───────────────────────────────────────────

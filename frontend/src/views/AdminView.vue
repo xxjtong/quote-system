@@ -206,11 +206,58 @@ async function resetAiPrompt() {
   await saveAiPrompt()
 }
 
+// ─── Login Logs ───
+const loginLogs = ref([])
+const loginLogCurrentPage = ref(1)
+const loginLogPerPage = ref(20)
+const loginLogTotal = ref(0)
+const loginLogTotalPages = computed(() => Math.max(1, Math.ceil(loginLogTotal.value / loginLogPerPage.value)))
+const loadingLoginLogs = ref(true)
+
+const loginLogPageNumbers = computed(() => {
+  const total = loginLogTotalPages.value
+  if (total <= 1) return []
+  const half = 3
+  let start = Math.max(1, loginLogCurrentPage.value - half)
+  let end = Math.min(total, loginLogCurrentPage.value + half)
+  if (start === 1) end = Math.min(total, start + 6)
+  else if (end === total) start = Math.max(1, end - 6)
+  const pages = []
+  for (let p = start; p <= end; p++) pages.push(p)
+  return pages
+})
+
+function loginLogGoPage(p) {
+  if (p < 1 || p > loginLogTotalPages.value) return
+  loginLogCurrentPage.value = p
+  fetchLoginLogs()
+}
+
+async function fetchLoginLogs() {
+  loadingLoginLogs.value = true
+  try {
+    const params = new URLSearchParams({
+      page: loginLogCurrentPage.value,
+      per_page: loginLogPerPage.value,
+    })
+    const data = await api(`/api/admin/login-logs?${params}`)
+    if (!data.error) {
+      loginLogs.value = data.logs || []
+      loginLogTotal.value = data.total || 0
+    }
+  } catch (e) {
+    toast('加载登录记录失败', 'danger')
+  } finally {
+    loadingLoginLogs.value = false
+  }
+}
+
 onMounted(() => {
   fetchUsers()
   fetchFields()
   fetchSettings()
   fetchAiPrompt()
+  fetchLoginLogs()
 })
 </script>
 
@@ -309,7 +356,7 @@ onMounted(() => {
               <td class="text-muted small">{{ u.last_login || '从未登录' }}</td>
               <td>
                 <div class="d-flex gap-1">
-                  <button class="btn btn-sm btn-outline-warning btn-sm-icon" @click="toggleUserRole(u)"
+                  <button v-if="u.id !== 1" class="btn btn-sm btn-outline-warning btn-sm-icon" @click="toggleUserRole(u)"
                     :title="u.role === 'admin' ? '降为普通用户' : '升为管理员'">
                     <i :class="u.role === 'admin' ? 'bi bi-arrow-down' : 'bi bi-arrow-up'"></i>
                   </button>
@@ -361,6 +408,66 @@ onMounted(() => {
           </label>
           <span class="small">{{ label }}</span>
         </div>
+      </div>
+    </div>
+
+    <!-- Login Logs -->
+    <div class="card-modern">
+      <div class="card-title-modern"><i class="bi bi-journal-text text-primary"></i>用户登录记录</div>
+      <div v-if="loadingLoginLogs" class="text-center py-3">
+        <div class="spinner-border spinner-border-sm text-primary"></div>
+      </div>
+      <div v-else class="table-responsive">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span v-if="!loadingLoginLogs" class="text-muted" style="font-size:.82rem">共 {{ loginLogTotal }} 条记录</span>
+          <select class="per-page-select" v-model.number="loginLogPerPage" @change="loginLogCurrentPage = 1; fetchLoginLogs()">
+            <option :value="10">10条/页</option>
+            <option :value="20">20条/页</option>
+            <option :value="50">50条/页</option>
+          </select>
+        </div>
+        <table class="table table-modern">
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>IP 地址</th>
+              <th>区域</th>
+              <th>User-Agent</th>
+              <th>登录时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="loginLogs.length === 0">
+              <td colspan="5"><div class="empty-state"><i class="bi bi-inbox"></i><p>暂无登录记录</p></div></td>
+            </tr>
+            <tr v-for="log in loginLogs" :key="log.id">
+              <td class="fw-medium">{{ log.username }}</td>
+              <td class="text-muted small">{{ log.ip_address || '—' }}</td>
+              <td>{{ log.region || '—' }}</td>
+              <td class="td-name" style="max-width:200px;font-size:.75rem" :title="log.user_agent">{{ log.user_agent || '—' }}</td>
+              <td class="text-muted small">{{ log.created_at }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <nav v-if="loginLogTotalPages > 1" class="mt-3">
+          <ul class="pagination pagination-modern justify-content-center mb-0">
+            <li class="page-item" :class="{ disabled: loginLogCurrentPage <= 1 }">
+              <a class="page-link" @click="loginLogGoPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
+            </li>
+            <li class="page-item" :class="{ disabled: loginLogCurrentPage <= 1 }">
+              <a class="page-link" @click="loginLogGoPage(loginLogCurrentPage - 1)">上一页</a>
+            </li>
+            <li v-for="p in loginLogPageNumbers" :key="p" class="page-item" :class="{ active: p === loginLogCurrentPage }">
+              <a class="page-link" @click="loginLogGoPage(p)">{{ p }}</a>
+            </li>
+            <li class="page-item" :class="{ disabled: loginLogCurrentPage >= loginLogTotalPages }">
+              <a class="page-link" @click="loginLogGoPage(loginLogCurrentPage + 1)">下一页</a>
+            </li>
+            <li class="page-item" :class="{ disabled: loginLogCurrentPage >= loginLogTotalPages }">
+              <a class="page-link" @click="loginLogGoPage(loginLogTotalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
+            </li>
+          </ul>
+        </nav>
       </div>
     </div>
   </div>

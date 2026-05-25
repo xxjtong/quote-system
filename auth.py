@@ -9,12 +9,52 @@ import jwt
 from flask import Blueprint, request, jsonify, g
 
 from extensions import db
-from models import User, SystemSetting
+from models import User, SystemSetting, LoginLog
 
 auth_bp = Blueprint('auth', __name__)
 
 
 # ─── Helpers ─────────────────────────────────
+
+def _get_client_ip():
+    """获取客户端真实IP"""
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers['X-Forwarded-For'].split(',')[0].strip()
+    if request.headers.get('X-Real-IP'):
+        return request.headers['X-Real-IP'].strip()
+    return request.remote_addr or ''
+
+
+def _lookup_ip_region(ip):
+    """查询IP归属地（使用 ipapi.co，免费 1000次/天）"""
+    if not ip or ip.startswith('127.') or ip.startswith('192.168.') or ip.startswith('10.'):
+        return '内网'
+    try:
+        import urllib.request, json
+        resp = urllib.request.urlopen(f'https://ipapi.co/{ip}/json/', timeout=3)
+        data = json.loads(resp.read())
+        if data.get('error'):
+            return ''
+        parts = [data.get(k, '') for k in ('country_name', 'region', 'city')]
+        return ' '.join(p for p in parts if p) or ''
+    except Exception:
+        return ''
+
+
+def _record_login(user):
+    """记录用户登录日志"""
+    ip = _get_client_ip()
+    region = _lookup_ip_region(ip) if ip and ip != '内网' else ('内网' if ip else '')
+    try:
+        log = LoginLog(
+            user_id=user.id, username=user.username,
+            ip_address=ip, region=region,
+            user_agent=(request.headers.get('User-Agent') or '')[:300],
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 def hash_password(password):
     """使用 bcrypt 哈希密码（自动加盐，work factor=12）"""
@@ -136,6 +176,7 @@ def auth_register():
     db.session.commit()
     user.last_login = datetime.now()
     db.session.commit()
+    _record_login(user)
     token = create_token(user, current_app)
     return jsonify({'token': token, 'user': user.to_dict()}), 201
 
@@ -156,6 +197,7 @@ def auth_login():
         user.password_hash = hash_password(data['password'].strip())
     user.last_login = datetime.now()
     db.session.commit()
+    _record_login(user)
     token = create_token(user, current_app)
     return jsonify({'token': token, 'user': user.to_dict()})
 
