@@ -40,3 +40,4 @@ sudoers-quote-system
 模板参考.xlsx
 *.db-shm
 *.db-wal
+settings.local.json

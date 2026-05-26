@@ -21,7 +21,7 @@ _TICKET_TTL = 120  # 秒
 
 
 def _validate_download_ticket(ticket_str):
-    """验证下载ticket，返回 user_id 或 None"""
+    """验证下载ticket，返回 user_id 或 None。有效期内允许多次使用。"""
     from models import DownloadTicket
     row = DownloadTicket.query.filter_by(ticket=ticket_str).first()
     if not row:
@@ -30,9 +30,6 @@ def _validate_download_ticket(ticket_str):
         db.session.delete(row)
         db.session.commit()
         return None
-    # 一次性使用后删除
-    db.session.delete(row)
-    db.session.commit()
     return row.user_id
 
 

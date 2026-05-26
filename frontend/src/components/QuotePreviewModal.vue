@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, inject, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { useApi } from '../composables/useApi'
+import { useApi, BASE_URL } from '../composables/useApi'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import DOMPurify from 'dompurify'
 
@@ -19,6 +19,15 @@ const { api, apiRaw, authToken } = useApi()
 const modalRef = ref(null)
 const emailModalRef = ref(null)
 const { activate, deactivate } = useFocusTrap(modalRef, close)
+
+async function openUniverSheet() {
+  try {
+    const url = `${BASE_URL}/univer.html?quoteId=${props.quoteId}&token=${encodeURIComponent(authToken.value)}`
+    window.open(url, '_blank')
+  } catch (e) {
+    toast('打开表格失败', 'danger')
+  }
+}
 const { activate: activateEmail, deactivate: deactivateEmail } = useFocusTrap(emailModalRef, () => { showEmailModal.value = false })
 
 const previewHtml = ref('')
@@ -142,6 +151,7 @@ function editQuote() {
             <div v-else class="preview-wrapper" v-html="safeHtml"></div>
           </div>
           <div class="modal-footer" style="gap:8px">
+            <button class="btn btn-outline-primary btn-modern" @click="openUniverSheet()"><i class="bi bi-table me-1"></i>编辑表格</button>
             <button class="btn btn-primary btn-modern" @click="editQuote()">编辑</button>
             <button class="btn btn-outline-success btn-modern" @click="downloadQuote()">下载</button>
             <button class="btn btn-outline-info btn-modern" @click="openEmailModal()">邮件</button>

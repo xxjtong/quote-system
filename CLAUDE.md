@@ -147,6 +147,90 @@ Pattern 1-7 覆盖 ¥ 和 元 格式（v2.2.0），Pattern 4 已合并（v2.4.0�
 - 启动: 终端1 `python app.py` + 终端2 `cd frontend && npx vite --host`
 - E2E 测试需 nginx 代理: `nginx -c /tmp/quote-nginx.conf` (模拟 VPS `/quote/` → Flask `/`)
 
+### Univer 独立表格编辑
+
+v2.5.0 新增 Univer 电子表格编辑器，完全独立于 Vue，用于报价单的所见即所得编辑。
+
+#### 架构
+
+```
+QuotePreviewModal.vue                     univer.html + univer-main.js
+  │  │
+  │  ├─ "编辑表格"按钮 → window.open(univer.html?quoteId=X&token=Y)
+  │
+  ├─ 预览卡片显示（HTML 渲染，无加粗/无换行）
+  │
+  └─ Univer 编辑器显示（应与预览卡一致）
+```
+
+#### 核心文件
+
+| 文件 | 职责 |
+|------|------|
+| `frontend/univer.html` | Univer 入口 HTML，Vite 多页面构建 |
+| `frontend/src/univer-main.js` | 全部逻辑：导入/导出/编辑器初始化/图片处理 |
+
+#### 导入流程（从后端 xlsx → Univer 快照）
+
+```
+后端 API /api/quotes/{id}/export-excel
+  → ExcelJS 读 xlsx
+  → extractImages() 先提取图片（JSZip 解析 xl/drawings/ + xl/media/）
+  → stripDrawings() 剥离图片节点（解决 ExcelJS 4.4.0 anchors 解析 crash）
+  → xlsxToSnapshot() 转换样式/数据为 Univer 快照格式
+  → createUnit() 加载到 Univer
+```
+
+#### 导出流程（从 Univer 快照 → 下载 xlsx）
+
+```
+doExportXlsx()
+  → workbook.save() 获取快照
+  → 解析 cellData / styles / mergeData / colD / rowD
+  → ExcelJS 写 xlsx
+  → IMAGE 公式 → 提取 base64 → addImage() 嵌入图片（nativeCol/nativeColOff 居中）
+  → 表头行固定行高，数据行自适应（图片行确保 min-height）
+```
+
+#### 样式策略
+
+| 属性 | 导入 | 导出 | 原因 |
+|------|------|------|------|
+| 对齐（横/纵） | ✓ | ✓ | |
+| 字体颜色 | ✓ | ✓ | 预览卡第一行灰色字 |
+| 背景填充 | ✓ | ✓ | 标题行黄色 |
+| 边框 | ✓ | ✓ | |
+| 列宽/行高 | ✓ | ✓ | |
+| 合并单元格 | ✓ | ✓ | |
+| 加粗 | ✗ | ✗ | 模板全加粗，预览卡仅一行 |
+| 斜体/下划线/删除线 | ✗ | ✗ | 预览卡没有 |
+| 字体/字号 | ✗ | ✗ | 用 Univer 默认 |
+| 自动换行 | ✗ | ✗ | 与预览卡一致 |
+
+#### 图片处理
+
+- 导入时：`extractImages()` JSZip 解析 `xl/drawings/drawing1.xml` + `xl/drawings/_rels/`，读取 `xl/media/` 图片 → 分块 base64 → `=IMAGE(url, "", 3, h, w)` 公式
+- 导出时：解析 IMAGE 公式提取 base64 → `wb.addImage()` → `nativeCol`/`nativeColOff` 定位居中
+- ExcelJS 4.4.0 的 anchors 崩溃通过 `stripDrawings()` 绕过
+- 图片等比缩小到单元格内（留 4px 边距），水平+垂直居中
+
+#### 工具栏
+
+- 最左侧"下载 xlsx"按钮（`sheet.command.download-xlsx`）
+- Ctrl+S / Cmd+S 快捷键（document capture 拦截，不注册 IShortcutService 避免双触发）
+- Univer 中文界面（9 个 locale 模块 deepMerge）
+
+#### 下拉填充后行高修复
+
+`sheet.command.auto-fill` 等命令执行后 100ms 触发 `set-row-is-auto-height`，防止行高丢失。
+
+#### 已知限制
+
+- `@univerjs/drawing` 插件未注册，不支持浮动图片
+- Univer 样式快照用 `bl`/`it`/`ff`/`fs`/`cl` 作为顶层属性（非 `ft` 子对象）
+- `WrapStrategy`: OVERFLOW=1, CLIP=2, WRAP=3
+- ExcelJS `addImage` 必须用 `nativeCol`/`nativeColOff` 定位（`col`/`colOff` 会被覆盖）
+
 ### 通用
 - 中文回复，表格式数据用 bullet 不用 pipe table
 - 多步操作给 ✓ 进度

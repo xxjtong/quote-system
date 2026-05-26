@@ -144,6 +144,7 @@ class QuoteItem(db.Model):
             'sort_order': self.sort_order,
             'profit': profit,
             'profit_rate': profit_rate,
+            'function_desc': product.function_desc or '' if self.product_id and product else '',
         }
 
 

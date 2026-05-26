@@ -229,11 +229,21 @@ def serve_upload(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
 
+# ─── Univer 独立页面（Vite 多页面构建产物） ──────
+# Flask 仅在生产环境（_has_vue_build）提供构建后的 univer.html
+# 开发环境由 Vite dev server 直接提供 univer.html
+
+
 # ─── SPA catch-all (must be LAST route) ──────
 @app.route('/<path:path>')
 def spa_catch_all(path):
-    """所有非 API/静态文件路径 → 返回 Vue SPA"""
+    """所有非 API/静态文件路径 → 返回 Vue SPA；univer.html 返回独立 Univer 页面"""
     if _has_vue_build:
+        # Univer 独立页面
+        if path == 'univer.html':
+            univer_html = os.path.join(_dist_dir, 'univer.html')
+            if os.path.isfile(univer_html):
+                return send_file(univer_html)
         return send_file(os.path.join(_dist_dir, 'index.html'))
     return render_template('index.html')
 
