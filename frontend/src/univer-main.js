@@ -285,6 +285,8 @@ async function doExportXlsx() {
 
     // 生成下载
     const buffer = await wb.xlsx.writeBuffer()
+    // 暴露 buffer 供 E2E 测试读取
+    window.__univerLastBuffer = buffer
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -299,6 +301,9 @@ async function doExportXlsx() {
     console.error('[Export] failed:', e)
   }
 }
+
+// 暴露给 E2E 测试
+window.__univerDownload = () => doExportXlsx()
 
 // ─── Ctrl+S：仅用 document capture 拦截，不注册 IShortcutService（避免双触发） ───
 document.addEventListener('keydown', (e) => {
@@ -398,7 +403,7 @@ async function extractImages(arrayBuf) {
         const rId = em[1]
         const mediaFile = relMap[rId]
         if (mediaFile) {
-          result.push({ row, col, endRow, mediaFile })
+          result.push({ row, col, mediaFile })
         }
       }
     }
@@ -518,6 +523,7 @@ async function init() {
 
     initUniver(snapshot)
     document.title = quoteTitle
+    window.__univerReady = true
   } catch (e) {
     document.getElementById('univer-app').innerHTML = `<p style="color:red;padding:20px">加载失败：${e.message}</p>`
   }
