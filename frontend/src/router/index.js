@@ -8,6 +8,8 @@ const routes = [
   { path: '/quotes/:id?', name: 'quotes', component: () => import('../views/QuotesView.vue'), meta: { auth: true } },
   { path: '/new-quote', name: 'newquote', component: () => import('../views/NewQuoteView.vue'), meta: { auth: true } },
   { path: '/import', name: 'import', component: () => import('../views/ImportView.vue'), meta: { auth: true } },
+  { path: '/dicts', name: 'dicts', component: () => import('../views/DictManageView.vue'), meta: { auth: true, admin: true } },
+  { path: '/categories', name: 'categories', component: () => import('../views/CategoryManageView.vue'), meta: { auth: true, admin: true } },
   { path: '/admin', name: 'admin', component: () => import('../views/AdminView.vue'), meta: { auth: true, admin: true } },
 ]
 

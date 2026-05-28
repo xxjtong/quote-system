@@ -46,12 +46,14 @@ const tabs = [
   { id: 'products', label: '产品管理', icon: 'bi bi-box-seam' },
   { id: 'quotes', label: '报价管理', icon: 'bi bi-file-earmark-text', badge: '+' },
   { id: 'import', label: '导入导出', icon: 'bi bi-upload' },
+  { id: 'dicts', label: '字典管理', icon: 'bi bi-book', adminOnly: true },
+  { id: 'categories', label: '分类管理', icon: 'bi bi-diagram-3', adminOnly: true },
   { id: 'admin', label: '管理', icon: 'bi bi-gear', adminOnly: true },
 ]
 
 const titles = {
   dashboard: '首页', products: '产品管理', quotes: '报价管理',
-  newquote: '新建报价单', import: '导入导出', admin: '管理',
+  newquote: '新建报价单', import: '导入导出', dicts: '字典管理', categories: '分类管理', admin: '管理',
   login: '登录'
 }
 
