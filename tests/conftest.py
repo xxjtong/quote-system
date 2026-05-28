@@ -120,6 +120,19 @@ def base_url():
     return BASE_URL
 
 
+@pytest.fixture(scope="session")
+def browser():
+    """Playwright Chromium browser — 所有 E2E 测试共享"""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+        )
+        yield b
+        b.close()
+
+
 def pytest_sessionfinish():
     """测试会话结束后自动清理测试数据（用户、产品、报价单）"""
     import sqlite3

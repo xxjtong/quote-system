@@ -3,9 +3,9 @@ Vue 3 报价系统 E2E 测试 — Playwright
 Test browser interactions against the new Vue frontend (via nginx /quote/ proxy).
 """
 import pytest
-from playwright.sync_api import sync_playwright, Page, Browser
+from playwright.sync_api import Page, Browser
 
-BASE = "http://127.0.0.1:8080/quote"
+BASE = "https://bwh.ddns.mobi/quote/"
 ADMIN_USER = "admin"
 ADMIN_PASS = "admin123"
 T = 15000  # timeout ms
@@ -17,17 +17,6 @@ NAV_PRODUCTS = "产品管理"
 NAV_QUOTES = "报价管理"
 NAV_IMPORT = "导入导出"
 NAV_ADMIN = "管理"
-
-
-@pytest.fixture(scope="session")
-def browser():
-    with sync_playwright() as p:
-        b = p.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
-        )
-        yield b
-        b.close()
 
 
 @pytest.fixture
@@ -73,6 +62,7 @@ def click_nav_exact(page: Page, text: str):
 class TestVueAuth:
     def test_page_loads_login(self, page):
         page.goto(BASE)
+        page.get_by_placeholder("用户名").wait_for(state="visible", timeout=T)
         assert page.get_by_placeholder("用户名").is_visible()
         assert page.get_by_placeholder("密码").is_visible()
 
@@ -93,6 +83,7 @@ class TestVueAuth:
 
     def test_register_form_accessible(self, page):
         page.goto(BASE)
+        page.get_by_text("注册新账号").wait_for(state="visible", timeout=T)
         page.get_by_text("注册新账号").click()
         page.wait_for_timeout(500)
         assert page.get_by_placeholder("用户名").is_visible()
@@ -229,14 +220,14 @@ class TestVueQuotes:
     def test_new_quote_form(self, page):
         do_login(page)
         # Navigate via badge '+' on quotes tab
-        page.goto(BASE + "/new-quote")
+        page.goto(BASE + "new-quote")
         page.wait_for_timeout(1000)
         body = page.text_content("body")
         assert "客户信息" in body or "产品明细" in body
 
     def test_save_validation(self, page):
         do_login(page)
-        page.goto(BASE + "/new-quote")
+        page.goto(BASE + "new-quote")
         page.wait_for_timeout(1000)
         page.get_by_role("button", name="保存报价单").click()
         page.wait_for_timeout(1500)
@@ -245,7 +236,7 @@ class TestVueQuotes:
 
     def test_add_product_picker(self, page):
         do_login(page)
-        page.goto(BASE + "/new-quote")
+        page.goto(BASE + "new-quote")
         page.wait_for_timeout(1000)
         page.get_by_role("button", name="添加产品").click()
         page.wait_for_timeout(1000)

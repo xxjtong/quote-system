@@ -4,24 +4,46 @@ Univer 独立表格编辑器 E2E Smoke 测试 — Playwright
 """
 import base64
 import io
+import json
+import subprocess
 import pytest
-import requests
-from playwright.sync_api import sync_playwright, Page, Browser
+from playwright.sync_api import Page, Browser
 
-BASE = "http://127.0.0.1:5173/quote"   # Vite dev server
-API = "http://127.0.0.1:5001"         # Flask API
+BASE = "https://bwh.ddns.mobi/quote"   # Production
+API = "https://bwh.ddns.mobi/quote"          # Production API (through nginx /quote/ prefix)
 T = 20000  # timeout ms（Univer 初始化较慢）
 
 
-@pytest.fixture(scope="session")
-def browser():
-    with sync_playwright() as p:
-        b = p.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
-        )
-        yield b
-        b.close()
+class _CurlResponse:
+    """Minimal requests.Response-like wrapper around curl subprocess."""
+    def __init__(self, status_code, text):
+        self.status_code = status_code
+        self._text = text
+
+    def json(self):
+        return json.loads(self._text)
+
+    @property
+    def text(self):
+        return self._text
+
+
+def _curl(method, url, *, json_data=None, token=None):
+    """Use curl for API calls — avoids LibreSSL compatibility issues on macOS."""
+    cmd = ["curl", "-s", "-w", "\n%{http_code}", "-X", method, url]
+    if json_data is not None:
+        cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(json_data)]
+    if token:
+        cmd += ["-H", f"Authorization: Bearer {token}"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    output = result.stdout.rstrip("\n")
+    *body_lines, status_line = output.split("\n")
+    body = "\n".join(body_lines)
+    try:
+        status = int(status_line)
+    except ValueError:
+        status = 0
+    return _CurlResponse(status, body)
 
 
 @pytest.fixture
@@ -35,7 +57,7 @@ def page(browser: Browser):
 
 def _get_token():
     """用 admin 账号登录，获取 JWT token"""
-    resp = requests.post(f"{API}/api/auth/login", json={
+    resp = _curl("POST", f"{API}/api/auth/login", json_data={
         "username": "admin", "password": "admin123"
     })
     assert resp.status_code == 200, f"Login failed: {resp.text}"
@@ -45,18 +67,18 @@ def _get_token():
 def _ensure_quote():
     """确保 quoteId=1 存在"""
     token = _get_token()
-    resp = requests.get(f"{API}/api/quotes/1", headers={"Authorization": f"Bearer {token}"})
+    resp = _curl("GET", f"{API}/api/quotes/1", token=token)
     if resp.status_code == 200:
         return
     # 不存在则找一个产品来创建
-    pr = requests.get(f"{API}/api/products", headers={"Authorization": f"Bearer {token}"})
+    pr = _curl("GET", f"{API}/api/products", token=token)
     data = pr.json()
     products = data.get("products", data) if isinstance(data, dict) else data
     pid = products[0]["id"] if products else 1
-    resp = requests.post(f"{API}/api/quotes", json={
+    resp = _curl("POST", f"{API}/api/quotes", json_data={
         "client": "测试客户", "title": "Univer测试", "contact": "测试联系人",
         "items": [{"product_id": pid, "quantity": 2, "unit_price": 100}]
-    }, headers={"Authorization": f"Bearer {token}"})
+    }, token=token)
     assert resp.status_code == 201, f"Create quote failed: {resp.text}"
 
 
@@ -137,7 +159,7 @@ class TestUniverSmoke:
         token = _get_token()
 
         # 找有图片的产品
-        pr = requests.get(f"{API}/api/products", headers={"Authorization": f"Bearer {token}"})
+        pr = _curl("GET", f"{API}/api/products", token=token)
         data = pr.json()
         products = data.get("products", data) if isinstance(data, dict) else data
         img_product = None
@@ -149,10 +171,10 @@ class TestUniverSmoke:
             pytest.skip("No product with image — skip")
 
         # 创建报价单
-        resp = requests.post(f"{API}/api/quotes", json={
+        resp = _curl("POST", f"{API}/api/quotes", json_data={
             "client": "图片测试", "title": "图片报价单", "contact": "测试",
             "items": [{"product_id": img_product["id"], "quantity": 1, "unit_price": 100}]
-        }, headers={"Authorization": f"Bearer {token}"})
+        }, token=token)
         assert resp.status_code == 201
         qid = resp.json().get("quote", resp.json())["id"]
 
@@ -166,7 +188,7 @@ class TestUniverSmoke:
             # 检查内容完整性：标题行有数据
             assert ws.cell(row=2, column=1).value is not None, "Missing title row"
         finally:
-            requests.delete(f"{API}/api/quotes/{qid}", headers={"Authorization": f"Bearer {token}"})
+            _curl("DELETE", f"{API}/api/quotes/{qid}", token=token)
 
 
 class TestUniverErrors:

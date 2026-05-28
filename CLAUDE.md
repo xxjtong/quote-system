@@ -231,6 +231,23 @@ doExportXlsx()
 - `WrapStrategy`: OVERFLOW=1, CLIP=2, WRAP=3
 - ExcelJS `addImage` 必须用 `nativeCol`/`nativeColOff` 定位（`col`/`colOff` 会被覆盖）
 
+#### E2E 测试
+
+```bash
+cd ~/quote-system && python3 -m pytest tests/test_e2e_univer.py -v
+```
+
+| 测试 | 覆盖 |
+|------|------|
+| `test_page_loads_and_univer_initializes` | 页面加载、Univer 初始化、零 JS 错误 |
+| `test_export_produces_valid_xlsx` | 导出 xlsx：行/列、合并单元格、黄色填充、表头 |
+| `test_export_with_images` | 有图片产品的导出完整性 |
+| `test_missing_params_shows_error` | 缺参数 → 错误提示 |
+| `test_bad_token_shows_error` | 无效 token → 错误提示 |
+| `test_no_console_errors_on_load` | 正常加载零 JS 异常 |
+
+测试通过 `window.__univerDownload()` 和 `window.__univerLastBuffer` 与导出逻辑交互（Univer 工具栏是 Canvas 渲染，无法用 DOM 选择器定位按钮）。
+
 ### 通用
 - 中文回复，表格式数据用 bullet 不用 pipe table
 - 多步操作给 ✓ 进度
@@ -243,10 +260,13 @@ doExportXlsx()
 # API 测试（生产环境）
 cd /opt/quote-system && python3 -m pytest tests/test_auth.py tests/test_products.py tests/test_quotes.py tests/test_admin.py tests/test_edge_cases.py tests/test_comprehensive.py -v
 
-# E2E 测试
+# E2E 测试（Vue 前端）
 cd /opt/quote-system && /opt/quote-system/venv/bin/python -m pytest tests/test_e2e_vue.py -v
 
-# 本地开发（/tmp/quote-system）
+# Univer E2E 测试（需 Vite dev server 运行）
+cd ~/quote-system && python3 -m pytest tests/test_e2e_univer.py -v
+
+# 本地开发
 cd /tmp/quote-system && source venv/bin/activate && python -m pytest tests/ -v
 ```
 
