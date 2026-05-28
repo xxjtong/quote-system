@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, inject, onMounted } from 'vue'
-import { useApi } from '../composables/useApi'
+import { useApi, BASE_URL } from '../composables/useApi'
 import { useAdvancedApi } from '../composables/useAdvancedApi'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import SmartRecognition from './SmartRecognition.vue'
@@ -64,14 +64,13 @@ onMounted(async () => {
 
 async function loadAllDicts() {
   try {
-    const [cm, cp, ps, hi, sm, mf] = await Promise.all([
+    const [cm, cp, ps, sm, mf] = await Promise.all([
       dicts.commMethods(), dicts.commProtocols(), dicts.powerSupplies(),
-      dicts.sensorMetrics(), dicts.hardwareInterfaces(), dicts.manufacturers(),
+      dicts.sensorMetrics(), dicts.manufacturers(),
     ])
     dictData.commMethods = cm?.items || []
     dictData.commProtocols = cp?.items || []
     dictData.powerSupplies = ps?.items || []
-    dictData.hardwareInterfaces = hi?.items || []
     dictData.sensorMetrics = sm?.items || []
     dictData.manufacturers = mf?.items || []
   } catch (e) { /* silent */ }
