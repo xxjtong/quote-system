@@ -55,6 +55,12 @@ from admin_bp import admin_bp
 app.register_blueprint(admin_bp)
 from ai_bp import ai_bp
 app.register_blueprint(ai_bp)
+from dict_bp import dict_bp
+app.register_blueprint(dict_bp)
+from category_bp import category_bp
+app.register_blueprint(category_bp)
+from product_advanced_bp import product_advanced_bp
+app.register_blueprint(product_advanced_bp)
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / 'uploads'
