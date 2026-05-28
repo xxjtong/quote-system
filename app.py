@@ -265,6 +265,17 @@ with app.app_context():
     _auto_migrate_columns = [
         ('quote_items', 'discount_rate', 'REAL DEFAULT 100'),
         ('products', 'pinyin_search', 'TEXT'),
+        # v2.6.0 Product 扩展字段
+        ('products', 'model', 'VARCHAR(100)'),
+        ('products', 'category_id', 'INTEGER'),
+        ('products', 'manufacturer_id', 'INTEGER'),
+        ('products', 'supplier_id', 'INTEGER'),
+        ('products', 'product_url', 'VARCHAR(500)'),
+        ('products', 'status', "VARCHAR(20) DEFAULT 'active'"),
+        ('products', 'parent_id', 'INTEGER'),
+        ('products', 'specs', 'TEXT'),
+        ('products', 'urls', 'TEXT'),
+        ('products', 'custom_fields', 'TEXT'),
     ]
     import sqlite3 as _sqlite3
     _auto_db = _sqlite3.connect(str(BASE_DIR / 'quote.db'))
@@ -325,6 +336,57 @@ with app.app_context():
         if not SystemSetting.query.filter_by(key=k).first():
             db.session.add(SystemSetting(key=k, value=v))
     db.session.commit()
+
+    # v2.6.0 种子数据: 字典表默认值
+    from models import (
+        DictCommMethod, DictCommProtocol, DictPowerSupply, DictSensorMetric
+    )
+
+    # 通讯方式种子
+    _comm_methods = [
+        ('wired', 'Ethernet'), ('wired', 'RS485'), ('wired', 'RS232'),
+        ('wired', 'DryContact'), ('wired', 'KNX'), ('wired', 'M-BUS'), ('wired', 'USB'),
+        ('wireless', 'LoRaWAN'), ('wireless', 'WiFi'), ('wireless', '4G'),
+        ('wireless', '5G'), ('wireless', 'NB-IoT'), ('wireless', 'Zigbee'),
+        ('wireless', 'BLE'), ('wireless', 'NFC'), ('wireless', 'GNSS'), ('wireless', 'D2D'),
+    ]
+    for _type, _name in _comm_methods:
+        if not DictCommMethod.query.filter_by(name=_name).first():
+            db.session.add(DictCommMethod(method_type=_type, name=_name))
+
+    # 通讯协议种子
+    _protocols = [
+        'HTTP', 'HTTPS', 'MQTT', 'MQTTS', 'ModbusRTU', 'ModbusTCP',
+        'BACnet/IP', 'BACnet/MS-TP', 'TCP', 'UDP', 'SNMP', 'SSH', 'VPN', 'RTSP', 'NTP',
+    ]
+    for _name in _protocols:
+        if not DictCommProtocol.query.filter_by(name=_name).first():
+            db.session.add(DictCommProtocol(name=_name))
+
+    # 供电方式种子
+    _supplies = [
+        ('外接电源', 'DC'), ('外接电源', 'PoE'), ('内置电池', 'Battery'),
+        ('外接电源', 'USB-C'), ('外接电源', 'AC'), ('外接电源', 'Solar'),
+    ]
+    for _cat, _name in _supplies:
+        if not DictPowerSupply.query.filter_by(name=_name).first():
+            db.session.add(DictPowerSupply(supply_category=_cat, name=_name))
+
+    # 传感指标种子
+    _metrics = [
+        ('温度', '℃'), ('湿度', '%RH'), ('CO2', 'ppm'), ('TVOC', 'ppb'),
+        ('PM2.5', 'μg/m³'), ('PM10', 'μg/m³'), ('气压', 'hPa'), ('光照', 'lux'),
+        ('噪声', 'dB'), ('水浸', None), ('门磁', None), ('倾斜', None),
+        ('液位', None), ('压力', None), ('距离', 'm'), ('人数', None),
+        ('人体存在', None), ('CO', 'ppm'), ('O3', 'ppm'), ('HCHO', 'mg/m³'),
+        ('电流', 'A'),
+    ]
+    for _name, _unit in _metrics:
+        if not DictSensorMetric.query.filter_by(name=_name).first():
+            db.session.add(DictSensorMetric(name=_name, unit=_unit))
+
+    db.session.commit()
+    print('[Init] v2.6.0 字典种子数据已初始化')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)

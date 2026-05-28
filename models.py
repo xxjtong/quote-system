@@ -1,4 +1,5 @@
 """报价系统数据模型 — Product / Quote / QuoteItem / User / 辅助表"""
+import json
 from datetime import datetime
 from extensions import db
 
@@ -20,10 +21,27 @@ class Product(db.Model):
     image_data = db.Column(db.LargeBinary, nullable=True)
     image_mime = db.Column(db.String(30), nullable=True)
     is_active = db.Column(db.Boolean, default=True, index=True)
+    # v2.6.0 新增: 产品高级功能字段 (全部 nullable, 向后兼容)
+    model = db.Column(db.String(100), nullable=True, index=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('device_categories.id'), nullable=True, index=True)
+    manufacturer_id = db.Column(db.Integer, db.ForeignKey('manufacturers.id'), nullable=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
+    product_url = db.Column(db.String(500), nullable=True)
+    status = db.Column(db.String(20), default='active', index=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True, index=True)
+    specs = db.Column(db.Text, nullable=True)        # JSON string
+    urls = db.Column(db.Text, nullable=True)         # JSON string
+    custom_fields = db.Column(db.Text, nullable=True) # JSON string
     pinyin_search = db.Column(db.Text, nullable=True, index=True)  # 预计算拼音，搜索用
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # v2.6.0 relationships
+    category_rel = db.relationship('DeviceCategory', foreign_keys=[category_id], backref='products')
+    manufacturer_rel = db.relationship('Manufacturer', foreign_keys=[manufacturer_id], backref='products')
+    supplier_rel = db.relationship('Supplier', foreign_keys=[supplier_id], backref='products')
+    parent_rel = db.relationship('Product', remote_side=[id], backref='variants')
 
     def to_dict(self, users_map=None):
         creator_name = None
@@ -52,6 +70,28 @@ class Product(db.Model):
             'created_by_name': creator_name,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '',
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M') if self.updated_at else '',
+            'model': self.model or '',
+            'category_id': self.category_id,
+            'category_name': '',
+            'manufacturer_id': self.manufacturer_id,
+            'manufacturer_name': '',
+            'supplier_id': self.supplier_id,
+            'supplier_name': '',
+            'product_url': self.product_url or '',
+            'status': self.status or 'active',
+            'parent_id': self.parent_id,
+            'specs': (json.loads(self.specs) if self.specs else {}),
+            'urls': (json.loads(self.urls) if self.urls else {}),
+            'custom_fields': (json.loads(self.custom_fields) if self.custom_fields else {}),
+            'spec_definitions': [],
+            'comm_methods': [],
+            'comm_protocols': [],
+            'power_supplies': [],
+            'hardware_interfaces': [],
+            'sensor_capabilities': [],
+            'images': [],
+            'dependencies': [],
+            'variants': [],
         }
 
 
@@ -271,4 +311,277 @@ class LoginLog(db.Model):
             'region': self.region or '',
             'user_agent': self.user_agent or '',
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+# v2.6.0 新增: 产品高级功能 — 字典表 / 分类树 / M2M 映射 / 规格定义
+# ═══════════════════════════════════════════════════════════════
+
+class Manufacturer(db.Model):
+    """制造商/品牌"""
+    __tablename__ = 'manufacturers'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    website = db.Column(db.String(500), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'name': self.name,
+            'website': self.website or '', 'description': self.description or '',
+        }
+
+
+class DictCommMethod(db.Model):
+    """通讯方式字典 (有线/无线)"""
+    __tablename__ = 'dict_comm_methods'
+    id = db.Column(db.Integer, primary_key=True)
+    method_type = db.Column(db.String(20), nullable=False)
+    name = db.Column(db.String(50), nullable=False, unique=True)
+
+    def to_dict(self):
+        return {'id': self.id, 'method_type': self.method_type, 'name': self.name}
+
+
+class DictCommProtocol(db.Model):
+    """通讯协议字典"""
+    __tablename__ = 'dict_comm_protocols'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False, unique=True)
+
+    def to_dict(self):
+        return {'id': self.id, 'name': self.name}
+
+
+class DictPowerSupply(db.Model):
+    """供电方式字典"""
+    __tablename__ = 'dict_power_supplies'
+    id = db.Column(db.Integer, primary_key=True)
+    supply_category = db.Column(db.String(50), nullable=False)
+    name = db.Column(db.String(50), nullable=False, unique=True)
+
+    def to_dict(self):
+        return {'id': self.id, 'supply_category': self.supply_category, 'name': self.name}
+
+
+class DictSensorMetric(db.Model):
+    """传感指标字典"""
+    __tablename__ = 'dict_sensor_metrics'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False, unique=True)
+    unit = db.Column(db.String(20), nullable=True)
+
+    def to_dict(self):
+        return {'id': self.id, 'name': self.name, 'unit': self.unit or ''}
+
+
+class Supplier(db.Model):
+    """供应商（规范化表，与 Product.supplier 字符串并存）"""
+    __tablename__ = 'suppliers'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False, index=True)
+    contact_person = db.Column(db.String(100), nullable=True)
+    phone = db.Column(db.String(50), nullable=True)
+    email = db.Column(db.String(200), nullable=True)
+    website = db.Column(db.String(500), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'name': self.name,
+            'contact_person': self.contact_person or '',
+            'phone': self.phone or '', 'email': self.email or '',
+            'website': self.website or '', 'notes': self.notes or '',
+        }
+
+
+class DeviceCategory(db.Model):
+    """设备分类树 (2级+)"""
+    __tablename__ = 'device_categories'
+    id = db.Column(db.Integer, primary_key=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey('device_categories.id'), nullable=True)
+    name = db.Column(db.String(100), nullable=False)
+    slug = db.Column(db.String(100), unique=True, nullable=True, index=True)
+    level = db.Column(db.Integer, default=1)
+    sort_order = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+
+    parent = db.relationship('DeviceCategory', remote_side=[id], backref='children')
+    spec_definitions = db.relationship(
+        'CategorySpecDefinition', backref='category',
+        cascade='all, delete-orphan', order_by='CategorySpecDefinition.sort_order'
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'parent_id': self.parent_id, 'name': self.name,
+            'slug': self.slug or '', 'level': self.level or 1,
+            'sort_order': self.sort_order, 'is_active': self.is_active,
+        }
+
+
+class CategorySpecDefinition(db.Model):
+    """分类动态规格定义"""
+    __tablename__ = 'category_spec_definitions'
+    id = db.Column(db.Integer, primary_key=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('device_categories.id', ondelete='CASCADE'), nullable=False)
+    spec_key = db.Column(db.String(100), nullable=False)
+    display_name = db.Column(db.String(200), nullable=False)
+    spec_type = db.Column(db.String(50), nullable=False)  # string/number/enum/boolean/range
+    unit = db.Column(db.String(50), nullable=True)
+    sort_order = db.Column(db.Integer, default=0)
+    is_filterable = db.Column(db.Boolean, default=True)
+    is_comparable = db.Column(db.Boolean, default=True)
+    display_group = db.Column(db.String(100), nullable=True)
+    options = db.Column(db.Text, nullable=True)   # JSON: enum 选项列表
+    validation = db.Column(db.Text, nullable=True) # JSON: {min, max} for number
+
+    def to_dict(self):
+        import json
+        return {
+            'id': self.id, 'category_id': self.category_id,
+            'spec_key': self.spec_key, 'display_name': self.display_name,
+            'spec_type': self.spec_type, 'unit': self.unit or '',
+            'sort_order': self.sort_order, 'is_filterable': self.is_filterable,
+            'is_comparable': self.is_comparable, 'display_group': self.display_group or '',
+            'options': json.loads(self.options) if self.options else None,
+            'validation': json.loads(self.validation) if self.validation else None,
+        }
+
+
+class ProductCommMethod(db.Model):
+    __tablename__ = 'product_comm_methods'
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), primary_key=True)
+    method_id = db.Column(db.Integer, db.ForeignKey('dict_comm_methods.id', ondelete='CASCADE'), primary_key=True)
+    details = db.Column(db.String(255), nullable=True)
+    method = db.relationship('DictCommMethod')
+
+    def to_dict(self):
+        return {
+            'method_id': self.method_id,
+            'method_name': self.method.name if self.method else '',
+            'method_type': self.method.method_type if self.method else '',
+            'details': self.details or '',
+        }
+
+
+class ProductCommProtocol(db.Model):
+    __tablename__ = 'product_comm_protocols'
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), primary_key=True)
+    protocol_id = db.Column(db.Integer, db.ForeignKey('dict_comm_protocols.id', ondelete='CASCADE'), primary_key=True)
+    direction = db.Column(db.String(20), default='both')
+    protocol = db.relationship('DictCommProtocol')
+
+    def to_dict(self):
+        return {
+            'protocol_id': self.protocol_id,
+            'protocol_name': self.protocol.name if self.protocol else '',
+            'direction': self.direction,
+        }
+
+
+class ProductPowerSupply(db.Model):
+    __tablename__ = 'product_power_supplies'
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), primary_key=True)
+    power_id = db.Column(db.Integer, db.ForeignKey('dict_power_supplies.id', ondelete='CASCADE'), primary_key=True)
+    voltage_range = db.Column(db.String(100), nullable=True)
+    battery_life = db.Column(db.String(100), nullable=True)
+    power = db.relationship('DictPowerSupply')
+
+    def to_dict(self):
+        return {
+            'power_id': self.power_id,
+            'power_name': self.power.name if self.power else '',
+            'power_category': self.power.supply_category if self.power else '',
+            'voltage_range': self.voltage_range or '',
+            'battery_life': self.battery_life or '',
+        }
+
+
+class ProductHardwareInterface(db.Model):
+    __tablename__ = 'product_hardware_interfaces'
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
+    interface_name = db.Column(db.String(50), nullable=False)
+    quantity = db.Column(db.Integer, default=1)
+    description = db.Column(db.String(255), nullable=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'product_id': self.product_id,
+            'interface_name': self.interface_name,
+            'quantity': self.quantity, 'description': self.description or '',
+        }
+
+
+class ProductSensorCapability(db.Model):
+    __tablename__ = 'product_sensor_capabilities'
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), primary_key=True)
+    metric_id = db.Column(db.Integer, db.ForeignKey('dict_sensor_metrics.id', ondelete='CASCADE'), primary_key=True)
+    measure_range = db.Column(db.String(100), nullable=True)
+    accuracy = db.Column(db.String(100), nullable=True)
+    resolution = db.Column(db.String(50), nullable=True)
+    metric = db.relationship('DictSensorMetric')
+
+    def to_dict(self):
+        return {
+            'metric_id': self.metric_id,
+            'metric_name': self.metric.name if self.metric else '',
+            'unit': self.metric.unit if self.metric else '',
+            'measure_range': self.measure_range or '',
+            'accuracy': self.accuracy or '',
+            'resolution': self.resolution or '',
+        }
+
+
+class ProductImage(db.Model):
+    __tablename__ = 'product_images'
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
+    url = db.Column(db.String(500), nullable=False)
+    is_primary = db.Column(db.Boolean, default=False)
+    sort_order = db.Column(db.Integer, default=0)
+    alt_text = db.Column(db.String(200), nullable=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'product_id': self.product_id,
+            'url': self.url, 'is_primary': self.is_primary,
+            'sort_order': self.sort_order, 'alt_text': self.alt_text or '',
+        }
+
+
+class ProductDependency(db.Model):
+    __tablename__ = 'product_dependencies'
+    __table_args__ = (
+        db.CheckConstraint(
+            'depends_on_product_id IS NOT NULL OR depends_on_category_id IS NOT NULL',
+            name='ck_dependency_target'
+        ),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
+    depends_on_product_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True)
+    depends_on_category_id = db.Column(db.Integer, db.ForeignKey('device_categories.id'), nullable=True)
+    dependency_type = db.Column(db.String(20), default='required')
+    description = db.Column(db.Text, nullable=True)
+    sort_order = db.Column(db.Integer, default=0)
+
+    product = db.relationship('Product', foreign_keys=[product_id], backref='dependencies_as_source')
+    target_product = db.relationship('Product', foreign_keys=[depends_on_product_id])
+    target_category = db.relationship('DeviceCategory')
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'product_id': self.product_id,
+            'depends_on_product_id': self.depends_on_product_id,
+            'depends_on_category_id': self.depends_on_category_id,
+            'dependency_type': self.dependency_type,
+            'description': self.description or '',
+            'sort_order': self.sort_order,
         }
