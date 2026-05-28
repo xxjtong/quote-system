@@ -138,8 +138,6 @@ def list_products():
         )
     if category:
         query = query.filter(Product.category.ilike(f'%{category}%'))
-    if supplier:
-        query = query.filter(Product.supplier == supplier)
 
     # 拼音搜索：纯ASCII（无汉字）时启用
     is_pinyin = search and not re.search(r'[\u4e00-\u9fff]', search)
@@ -158,13 +156,14 @@ def list_products():
             like = f'%{search}%'
             query = query.filter(
                 db.or_(Product.name.ilike(like), Product.spec.ilike(like),
-                        Product.supplier.ilike(like), Product.function_desc.ilike(like))
+                        Product.function_desc.ilike(like))
             )
         total = query.count()
         products = query.offset((page - 1) * per_page).limit(per_page).all()
 
     # 获取所有分类标签（支持逗号分隔的多标签）
-    raw_cats = [r[0] for r in db.session.query(Product.category).filter(Product.category.isnot(None)).all() if r[0]]
+    from sqlalchemy import text as _text
+    raw_cats = [r[0] for r in db.session.execute(_text('SELECT category FROM products WHERE category IS NOT NULL')).all() if r[0]]
     cat_set = set()
     for c in raw_cats:
         for tag in c.split(','):
@@ -173,7 +172,7 @@ def list_products():
                 cat_set.add(tag)
     categories = sorted(cat_set)
 
-    suppliers_list = sorted([r[0] for r in db.session.query(Product.supplier).distinct().filter(Product.supplier.isnot(None)).all() if r[0]])
+    suppliers_list = sorted([r[0] for r in db.session.execute(_text('SELECT DISTINCT supplier FROM products WHERE supplier IS NOT NULL')).all() if r[0]])
     latest = db.session.query(func.max(Product.updated_at)).scalar()
     total_all = Product.query.count()
 
@@ -184,8 +183,34 @@ def list_products():
         creator_users = User.query.filter(User.id.in_(creator_ids)).all()
         users_map = {u.id: u.username for u in creator_users}
 
+    # v2.6.0: 预加载分类/制造商/供应商名称
+    from models import DeviceCategory, Manufacturer, Supplier
+    cat_ids = [p.category_id for p in products if p.category_id]
+    cat_map = {}
+    if cat_ids:
+        cats = DeviceCategory.query.filter(DeviceCategory.id.in_(cat_ids)).all()
+        cat_map = {c.id: c.name for c in cats}
+    mfr_ids = [p.manufacturer_id for p in products if p.manufacturer_id]
+    mfr_map = {}
+    if mfr_ids:
+        mfrs = Manufacturer.query.filter(Manufacturer.id.in_(mfr_ids)).all()
+        mfr_map = {m.id: m.name for m in mfrs}
+    sup_ids = [p.supplier_id for p in products if p.supplier_id]
+    sup_map = {}
+    if sup_ids:
+        sups = Supplier.query.filter(Supplier.id.in_(sup_ids)).all()
+        sup_map = {s.id: s.name for s in sups}
+
+    products_json = []
+    for p in products:
+        p_dict = add_pinyin_field(p.to_dict(users_map=users_map))
+        p_dict['category_name'] = cat_map.get(p.category_id, '')
+        p_dict['manufacturer_name'] = mfr_map.get(p.manufacturer_id, '')
+        p_dict['supplier_name'] = sup_map.get(p.supplier_id, '')
+        products_json.append(p_dict)
+
     return jsonify({
-        'products': [add_pinyin_field(p.to_dict(users_map=users_map)) for p in products],
+        'products': products_json,
         'total': total,
         'page': page,
         'per_page': per_page,
@@ -230,6 +255,16 @@ def create_product():
     )
     _store_image_blob(product, data)
     product.pinyin_search = _compute_pinyin_search(name, spec, data.get('category', ''), data.get('supplier', ''))
+    # v2.6.0 new optional fields
+    optional_new_fields = ['model', 'category_id', 'manufacturer_id', 'supplier_id',
+                           'product_url', 'status', 'parent_id']
+    for f in optional_new_fields:
+        if f in data and data[f] is not None:
+            setattr(product, f, data[f])
+    for json_field in ['specs', 'urls', 'custom_fields']:
+        if json_field in data:
+            val = data[json_field]
+            setattr(product, json_field, json.dumps(val, ensure_ascii=False) if val else None)
     db.session.add(product)
     db.session.commit()
     return jsonify({'product': product.to_dict()}), 201
@@ -240,7 +275,19 @@ def get_product(product_id):
     product = db.session.get(Product, product_id)
     if not product:
         return jsonify({'error': '产品不存在'}), 404
-    return jsonify({'product': product.to_dict()})
+    p_dict = product.to_dict()
+    # Load related names from FK tables
+    from models import DeviceCategory, Manufacturer, Supplier
+    _cat = db.session.get(DeviceCategory, product.category_id) if product.category_id else None
+    _mfr = db.session.get(Manufacturer, product.manufacturer_id) if product.manufacturer_id else None
+    _sup = db.session.get(Supplier, product.supplier_id) if product.supplier_id else None
+    if _cat:
+        p_dict['category_name'] = _cat.name
+    if _mfr:
+        p_dict['manufacturer_name'] = _mfr.name
+    if _sup:
+        p_dict['supplier_name'] = _sup.name
+    return jsonify({'product': p_dict})
 
 
 @products_bp.route('/api/products/<int:product_id>/image', methods=['GET'])
@@ -299,6 +346,16 @@ def update_product(product_id):
         product.price = round(float(data['price']), 2)
     if 'cost_price' in data:
         product.cost_price = round(float(data['cost_price']), 2)
+    # v2.6.0 new optional fields
+    optional_new_fields = ['model', 'category_id', 'manufacturer_id', 'supplier_id',
+                           'product_url', 'status', 'parent_id']
+    for f in optional_new_fields:
+        if f in data and data[f] is not None:
+            setattr(product, f, data[f])
+    for json_field in ['specs', 'urls', 'custom_fields']:
+        if json_field in data:
+            val = data[json_field]
+            setattr(product, json_field, json.dumps(val, ensure_ascii=False) if val else None)
     _store_image_blob(product, data)
     product.pinyin_search = _compute_pinyin_search(product.name, product.spec or '', product.category or '', product.supplier or '')
     db.session.commit()

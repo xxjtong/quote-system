@@ -37,11 +37,11 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
-    # v2.6.0 relationships
-    category = db.relationship('DeviceCategory', foreign_keys=[category_id], backref='products')
-    manufacturer = db.relationship('Manufacturer', foreign_keys=[manufacturer_id], backref='products')
-    supplier = db.relationship('Supplier', foreign_keys=[supplier_id], backref='products')
-    parent = db.relationship('Product', remote_side=[id], backref='variants')
+    # v2.6.0 relationships (prefixed to avoid collision with legacy columns 'category'/'supplier')
+    device_category = db.relationship('DeviceCategory', foreign_keys=[category_id], backref='products')
+    product_manufacturer = db.relationship('Manufacturer', foreign_keys=[manufacturer_id], backref='products')
+    product_supplier = db.relationship('Supplier', foreign_keys=[supplier_id], backref='products')
+    parent_product = db.relationship('Product', remote_side=[id], backref='variants')
 
     def to_dict(self, users_map=None):
         creator_name = None
