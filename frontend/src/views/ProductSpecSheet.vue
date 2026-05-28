@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useApi } from '../composables/useApi'
+import { useApi, BASE_URL } from '../composables/useApi'
 
 const route = useRoute()
 const router = useRouter()
@@ -36,7 +36,7 @@ function imgSrc(url) {
   if (!url) return ''
   if (url.startsWith('http')) return url
   const token = authToken.value
-  return (import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')) + url + (token ? '?token=' + token : '')
+  return BASE_URL + url + (token ? '?token=' + token : '')
 }
 
 function hasM2MData(arr) { return arr && arr.length > 0 }
@@ -101,7 +101,7 @@ function goBack() {
         <div class="col-md-6 text-center">
           <img v-if="product.has_image || product.image_url"
             :src="product.has_image
-              ? (import.meta.env.BASE_URL === '/' ? '' : import.meta.env.BASE_URL.replace(/\/$/, '')) + '/api/products/' + product.id + '/image' + (authToken.value ? '?token=' + authToken.value : '')
+              ? BASE_URL + '/api/products/' + product.id + '/image' + (authToken.value ? '?token=' + authToken.value : '')
               : imgSrc(product.image_url)"
             style="max-width:100%;max-height:250px;object-fit:contain;border:1px solid #dee2e6;border-radius:6px">
           <div v-else class="text-muted py-5"><i class="bi bi-image" style="font-size:3rem"></i></div>
