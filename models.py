@@ -38,10 +38,10 @@ class Product(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     # v2.6.0 relationships
-    category_rel = db.relationship('DeviceCategory', foreign_keys=[category_id], backref='products')
-    manufacturer_rel = db.relationship('Manufacturer', foreign_keys=[manufacturer_id], backref='products')
-    supplier_rel = db.relationship('Supplier', foreign_keys=[supplier_id], backref='products')
-    parent_rel = db.relationship('Product', remote_side=[id], backref='variants')
+    category = db.relationship('DeviceCategory', foreign_keys=[category_id], backref='products')
+    manufacturer = db.relationship('Manufacturer', foreign_keys=[manufacturer_id], backref='products')
+    supplier = db.relationship('Supplier', foreign_keys=[supplier_id], backref='products')
+    parent = db.relationship('Product', remote_side=[id], backref='variants')
 
     def to_dict(self, users_map=None):
         creator_name = None
@@ -442,7 +442,6 @@ class CategorySpecDefinition(db.Model):
     validation = db.Column(db.Text, nullable=True) # JSON: {min, max} for number
 
     def to_dict(self):
-        import json
         return {
             'id': self.id, 'category_id': self.category_id,
             'spec_key': self.spec_key, 'display_name': self.display_name,
