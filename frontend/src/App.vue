@@ -54,6 +54,7 @@ const tabs = [
 const titles = {
   dashboard: '首页', products: '产品管理', quotes: '报价管理',
   newquote: '新建报价单', import: '导入导出', dicts: '字典管理', categories: '分类管理', admin: '管理',
+  compare: '产品对比', specSheet: '规格书',
   login: '登录'
 }
 

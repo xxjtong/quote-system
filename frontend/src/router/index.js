@@ -4,6 +4,8 @@ import { useApi } from '../composables/useApi'
 const routes = [
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { guest: true } },
   { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { auth: true } },
+  { path: '/products/compare', name: 'compare', component: () => import('../views/ProductCompareView.vue'), meta: { auth: true } },
+  { path: '/products/:id/spec-sheet', name: 'specSheet', component: () => import('../views/ProductSpecSheet.vue'), meta: { auth: true } },
   { path: '/products/:id?', name: 'products', component: () => import('../views/ProductsView.vue'), meta: { auth: true } },
   { path: '/quotes/:id?', name: 'quotes', component: () => import('../views/QuotesView.vue'), meta: { auth: true } },
   { path: '/new-quote', name: 'newquote', component: () => import('../views/NewQuoteView.vue'), meta: { auth: true } },
