@@ -333,10 +333,16 @@ function renderContent(msg) {
   function flushText() {
     if (textBuf.length) {
       let t = textBuf.join('\n')
-      // Escape HTML entities (except #N links we handle later)
+      // Escape HTML entities
       t = t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      // Markdown **bold**
+      t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // Markdown *italic*
+      t = t.replace(/\*(.+?)\*/g, '<em>$1</em>')
       // #N / 报价单 N → clickable links
       t = t.replace(/(?:#|报价单\s*)(\d+)/g, '<a href="#" class="chat-ref-link" data-qid="$1">#$1</a>')
+      // 换行 → <br>
+      t = t.replace(/\n/g, '<br>')
       parts.push({ html: true, value: t })
       textBuf = []
     }
