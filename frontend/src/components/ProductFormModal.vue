@@ -103,10 +103,6 @@ watch(() => advancedData.category_id, async (catId) => {
   } catch (e) { /* silent */ }
 })
 
-function onCategoryIdChange() {
-  // spec loading handled by the watch above
-}
-
 // Use props if available, otherwise fall back to internally loaded data
 const effectiveCategoryTree = computed(() =>
   props.categoryTree && props.categoryTree.length ? props.categoryTree : categoryTree.value
@@ -391,7 +387,7 @@ async function saveProduct() {
                   </div>
                   <div class="col-md-4">
                     <label class="form-label-modern">设备分类 <small class="text-muted">(触发高级规格)</small></label>
-                    <select class="form-select" v-model.number="advancedData.category_id" @change="onCategoryIdChange">
+                    <select class="form-select" v-model.number="advancedData.category_id">
                       <option :value="null">-- 无 --</option>
                       <option v-for="c in flattenCategories(effectiveCategoryTree)" :key="c.id" :value="c.id">{{ c.name }}</option>
                     </select>

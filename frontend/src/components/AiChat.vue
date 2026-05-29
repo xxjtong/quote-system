@@ -392,7 +392,7 @@ function renderContent(msg) {
   if (tableRows.length >= 2) parts.push({ html: true, value: renderTable(tableRows) })
   flushText()
 
-  return DOMPurify.sanitize(parts.map(p => p.value).join('\n'), { ALLOWED_ATTR: ['style', 'class', 'href', 'data-qid'] })
+  return DOMPurify.sanitize(parts.map(p => p.value).join('\n'), { ALLOWED_ATTR: ['class', 'href', 'data-qid'] })
 }
 
 function renderTable(rows) {

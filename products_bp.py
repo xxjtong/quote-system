@@ -1011,13 +1011,19 @@ def export_all_products():
         cats = DeviceCategory.query.filter(DeviceCategory.id.in_(cat_ids)).all()
         cat_map = {c.id: c.name for c in cats}
 
-    # Preload manufacturer names
+    # Preload manufacturer names + user names
     mfr_ids = set(p.manufacturer_id for p in products if p.manufacturer_id)
     mfr_map = {}
     if mfr_ids:
         from models import Manufacturer
         mfrs = Manufacturer.query.filter(Manufacturer.id.in_(mfr_ids)).all()
         mfr_map = {m.id: m for m in mfrs}
+    user_ids = set(p.created_by for p in products if p.created_by)
+    user_map = {}
+    if user_ids:
+        from models import User
+        users = User.query.filter(User.id.in_(user_ids)).all()
+        user_map = {u.id: u.username for u in users}
 
     # 按 category 分 Sheet，未分类放「未分类」
     sheet_map = {}
@@ -1070,12 +1076,7 @@ def export_all_products():
                 p.status or 'active',
             ]
             if is_admin:
-                creator = ''
-                if p.created_by:
-                    from models import User
-                    u = db.session.get(User, p.created_by)
-                    creator = u.username if u else str(p.created_by)
-                row_data.append(creator)
+                row_data.append(user_map.get(p.created_by, ''))
             ws.append(row_data)
 
     # 删除默认空 Sheet

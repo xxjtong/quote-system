@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, inject, onMounted, computed } from 'vue'
+import { ref, reactive, inject, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
@@ -205,6 +205,10 @@ onMounted(() => {
   if (autoProductIds.value.length > 0) autoAddProductsById()
   else if (autoProducts.value.length > 0) autoAddProducts()
   else if (autoProduct.value) autoAddProduct()
+})
+
+onUnmounted(() => {
+  clearTimeout(pickerTimer)
 })
 
 // 通过产品ID直接添加（AI对话用ID=引用时最可靠）

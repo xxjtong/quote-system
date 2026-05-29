@@ -41,9 +41,11 @@ class SessionManager:
     def get_messages(self, conversation_id, limit=None):
         if limit is None:
             limit = MAX_CONTEXT_MESSAGES
+        # SQL LIMIT avoids loading full history into memory
         messages = AIMessage.query.filter_by(
             conversation_id=conversation_id
-        ).order_by(AIMessage.created_at.asc()).all()
+        ).order_by(AIMessage.created_at.desc()).limit(limit * 2).all()
+        messages.reverse()
 
         system_msgs = [m for m in messages if m.role == 'system']
         other_msgs = [m for m in messages if m.role != 'system']
