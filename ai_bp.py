@@ -205,7 +205,8 @@ def ai_chat():
 
     try:
         result = agent.run(messages, tool_defs, conv_pk, sm, stream=False, quick_reply_llm=_quick_reply_llm)
-        reply = result.get('reply', '') or '抱歉，AI 暂时无法回答，请稍后再试。'
+        agent_error = result.get('error', '')
+        reply = result.get('reply', '') or agent_error or '抱歉，AI 暂时无法回答，请稍后再试。'
         parsed = result.get('parsed', parse_reply_actions(reply))
         elapsed = result.get('elapsed', time.time() - t0)
 

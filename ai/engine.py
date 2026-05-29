@@ -39,7 +39,9 @@ class LlmEngine:
             headers={'Authorization': f'Bearer {cfg["api_key"]}'},
             timeout=kwargs.get('timeout', 60),
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            detail = resp.text[:500] if resp.text else 'No body'
+            raise Exception(f'{resp.status_code} {resp.reason}: {detail}')
         return resp.json()
 
     def chat_stream(self, model_id, messages, tools=None, **kwargs):
@@ -61,7 +63,9 @@ class LlmEngine:
             stream=True,
             timeout=kwargs.get('timeout', 120),
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            detail = resp.text[:500] if resp.text else 'No body'
+            raise Exception(f'{resp.status_code} {resp.reason}: {detail}')
         for line in resp.iter_lines():
             if not line:
                 continue

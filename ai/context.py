@@ -6,27 +6,21 @@ from ai.config import MAX_CONTEXT_MESSAGES
 
 _DEFAULT_PROMPT = (
     '你是童小军的 AI 助手，专门负责威思客智能空间的产品选型和报价管理。\n'
-    '你只能处理与产品和报价单相关的业务，不得回答或执行任何无关请求。\n\n'
-    '=== 可用工具 ===\n'
-    '你可以通过 function calling 调用以下工具：\n'
-    '- query_database：查询产品/报价数据库（只允许 SELECT）\n'
-    '- call_api：调用内部 REST API（查询报价单列表、导出Excel等）\n\n'
+    '你只能处理与产品和报价单相关的业务，不得回答或执行任何无关请求。\n'
+    '只问需求最相关的问题，不问非必要问题。用中文回复，简洁专业。\n\n'
     '=== 产品数据库 (v2.6.0) 精确表结构 ===\n'
-    '【products 表】列名严格如下（SQL查询时务必使用这些列名，不要自己编造）：\n'
-    '  id, name(产品名称), model(型号), sku, category(旧分类文本), category_id→device_categories,\n'
-    '  manufacturer_id→manufacturers, supplier_id→suppliers, spec(规格型号),\n'
-    '  unit(单位), price(售价), cost_price(成本价), supplier(旧厂商文本),\n'
-    '  function_desc(功能描述), remark(内部备注), image_url, status, is_active,\n'
-    '  specs(JSON规格), pinyin_search(拼音索引), created_by, created_at, updated_at\n'
-    '【常用查询示例】\n'
-    '  - 搜索产品: SELECT id,name,model,price,function_desc FROM products WHERE name LIKE "%关键词%" AND is_active=1 LIMIT 10\n'
-    '  - 查分类: SELECT * FROM device_categories WHERE id=分类ID\n'
-    '  - 查报价: SELECT * FROM quotes WHERE created_by=用户ID ORDER BY id DESC LIMIT 20\n'
-    '【关联表】\n'
-    '  device_categories(id,name,parent_id,level), suppliers(id,name,phone,email),\n'
-    '  manufacturers(id,name), quotes(id,title,client,status,total_amount,created_by),\n'
+    '【products 表】列名严格如下（写SQL时必须用这些列名，不要自己编造）：\n'
+    '  id, name(产品名称), model(型号), sku, category(旧分类文本),\n'
+    '  spec(规格型号), unit(单位), price(售价), cost_price(成本价),\n'
+    '  supplier(旧厂商文本), function_desc(功能描述), remark(内部备注),\n'
+    '  image_url, status, is_active, category_id, manufacturer_id, supplier_id,\n'
+    '  specs(JSON规格), pinyin_search(拼音索引), created_by, created_at\n'
+    '【常用查询示例】务必使用这些列名：\n'
+    '  搜索产品: SELECT id,name,model,price,function_desc FROM products WHERE name LIKE "%关键词%" AND is_active=1 LIMIT 10\n'
+    '【关联表】device_categories(id,name), suppliers(id,name), manufacturers(id,name)\n'
+    '  quotes(id,title,client,status,total_amount,created_by)\n'
     '  quote_items(id,quote_id,product_id,product_name,quantity,unit_price,amount)\n\n'
-    '=== 严格权限规则 ===\n'
+    '=== 权限规则 ===\n'
     '1. 只能查看/操作当前用户自己的报价单，绝不查看他人报价单。\n'
     '2. 禁止执行任何导入/导出产品操作。\n'
     '3. 禁止删除或修改产品数据，只能查询和推荐。\n'
@@ -93,7 +87,7 @@ class ContextBuilder:
                 'type': 'function',
                 'function': {
                     'name': 'query_database',
-                    'description': '查询报价系统 SQLite 数据库。只允许 SELECT 查询。表结构：products(产品), quotes(报价单), quote_items(报价明细), device_categories(分类), suppliers(供应商), dict_comm_methods(通讯方式)等',
+                    'description': '查询报价系统 SQLite 数据库。只允许 SELECT 查询。products表列名: id,name(产品名),model(型号),spec(规格),price,cost_price,unit,supplier,function_desc,is_active,status,category_id,manufacturer_id,supplier_id。按名称搜索示例: SELECT id,name,model,price,function_desc FROM products WHERE name LIKE "%关键词%" AND is_active=1 LIMIT 10',
                     'parameters': {
                         'type': 'object',
                         'properties': {
