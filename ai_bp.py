@@ -52,9 +52,9 @@ def _get_tools(user):
     })
 
 def _quick_reply_llm(model_id='deepseek-v4-flash', system_msg='', user_msg='', max_tokens=100):
-    # Quick reply 固定用 flash（任务简单，省 token）
+    # Quick reply 用辅助模型（AUX_MODEL）
     try:
-        resp = _get_engine().chat('deepseek-v4-flash', [
+        resp = _get_engine().chat_aux([
             {'role': 'system', 'content': system_msg},
             {'role': 'user', 'content': user_msg},
         ], max_tokens=max_tokens)
