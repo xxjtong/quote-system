@@ -19,7 +19,7 @@ def parse_reply_actions(reply_text):
     # Pattern 1: "产品名 — ¥价格"
     pat1 = re.findall(r'([一-龥A-Za-z0-9\s\-]+?)\s*[—\-]\s*[¥￥]\s*([\d,]+\.?\d*)', text)
     for name, price in pat1:
-        name = re.sub(r'^\*{1,3}\s*', '', name.strip())  # strip markdown bold
+        name = re.sub(r'\*{1,3}\s*', '', name.strip())   # strip markdown bold (both sides)
         name = re.sub(r'^\d+\.\s*', '', name).strip()     # strip leading number
         if _is_valid_product_name(name):
             try:
@@ -30,7 +30,7 @@ def parse_reply_actions(reply_text):
     # Pattern 2: "产品名 ¥价格"
     pat2 = re.findall(r'([一-龥A-Za-z0-9\s\-]+?)\s+[¥￥]\s*([\d,]+\.?\d*)', text)
     for name, price in pat2:
-        name = re.sub(r'^\*{1,3}\s*', '', name.strip())
+        name = re.sub(r'\*{1,3}\s*', '', name.strip())
         name = re.sub(r'^\d+\.\s*', '', name).strip()
         if _is_valid_product_name(name):
             try:
