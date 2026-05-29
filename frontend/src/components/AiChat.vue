@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, inject, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, inject, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
@@ -47,10 +47,9 @@ async function fetchModels() {
   } catch (e) { /* silent */ }
 }
 
-function onModelChange(e) {
-  selectedModel.value = e.target.value
-  localStorage.setItem('ai_model', selectedModel.value)
-}
+watch(selectedModel, (val) => {
+  if (val) localStorage.setItem('ai_model', val)
+})
 
 const historyBtn = ref(null)
 const historyOpen = ref(false)
@@ -458,7 +457,7 @@ onMounted(() => { loadHistory(); fetchModels() })
       </div>
       <div class="d-flex align-items-center gap-2">
         <select v-if="availableModels.length" class="form-select form-select-sm" style="width:auto;font-size:.75rem"
-            :value="selectedModel" @change="onModelChange" title="选择 AI 模型">
+            v-model="selectedModel" title="选择 AI 模型">
           <option v-for="m in availableModels" :key="m.id" :value="m.id"
             :selected="m.id === (selectedModel || defaultModel)">{{ m.name }}</option>
         </select>

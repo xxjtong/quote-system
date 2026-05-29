@@ -14,6 +14,7 @@ from flask import Blueprint, request, jsonify, g, Response, current_app, stream_
 from auth import require_auth, require_admin, create_token
 from extensions import db
 from models import User, AIUsageLog, AIChatSession
+from utils import _log_ai_usage
 
 # ─── Blueprint ──────────────────────────────────────────────
 ai_bp = Blueprint('ai', __name__)
@@ -140,8 +141,7 @@ def _handle_lightweight_chat(user_input, stream, t0, user, model_id='deepseek-v4
                 yield f'data: {_json.dumps({"type": "error", "error": str(e)})}\n\n'
             finally:
                 yield 'data: [DONE]\n\n'
-                from utils import _log_ai_usage
-                _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
+_log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
 
         return Response(generate(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
@@ -150,12 +150,10 @@ def _handle_lightweight_chat(user_input, stream, t0, user, model_id='deepseek-v4
         resp = _get_engine().chat(model_id, messages, max_tokens=200, temperature=0.7)
         reply = resp['choices'][0]['message'].get('content', '') or '好的。'
         parsed = parse_reply_actions(reply)
-        from utils import _log_ai_usage
-        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0)
+_log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0)
         return jsonify({'reply': reply, 'parsed': parsed, 'model': 'ai-engine', 'timings': {'总耗时': f'{time.time()-t0:.1f}s'}})
     except Exception as e:
-        from utils import _log_ai_usage
-        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
+_log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
         return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503
 
 # ─── Main Chat Endpoint ────────────────────────────────────
@@ -252,8 +250,7 @@ def ai_chat():
                 yield f'data: {_json.dumps({"type": "error", "error": err_msg})}\n\n'
             finally:
                 yield 'data: [DONE]\n\n'
-                from utils import _log_ai_usage
-                _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
+_log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
 
         return Response(stream_with_context(generate()), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
@@ -280,10 +277,8 @@ def ai_chat():
         parsed = parse_reply_actions(reply)
         elapsed = time.time() - t0
 
-        from utils import _log_ai_usage
-        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=elapsed)
+_log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=elapsed)
         return jsonify({'reply': reply, 'parsed': parsed, 'model': 'ai-engine', 'timings': {'总耗时': f'{elapsed:.1f}s'}})
     except Exception as e:
-        from utils import _log_ai_usage
-        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
+_log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
         return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503
