@@ -1,5 +1,44 @@
 # 更新日志
 
+## v3.0.0 (2026-05-29) — AI 引擎自研
+
+### 自研 AI Engine 替代 Hermes Gateway
+
+- **新 `ai/` 包**: engine(LlmEngine), context(ContextBuilder), tools(ToolRegistry), session(SessionManager), sse(SseAdapter), reply_parser, agent
+- DeepSeek API 直连，OpenAI-compatible 格式，支持 function calling
+- 服务端对话持久化（AIConversation + AIMessage 表），每轮加载完整上下文
+- 流式 SSE 使用 `stream_with_context`，支持 GenUI `component` 事件
+- 模型选择: flash(快速)/pro(深度推理) 前端下拉框切换
+
+### GenUI 渲染池
+
+- `componentRegistry` + `<component :is>` 动态组件渲染
+- ProductCompareCard: 勾选对比 + 创建报价单
+- QuoteDraftCard: 预览 + 下载，tool 结果直接提取 created_quote
+- SSE `component` 事件自动触发
+
+### v2.6.0 产品高级功能
+
+- 15 张新表: 字典(4)、M2M(5)、分类树、规格定义、供应商、制造商、产品图片、产品依赖
+- Product 扩展 10 字段: model, category_id, manufacturer_id, supplier_id, specs(JSON), status 等
+- 分类管理 + 字典管理 前端页面
+- 导入导出适配新表结构
+- 生产数据迁移（456 产品 → 新表）
+
+### 前端重构
+
+- 统一 UI 风格: `.page-header`, `.card-modern`, `.table-modern`, `.btn-modern`
+- 产品数据库页面（product-db 移植）
+- AiChat SSE 超时处理（30s）、错误恢复
+- 快捷按钮黑名单过滤
+
+### 测试
+
+- Backend: 138/138 通过
+- UI: 15/15 页面渲染 + 17/17 功能流程
+
+---
+
 ## v2.3.0 (2026-05-24)
 
 ### 后端重构 — 消除循环依赖 + Blueprint 合并

@@ -51,56 +51,69 @@
 - pytest 测试: venv 在 `/opt/quote-system/venv/`
 - ⚠️ 依赖: `flask flask-sqlalchemy flask-cors pyjwt openpyxl pypinyin Pillow`（`pypinyin` 是 lazy import，`import app` 检测不到遗漏；`Pillow` 是 openpyxl 处理图片所需）
 
-### AI 对话
+### AI 对话 (v3.0 自研引擎)
 
 #### 架构总览
 
 ```
-浏览器 (AiChat.vue)                     Flask (ai_bp.py)                  Hermes Gateway (:8642)          DeepSeek API
-  │                                        │                                  │                              │
-  │─ SSE 流式请求 ──────────────────────>│                                  │                              │
-  │  POST /api/chat                       │─ POST /v1/chat/completions ────>│ (轻量消息, 带 auth key)      │
-  │  {input, stream:true,                 │  或                              │                              │
-  │   history, conversation_id}           │─ POST /v1/responses ───────────>│ (完整Agent, 带 auth key)     │
-  │                                        │                                  │─ agent.run ─────────────────>│
-  │                                        │                                  │<─ SSE text deltas ─────────│
-  │<─ SSE: connect ──────────────────────│<─ SSE stream ────────────────────│                              │
-  │<─ SSE: text delta ──────────────────│                                  │                              │
-  │<─ SSE: done + parsed ───────────────│                                  │                              │
-  │<─ SSE: quick_replies (并行) ────────│ (收到100字后后台启动LLM生成)       │                              │
+浏览器 (AiChat.vue)          Flask (ai_bp.py)         ai/engine.py          DeepSeek API
+  │                             │                        │                      │
+  │─ POST /api/chat (SSE) ──>│                        │                      │
+  │  {input, stream, history, │─ LlmEngine.chat() ──>│                      │
+  │   conversation_id}        │  (OpenAI-compatible)   │─ HTTPS ────────────>│
+  │                             │                        │<─ SSE chunks ─────│
+  │<─ SSE: connect ──────────│<─ SseAdapter ──────────│                      │
+  │<─ SSE: text delta ───────│                        │                      │
+  │<─ SSE: component (GenUI) │                        │                      │
+  │<─ SSE: done + parsed ────│                        │                      │
 ```
 
-#### 核心组件
+#### 核心模块
 
-| 组件 | 文件 | 职责 |
+| 模块 | 文件 | 职责 |
 |------|------|------|
-| AiChat.vue | `frontend/src/components/AiChat.vue` | 对话UI、SSE消费、消息渲染、历史管理 |
-| ai_bp.py | `ai_bp.py` | 路由、输入验证、轻量判定、Gateway调用、回复解析 |
-| Hermes Gateway | `:8642` | Agent循环、工具调用(DB/API)、模型路由 |
-| DeepSeek API | `api.deepseek.com/v1` | LLM推理 |
+| AiChat.vue | `frontend/src/components/AiChat.vue` | 对话UI、SSE消费、GenUI渲染、历史管理 |
+| ai_bp.py | `ai_bp.py` | 路由、输入验证、轻量判定、tool loop编排 |
+| ai/engine.py | `ai/engine.py` | LlmEngine — OpenAI-compatible HTTP 客户端 |
+| ai/context.py | `ai/context.py` | ContextBuilder — 动态 system prompt + tool 定义 |
+| ai/tools.py | `ai/tools.py` | ToolRegistry — SQL 查询 + API 调用 |
+| ai/session.py | `ai/session.py` | SessionManager — 服务端对话持久化 |
+| ai/sse.py | `ai/sse.py` | SseAdapter — SSE 事件格式化 |
+| ai/reply_parser.py | `ai/reply_parser.py` | 价格解析 + Quick Reply 生成 |
+| GenUI/*.vue | `frontend/src/components/GenUI/` | 动态组件池（ProductCompareCard, QuoteDraftCard）|
 
 #### 请求流程
 
-1. **前端**: `sendMessage()` → `apiStream('/api/chat', {input, stream:true, history, conversation_id})`
-   - SSE流式需要 `Content-Type: application/json` 头（缺少则 Flask 无法解析 body → "请输入问题"）
-   - `history`: 最近3轮对话(6条)，每条截取200字，改善多轮连贯性
-   - `conversation_id`: 前端session ID，Gateway据此维护对话session
-
+1. **前端**: `sendMessage()` → `apiStream('/api/chat', ...)` — dev模式直连 Flask :5001（绕过Vite代理）
 2. **后端 ai_chat()**: 
-   - **速率限制**: 内存计数器（threading.Lock），每分钟5次（v2.4.0改为内存，原是DB COUNT）
-   - **轻量判定**: `_is_lightweight()` 正则匹配问候/确认/帮助类简单消息 → 走 `/v1/chat/completions`
-   - **正常消息**: 走 `/v1/responses`（Agent循环，有工具调用能力）
-   - **max_tokens 动态调整**: 列表/报价类2000，分析/推荐类1500，默认800
-   - System prompt 有30s TTL缓存（`_prompt_cache`），不变时不重复发送 instructions
-   - Gateway 调用需要 `Authorization: Bearer {QUOTE_GATEWAY_KEY}` 头
+   - 速率限制: 10次/分钟/用户（v3.0）
+   - 轻量判定 → flash 快速响应；正常消息 → tool loop（最多3轮）
+   - 每次请求都带完整 system prompt + 对话历史（`AIMessage` 表，最多30条）
+3. **Tool Calling**: 
+   - `query_database`: SELECT 查询产品/报价（安全限制：只允许SELECT）
+   - `call_api`: GET/POST 内部 API（含创建报价单）
+   - 工具结果注入 LLM 上下文，形成闭环
+4. **SSE 事件**: `connect → first_token → text → tool → component(GenUI) → done → quick_replies → [DONE]`
+5. **GenUI**: 后端自动检测 `created_quote` 和 `products`，emit `component` 事件 → 前端 `<component :is>` 渲染
 
-3. **Gateway**: 
-   - Profile: `qoute`（`/home/tong/.hermes/profiles/qoute/config.yaml`）
-   - model.provider: `deepseek`，读取 `DEEPSEEK_API_KEY` 环境变量
-   - API Server key: `qs-65bf75614bdd4245`（`api_server.extra.key`）
+#### 配置
 
-4. **SSE 流式** (`_ai_chat_sse`):
-   - 透传 Gateway `/v1/responses` SSE stream → 解析 `response.output_text.delta` 事件
+```bash
+# 环境变量
+DEEPSEEK_API_KEY=sk-...        # DeepSeek API key（必填）
+QUOTE_AI_MODEL=deepseek-v4-flash  # 默认模型
+
+# 模型选择（前端下拉框）
+deepseek-v4-flash → api.deepseek.com → deepseek-chat
+deepseek-v4-pro   → api.deepseek.com → deepseek-reasoner
+```
+
+#### 对话持久化
+
+- `AIConversation` 表：用户+session_id 唯一
+- `AIMessage` 表：role (system/user/assistant/tool)、content、tool_calls
+- 每轮自动加载最近 30 条消息作为上下文
+- 报价单创建后 `created_quote_id` 从 tool 结果直接提取，不依赖文本解析
    - **并行 quick_reply**: 累积100字后后台线程启动 LLM 生成，主回复完成后 join(2s)
    - 事件类型: `connect` → `first_token` → `text` → `done`(+parsed) → `quick_replies` → `[DONE]`
 
