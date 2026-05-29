@@ -140,8 +140,10 @@ def _handle_lightweight_chat(user_input, stream, t0, user, model_id='deepseek-v4
                 yield f'data: {_json.dumps({"type": "error", "error": str(e)})}\n\n'
             finally:
                 yield 'data: [DONE]\n\n'
+                from utils import _log_ai_usage
+                _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
 
-        return Response(stream_with_context(generate()), mimetype='text/event-stream',
+        return Response(generate(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
     try:
@@ -246,11 +248,12 @@ def ai_chat():
 
                 yield f'data: {_json.dumps({"type": "done", "parsed": {}, "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
             except Exception as e:
-                import traceback
                 err_msg = str(e)[:200]
                 yield f'data: {_json.dumps({"type": "error", "error": err_msg})}\n\n'
             finally:
                 yield 'data: [DONE]\n\n'
+                from utils import _log_ai_usage
+                _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
 
         return Response(stream_with_context(generate()), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
