@@ -524,36 +524,7 @@ onMounted(() => { loadHistory(); fetchModels() })
           </template>
           <template v-else>{{ msg.content }}</template>
 
-          <!-- Parsed: Product Cards -->
-          <div v-if="msg.role === 'assistant' && msg.parsed?.products?.length" class="mt-2">
-            <div v-for="(prod, pi) in msg.parsed.products.slice(0, 4)" :key="pi"
-              class="product-card d-flex align-items-center gap-2 p-2 rounded mb-1"
-              style="background:white;border:1px solid var(--gray-200);cursor:pointer"
-              @click="toggleCompare(prod)">
-              <div class="flex-grow-1">
-                <div class="fw-medium small">{{ prod.name }}</div>
-                <div class="text-primary fw-bold">{{ formatMoney(prod.price) }}</div>
-              </div>
-              <div class="d-flex gap-1">
-                <button class="btn btn-sm btn-outline-primary" style="font-size:.7rem;padding:1px 6px"
-                  @click.stop="createQuoteFromProduct(prod.name)" title="创建报价单">
-                  <i class="bi bi-cart-plus"></i>
-                </button>
-                <div v-if="isCompared(prod)" class="text-success"><i class="bi bi-check-circle-fill"></i></div>
-                <div v-else class="text-muted" style="font-size:.7rem">对比</div>
-              </div>
-            </div>
-
-            <!-- Compare action -->
-            <div v-if="compareList.length >= 2" class="mt-2 d-flex gap-2">
-              <button class="btn btn-sm btn-outline-success" @click="showCompare = true">
-                <i class="bi bi-bar-chart me-1"></i>对比 {{ compareList.length }} 款
-              </button>
-              <button class="btn btn-sm btn-outline-secondary" @click="compareList = []">清除选择</button>
-            </div>
-          </div>
-
-          <!-- GenUI: Dynamically rendered components from AI -->
+          <!-- GenUI: Dynamically rendered components from AI (replaces old product cards) -->
           <div v-if="msg.role === 'assistant' && msg.components?.length" class="mt-2">
             <component
               v-for="(comp, ci) in msg.components" :key="ci"
