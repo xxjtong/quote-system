@@ -81,11 +81,13 @@ def my_ai_usage():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
     query = AIUsageLog.query.filter_by(user_id=uid).order_by(AIUsageLog.created_at.desc())
-    total = query.count()
+    my_count = query.count()
+    total_count = AIUsageLog.query.count()
     logs = query.offset((page - 1) * per_page).limit(per_page).all()
     return jsonify({
         'logs': [l.to_dict() for l in logs],
-        'total': total, 'page': page, 'per_page': per_page,
+        'my_count': my_count, 'total_count': total_count,
+        'total': query.count(), 'page': page, 'per_page': per_page,
     })
 
 # ─── Rate Limiting ─────────────────────────────────────────
