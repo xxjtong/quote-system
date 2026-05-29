@@ -196,65 +196,57 @@ def ai_chat():
 
     if stream:
         def generate():
-            try:
-                engine = _get_engine()
-                yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
+            with current_app.app_context():
+                try:
+                    engine = _get_engine()
+                    yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
 
-                loop_messages = list(messages)
-                for turn in range(3):
-                    resp = engine.chat(model_id, loop_messages, tools=tool_defs, max_tokens=2000)
-                    msg = resp['choices'][0]['message']
+                    loop_messages = list(messages)
+                    for turn in range(3):
+                        resp = engine.chat(model_id, loop_messages, tools=tool_defs, max_tokens=2000)
+                        msg = resp['choices'][0]['message']
 
-                    if not msg.get('tool_calls'):
-                        reply = msg.get('content', '')
-                        if reply:
-                            yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{time.time()-t0:.1f}s"})}\n\n'
-                            for i in range(0, len(reply), 3):
-                                yield f'data: {_json.dumps({"type": "text", "text": reply[i:i+3]}, ensure_ascii=False)}\n\n'
-                        if turn > 0:
-                            yield f'data: {_json.dumps({"type": "tool"})}\n\n'
-                        parsed = parse_reply_actions(reply)
-                        yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
+                        if not msg.get('tool_calls'):
+                            reply = msg.get('content', '')
+                            if reply:
+                                yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{time.time()-t0:.1f}s"})}\n\n'
+                                for i in range(0, len(reply), 3):
+                                    yield f'data: {_json.dumps({"type": "text", "text": reply[i:i+3]}, ensure_ascii=False)}\n\n'
+                            if turn > 0:
+                                yield f'data: {_json.dumps({"type": "tool"})}\n\n'
+                            parsed = parse_reply_actions(reply)
+                            yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
 
-                        # 持久化 AI 回复（多轮对话上下文）
-                        sm.add_message(conv_pk, 'assistant', reply)
+                            sm.add_message(conv_pk, 'assistant', reply)
 
-                        # LLM 生成智能快捷回复
-                        try:
-                            llm_replies = generate_quick_replies(reply, _quick_reply_llm)
-                            # 合并：LLM 优先，正则兜底
-                            merged = list(llm_replies) if llm_replies else []
-                            for r in (parsed.get('quick_replies') or []):
-                                if r not in merged:
-                                    merged.append(r)
-                            if merged:
-                                yield f'data: {_json.dumps({"type": "quick_replies", "items": merged[:5]}, ensure_ascii=False)}\n\n'
-                        except Exception:
-                            pass
-                        return
+                            try:
+                                llm_replies = generate_quick_replies(reply, _quick_reply_llm)
+                                merged = list(llm_replies) if llm_replies else []
+                                for r in (parsed.get('quick_replies') or []):
+                                    if r not in merged: merged.append(r)
+                                if merged:
+                                    yield f'data: {_json.dumps({"type": "quick_replies", "items": merged[:5]}, ensure_ascii=False)}\n\n'
+                            except Exception:
+                                pass
+                            return
 
-                    yield f'data: {_json.dumps({"type": "tool"})}\n\n'
-                    # 持久化工具调用消息
-                    sm.add_message(conv_pk, 'assistant', msg.get('content') or '', tool_calls=msg['tool_calls'])
-                    loop_messages.append({'role': 'assistant', 'content': msg.get('content'), 'tool_calls': msg['tool_calls']})
-                    for tc in msg['tool_calls']:
-                        fn = tc['function']
-                        try:
-                            args = _json.loads(fn['arguments'])
-                        except Exception:
-                            args = {}
-                        result = agent.tools.execute(fn['name'], args)
-                        result_str = _json.dumps(result, ensure_ascii=False)
-                        sm.add_message(conv_pk, 'tool', result_str, tool_call_id=tc.get('id', ''), name=fn['name'])
-                        loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': result_str})
+                        yield f'data: {_json.dumps({"type": "tool"})}\n\n'
+                        sm.add_message(conv_pk, 'assistant', msg.get('content') or '', tool_calls=msg['tool_calls'])
+                        loop_messages.append({'role': 'assistant', 'content': msg.get('content'), 'tool_calls': msg['tool_calls']})
+                        for tc in msg['tool_calls']:
+                            fn = tc['function']
+                            try: args = _json.loads(fn['arguments'])
+                            except Exception: args = {}
+                            result = agent.tools.execute(fn['name'], args)
+                            result_str = _json.dumps(result, ensure_ascii=False)
+                            sm.add_message(conv_pk, 'tool', result_str, tool_call_id=tc.get('id', ''), name=fn['name'])
+                            loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': result_str})
 
-                yield f'data: {_json.dumps({"type": "done", "parsed": {}, "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
-            except Exception as e:
-                import traceback
-                err_msg = str(e)[:200]
-                yield f'data: {_json.dumps({"type": "error", "error": err_msg})}\n\n'
-            finally:
-                yield 'data: [DONE]\n\n'
+                    yield f'data: {_json.dumps({"type": "done", "parsed": {}, "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
+                except Exception as e:
+                    yield f'data: {_json.dumps({"type": "error", "error": str(e)[:200]})}\n\n'
+                finally:
+                    yield 'data: [DONE]\n\n'
 
         from utils import _log_ai_usage
         _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=0, success=True)
