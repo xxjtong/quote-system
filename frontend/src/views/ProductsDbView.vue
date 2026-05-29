@@ -119,7 +119,7 @@
         </div>
       </div>
       <div class="card-footer" v-if="products.length">
-        <nav v-if="totalPages > 1" class="mt-1">
+        <nav v-if="totalPages > 1" class="mt-3">
           <ul class="pagination pagination-modern justify-content-center mb-0">
             <li class="page-item" :class="{ disabled: page <= 1 }">
               <a class="page-link" @click="goPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
