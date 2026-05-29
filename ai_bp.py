@@ -53,7 +53,7 @@ def _build_agent(user):
     })
     return Agent(_get_engine(), tools), ctx
 
-def _quick_reply_llm(model_id, system_msg, user_msg, max_tokens):
+def _quick_reply_llm(model_id='deepseek-v4-flash', system_msg='', user_msg='', max_tokens=100):
     # Quick reply 固定用 flash（任务简单，省 token）
     try:
         resp = _get_engine().chat('deepseek-v4-flash', [
@@ -215,6 +215,19 @@ def ai_chat():
                             yield f'data: {_json.dumps({"type": "tool"})}\n\n'
                         parsed = parse_reply_actions(reply)
                         yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
+
+                        # LLM 生成智能快捷回复（fire-and-forget，2s timeout）
+                        try:
+                            llm_replies = generate_quick_replies(reply, _quick_reply_llm)
+                            # 合并：LLM 优先，正则兜底
+                            merged = list(llm_replies) if llm_replies else []
+                            for r in (parsed.get('quick_replies') or []):
+                                if r not in merged:
+                                    merged.append(r)
+                            if merged:
+                                yield f'data: {_json.dumps({"type": "quick_replies", "items": merged[:5]}, ensure_ascii=False)}\n\n'
+                        except Exception:
+                            pass
                         return
 
                     yield f'data: {_json.dumps({"type": "tool"})}\n\n'
