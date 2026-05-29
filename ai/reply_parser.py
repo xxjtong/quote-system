@@ -69,18 +69,24 @@ def parse_reply_actions(reply_text):
         except ValueError:
             pass
 
-    # Pattern 6: 快捷回复提取
-    qr_patterns = [
-        r'["""]([^"""]+)["”]',
-        r'[“]([^”]+)[”]',
-        r'\*\*([^*]+)\*\*',
+    # Pattern 6: 快捷回复提取 — 只提取产品型号 + 操作建议
+    # 产品型号模式: 大写字母+数字+连字符 (如 AM319-470M-HCHO-IR, NANO, LD-AQS)
+    model_matches = re.findall(r'\b([A-Z][A-Z0-9]{1,3}(?:-[A-Z0-9]+){1,5})\b', text)
+    for m in model_matches:
+        m = m.strip()
+        if 3 <= len(m) <= 30 and m not in quick_replies:
+            quick_replies.append(m)
+
+    # 操作建议关键词
+    action_keywords = [
+        '创建报价单', '一键创建报价', '加入报价单',
+        '对比产品', '对比这几款', '详细对比',
+        '查看详情', '查看参数', '查看更多', '看看其他',
+        '再推荐几款', '换个方向', '有便宜的吗',
     ]
-    for pat in qr_patterns:
-        matches = re.findall(pat, text)
-        for m in matches:
-            m = m.strip()
-            if 2 <= len(m) <= 30 and m not in quick_replies:
-                quick_replies.append(m)
+    for kw in action_keywords:
+        if kw in text and kw not in quick_replies:
+            quick_replies.append(kw)
 
     # 过滤：去掉含管道符/表格标记的产品名，以及黑名单词
     def _valid_name(name):
@@ -130,14 +136,16 @@ def generate_quick_replies(reply_text, quick_reply_fn=None):
         return []
     snippet = reply_text.strip()[-800:]
     user_msg = (
-        '根据AI助手回复，推测用户最可能想说的2-4个简短回复。\n'
+        '根据AI助手回复，生成2-3个用户最可能点击的快捷按钮。\n'
         '规则：\n'
-        '- 每个回复5-15字，简洁自然\n'
-        '- 如果AI问了"还是"选择题，提取两个选项\n'
-        '- 如果AI推荐了产品，生成"详细对比这两款""查看更多同类产品"\n'
-        '- 如果AI问了是否创建报价单，生成"创建报价单""先不用"\n'
-        '- 如果AI给了价格，生成"有更便宜的替代吗""查看参数对比"\n'
-        '- 返回纯JSON数组如["创建报价单","先看看参数"]，不要markdown\n'
+        '- 每个按钮5-15字，是用户下一步会说的话\n'
+        '- 只生成产品型号/名称 或 操作建议，不要生成价格数字、单位、无关词汇\n'
+        '- 如果AI推荐了产品，提取产品型号作为按钮（如"AM319-HCHO-IR"）\n'
+        '- 如果有报价相关，生成"创建报价单"\n'
+        '- 如果有多款产品，生成"对比这几款"\n'
+        '- 如果AI问了场景，生成选项之一（如"LoRa无线方案"）\n'
+        '- 最多3个按钮，不够就少生成\n'
+        '- 返回纯JSON数组如["创建报价单","AM319-HCHO-IR"]，不要markdown\n'
         f'AI回复摘要："""{snippet}"""'
     )
     result = quick_reply_fn(
