@@ -245,7 +245,8 @@ async function sendMessage(textOverride) {
             currentPhase.value = phases.length - 1
             emit('chat-completed')
           } else if (data.type === 'quick_replies') {
-            if (data.items?.length && chatMessages.value[msgIndex]?.parsed) {
+            // 已创建报价单时忽略快捷回复（预览卡片已有按钮）
+            if (data.items?.length && chatMessages.value[msgIndex]?.parsed && !chatMessages.value[msgIndex].parsed.created_quote) {
               chatMessages.value[msgIndex].parsed.quick_replies = data.items
             }
           } else if (data.type === 'component') {
@@ -533,7 +534,7 @@ onMounted(() => { loadHistory(); fetchModels() })
           </div>
 
           <!-- Parsed: Quick Reply Buttons -->
-          <div v-if="msg.role === 'assistant' && msg.parsed?.quick_replies?.length && !msg.parsed?.created_quote && !chatLoading" class="mt-2 d-flex flex-wrap gap-1">
+          <div v-if="msg.role === 'assistant' && msg.parsed?.quick_replies?.length && !msg.parsed?.created_quote && !msg.components?.some(c => c.component === 'QuoteDraftCard') && !chatLoading" class="mt-2 d-flex flex-wrap gap-1">
             <button v-for="(qr, qi) in msg.parsed.quick_replies" :key="qi"
               class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
               @click="quickReply(qr)">{{ qr }}</button>
