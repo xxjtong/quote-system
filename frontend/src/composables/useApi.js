@@ -63,11 +63,13 @@ export function useApi() {
     return r
   }
 
-  // SSE 流式请求（不读 body，由调用方处理 ReadableStream）
+  // SSE 流式请求 — dev 模式直连 Flask（Vite 代理不支持 SSE 流式）
   function apiStream(url, body) {
     const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' }
     if (authToken.value) headers['Authorization'] = 'Bearer ' + authToken.value
-    return fetch(BASE_URL + url, {
+    // Dev 模式绕过 Vite 代理（代理缓冲 SSE 响应），直连 Flask
+    const base = import.meta.env.DEV ? 'http://127.0.0.1:5001' : BASE_URL
+    return fetch(base + url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
