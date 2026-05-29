@@ -76,6 +76,9 @@ class Agent:
         turn = 0
         tool_called = False
 
+        # Emit connect immediately so frontend knows we're alive
+        events.extend(SseAdapter.connect(t0))
+
         # Phase 1: Tool rounds (non-streaming)
         while turn < MAX_AGENT_TURNS:
             try:
@@ -95,7 +98,6 @@ class Agent:
             if not msg.get('tool_calls'):
                 # No more tool calls — stream the final text response
                 final_text = msg.get('content', '')
-                events.extend(SseAdapter.connect(t0))
                 if tool_called:
                     events.extend(SseAdapter.tool())
 
