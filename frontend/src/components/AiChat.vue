@@ -542,15 +542,11 @@ onMounted(() => { loadHistory(); fetchModels() })
             </button>
           </div>
 
-          <!-- Created Quote: Preview + Download buttons -->
-          <div v-if="msg.role === 'assistant' && msg.parsed?.created_quote && !chatLoading" class="mt-2 d-flex gap-2">
-            <button class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
+          <!-- Created Quote: Preview button -->
+          <div v-if="msg.role === 'assistant' && msg.parsed?.created_quote && !chatLoading" class="mt-2">
+            <button class="btn btn-sm btn-primary" style="font-size:.78rem"
               @click="previewCreatedQuote(msg.parsed.created_quote.id)">
               <i class="bi bi-eye me-1"></i>预览报价单
-            </button>
-            <button class="btn btn-sm btn-primary" style="font-size:.78rem"
-              @click="downloadCreatedQuote(msg.parsed.created_quote.download_url)">
-              <i class="bi bi-download me-1"></i>下载Excel
             </button>
           </div>
 
