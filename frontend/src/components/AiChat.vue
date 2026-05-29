@@ -334,8 +334,7 @@ function createQuoteFromProducts(products) {
 
 // Handle quick reply button
 function quickReply(text) {
-  if (text === '查看报价单') {
-    // 找到最新创建的报价单并预览
+  if (text === '查看报价单' || text === '预览报价单') {
     for (const m of [...chatMessages.value].reverse()) {
       if (m.role === 'assistant' && m.parsed?.created_quote) {
         previewCreatedQuote(m.parsed.created_quote.id)
