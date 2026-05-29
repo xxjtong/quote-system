@@ -225,8 +225,8 @@ onMounted(() => {
     <!-- Content -->
     <div class="card-modern">
       <div class="card-title-modern d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-list"></i>{{ currentTabLabel }}列表</span>
-        <button class="btn btn-primary btn-sm" @click="openCreate">
+        <span><i class="bi bi-list text-primary"></i>{{ currentTabLabel }}列表</span>
+        <button class="btn btn-primary btn-modern" @click="openCreate">
           <i class="bi bi-plus-lg"></i> 新增
         </button>
       </div>

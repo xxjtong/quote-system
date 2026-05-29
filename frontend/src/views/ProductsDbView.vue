@@ -1,24 +1,26 @@
 <template>
   <div>
     <!-- Page header -->
-    <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
-      <h5 class="mb-0"><i class="bi bi-database me-2"></i>产品数据库</h5>
-      <div class="d-flex align-items-center gap-2">
-        <div style="min-width:200px">
-          <SearchInput v-model="search" placeholder="搜索型号/名称..." />
+    <div class="page-header justify-content-between">
+      <h5><i class="bi bi-database me-2"></i>产品数据库</h5>
+      <div style="display:flex;gap:8px">
+        <div style="position:relative;width:200px">
+          <i class="bi bi-search text-muted" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);z-index:5"></i>
+          <input class="form-control form-control-sm ps-4" placeholder="搜索型号/名称..."
+            v-model="search" />
         </div>
-        <a :href="exportUrl" target="_blank" class="btn btn-outline-secondary btn-sm">
+        <a :href="exportUrl" target="_blank" class="btn btn-outline-primary btn-modern">
           <i class="bi bi-download me-1"></i>导出
         </a>
-        <button class="btn btn-primary btn-sm" @click="$router.push('/products-db/new')">
+        <button class="btn btn-primary btn-modern" @click="$router.push('/products-db/new')">
           <i class="bi bi-plus-lg me-1"></i>新增
         </button>
       </div>
     </div>
 
     <!-- Filter panel -->
-    <div class="card mb-3">
-      <div class="card-body py-2 px-3">
+    <div class="card-modern mb-3">
+      <div style="padding:8px 12px">
         <div class="d-flex flex-wrap align-items-center gap-2" v-if="categoryTree.length">
           <span class="small text-muted fw-medium me-1">品类</span>
           <span v-for="c in flatCategories" :key="c.id"
@@ -63,10 +65,10 @@
     </div>
 
     <!-- Data table -->
-    <div class="card">
+    <div class="card-modern">
       <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0" v-if="products.length">
-          <thead class="table-light">
+        <table class="table table-modern" v-if="products.length">
+          <thead>
             <tr>
               <th>名称</th>
               <th>型号</th>
@@ -109,20 +111,40 @@
             </tr>
           </tbody>
         </table>
-        <div v-else class="text-center py-5 text-muted">
-          <i class="bi bi-inbox" style="font-size:2rem"></i>
-          <p class="mt-2">暂无产品</p>
+        <div v-else>
+          <div class="empty-state">
+            <i class="bi bi-inbox"></i>
+            <p>暂无产品</p>
+          </div>
         </div>
       </div>
       <div class="card-footer" v-if="products.length">
-        <Pagination :total="total" :page="page" :per-page="perPage" @change="onPageChange" />
+        <nav v-if="totalPages > 1" class="mt-1">
+          <ul class="pagination pagination-modern justify-content-center mb-0">
+            <li class="page-item" :class="{ disabled: page <= 1 }">
+              <a class="page-link" @click="goPage(1)" title="首页"><i class="bi bi-chevron-double-left"></i></a>
+            </li>
+            <li class="page-item" :class="{ disabled: page <= 1 }">
+              <a class="page-link" @click="goPage(page - 1)">上一页</a>
+            </li>
+            <li v-for="p in pageNumbers" :key="p" class="page-item" :class="{ active: p === page }">
+              <a class="page-link" @click="goPage(p)">{{ p }}</a>
+            </li>
+            <li class="page-item" :class="{ disabled: page >= totalPages }">
+              <a class="page-link" @click="goPage(page + 1)">下一页</a>
+            </li>
+            <li class="page-item" :class="{ disabled: page >= totalPages }">
+              <a class="page-link" @click="goPage(totalPages)" title="末页"><i class="bi bi-chevron-double-right"></i></a>
+            </li>
+          </ul>
+        </nav>
       </div>
     </div>
 
     <!-- Delete confirmation modal -->
     <Teleport to="body">
       <div v-if="deleteTarget" class="modal-backdrop show" @click="deleteTarget = null"></div>
-      <div v-if="deleteTarget" class="modal d-block" tabindex="-1">
+      <div v-if="deleteTarget" class="modal d-block modern-modal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-sm">
           <div class="modal-content">
             <div class="modal-header">
@@ -133,8 +155,8 @@
               <p class="mb-0">确定删除「{{ deleteTarget?.name }}」？</p>
             </div>
             <div class="modal-footer">
-              <button class="btn btn-danger btn-sm" @click="doDelete">确定删除</button>
-              <button class="btn btn-secondary btn-sm" @click="deleteTarget = null">取消</button>
+              <button class="btn btn-danger btn-modern" @click="doDelete">确定删除</button>
+              <button class="btn btn-secondary btn-modern" @click="deleteTarget = null">取消</button>
             </div>
           </div>
         </div>
@@ -144,16 +166,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted, inject } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, watch, onMounted, inject } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useApi, BASE_URL } from '../composables/useApi'
 import { useAdvancedApi } from '../composables/useAdvancedApi'
-import SearchInput from '../components/SearchInput.vue'
 import TagBadge from '../components/TagBadge.vue'
-import Pagination from '../components/Pagination.vue'
 
 const toast = inject('toast')
 const router = useRouter()
+const route = useRoute()
 const { api } = useApi()
 const { dicts, categories } = useAdvancedApi()
 
@@ -162,6 +183,27 @@ const total = ref(0)
 const page = ref(1)
 const perPage = 20
 const search = ref('')
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage)))
+
+const pageNumbers = computed(() => {
+  const total = totalPages.value
+  if (total <= 1) return []
+  const half = 3
+  let start = Math.max(1, page.value - half)
+  let end = Math.min(total, page.value + half)
+  if (start === 1) end = Math.min(total, start + 6)
+  else if (end === total) start = Math.max(1, end - 6)
+  const pages = []
+  for (let p = start; p <= end; p++) pages.push(p)
+  return pages
+})
+
+function goPage(p) {
+  if (p < 1 || p > totalPages.value) return
+  page.value = p
+  loadProducts()
+}
 
 const filters = reactive({
   category_id: null,
@@ -210,6 +252,8 @@ function buildParams() {
   if (filters.comm_protocol) parts.push('comm_protocol=' + filters.comm_protocol)
   if (filters.power_supply) parts.push('power_supply=' + filters.power_supply)
   if (filters.manufacturer_id) parts.push('manufacturer_id=' + filters.manufacturer_id)
+  parts.push('sort_by=id')
+  parts.push('sort_order=desc')
   parts.push('page=' + page.value)
   parts.push('per_page=' + perPage)
   return parts.join('&')
@@ -224,12 +268,6 @@ async function loadProducts() {
     toast('加载产品失败', 'danger')
   }
 }
-
-function onPageChange(newPage) {
-  page.value = newPage
-  loadProducts()
-}
-
 function confirmDelete(p) {
   deleteTarget.value = p
 }
@@ -250,6 +288,11 @@ async function doDelete() {
 watch(search, () => {
   page.value = 1
   loadProducts()
+})
+
+// Reload products when navigating back to this page
+watch(() => route.path, (path) => {
+  if (path === '/products-db') loadProducts()
 })
 
 onMounted(async () => {

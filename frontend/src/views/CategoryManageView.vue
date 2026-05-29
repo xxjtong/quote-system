@@ -264,7 +264,7 @@ onMounted(() => {
         <div class="card-modern">
           <div class="card-title-modern d-flex justify-content-between align-items-center">
             <span><i class="bi bi-tree"></i>分类树</span>
-            <button class="btn btn-sm btn-primary" @click="openCreateCat">
+            <button class="btn btn-sm btn-primary btn-modern" @click="openCreateCat">
               <i class="bi bi-plus-lg"></i> 新增分类
             </button>
           </div>
@@ -296,14 +296,14 @@ onMounted(() => {
             <div class="card-title-modern d-flex justify-content-between align-items-center">
               <span><i class="bi bi-pencil-square"></i>{{ creatingNew ? '新增分类' : '分类详情' }}</span>
               <div class="d-flex gap-1">
-                <button v-if="creatingNew" class="btn btn-sm btn-primary" @click="createCategory">
+                <button v-if="creatingNew" class="btn btn-sm btn-primary btn-modern" @click="createCategory">
                   <i class="bi bi-check-lg"></i> 创建
                 </button>
                 <template v-else>
-                  <button class="btn btn-sm btn-outline-primary" @click="saveCategory">
+                  <button class="btn btn-sm btn-outline-primary btn-modern" @click="saveCategory">
                     <i class="bi bi-check-lg"></i> 保存
                   </button>
-                  <button class="btn btn-sm btn-outline-danger" @click="deleteCategory">
+                  <button class="btn btn-sm btn-outline-danger btn-modern" @click="deleteCategory">
                     <i class="bi bi-trash"></i> 删除
                   </button>
                 </template>
@@ -349,7 +349,7 @@ onMounted(() => {
           <div v-if="!creatingNew" class="card-modern mt-3">
             <div class="card-title-modern d-flex justify-content-between align-items-center">
               <span><i class="bi bi-list-columns"></i>规格定义</span>
-              <button class="btn btn-sm btn-primary" @click="openCreateSpec">
+              <button class="btn btn-sm btn-primary btn-modern" @click="openCreateSpec">
                 <i class="bi bi-plus-lg"></i> 新增规格
               </button>
             </div>

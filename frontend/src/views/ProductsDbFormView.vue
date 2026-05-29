@@ -1,11 +1,11 @@
 <template>
   <div>
     <!-- Page header -->
-    <div class="d-flex align-items-center justify-content-between mb-3">
-      <h5 class="mb-0"><i class="bi bi-database me-2"></i>{{ isEdit ? '编辑产品' : '新增产品' }}</h5>
-      <div class="d-flex gap-2">
-        <button class="btn btn-outline-secondary btn-sm" @click="$router.push('/products-db')">取消</button>
-        <button class="btn btn-primary btn-sm" @click="save" :disabled="saving">
+    <div class="page-header justify-content-between">
+      <h5><i class="bi bi-database me-2"></i>{{ isEdit ? '编辑产品' : '新增产品' }}</h5>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline-secondary btn-modern" @click="$router.push('/products-db')"><i class="bi bi-x-lg me-1"></i>取消</button>
+        <button class="btn btn-primary btn-modern" @click="save" :disabled="saving">
           <span v-if="saving" class="spinner-border spinner-border-sm me-1"></span>
           <i v-else class="bi bi-check-lg me-1"></i>
           保存
@@ -16,9 +16,9 @@
     <div v-if="loaded" class="row g-3">
       <!-- Basic info -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-info-circle me-1"></i>基本信息</div>
-          <div class="card-body">
+        <div class="card-modern">
+        <div class="card-title-modern"><i class="bi bi-info-circle text-primary"></i>基本信息</div>
+          <div style="padding:16px">
             <div class="row g-2">
               <div class="col-md-4">
                 <label class="form-label small">产品名称 <span class="text-danger">*</span></label>
@@ -76,9 +76,9 @@
 
       <!-- Images -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-images me-1"></i>产品图片</div>
-          <div class="card-body">
+        <div class="card-modern">
+        <div class="card-title-modern"><i class="bi bi-images text-primary"></i>产品图片</div>
+          <div style="padding:16px">
             <div v-if="form.images.length" class="d-flex gap-2 flex-wrap mb-2">
               <div v-for="(img, idx) in form.images" :key="idx" style="position:relative">
                 <img :src="img.url" style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #dee2e6" />
@@ -90,12 +90,12 @@
               </div>
             </div>
             <div class="d-flex gap-2 flex-wrap align-items-center">
-              <label class="btn btn-outline-secondary btn-sm" style="cursor:pointer">
+              <label class="btn btn-outline-secondary btn-sm btn-modern" style="cursor:pointer">
                 <i class="bi bi-upload me-1"></i>上传图片
                 <input type="file" accept="image/*" style="display:none" @change="onFileSelect" />
               </label>
               <input v-model="imageUrlInput" class="form-control form-control-sm" style="flex:1;min-width:200px" placeholder="粘贴图片URL，回车下载" @keyup.enter="onDownloadImage" />
-              <button class="btn btn-outline-secondary btn-sm" @click="onDownloadImage" :disabled="imageDownloading">
+              <button class="btn btn-outline-secondary btn-sm btn-modern" @click="onDownloadImage" :disabled="imageDownloading">
                 <span v-if="imageDownloading" class="spinner-border spinner-border-sm"></span>
                 <span v-else><i class="bi bi-cloud-download me-1"></i>下载</span>
               </button>
@@ -106,11 +106,11 @@
 
       <!-- Comm Methods -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-wifi me-1"></i>通讯方式</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-wifi text-primary"></i>通讯方式</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th style="width:150px">方式</th><th>详情</th><th style="width:40px"></th></tr>
               </thead>
               <tbody>
@@ -122,12 +122,12 @@
                     </select>
                   </td>
                   <td><input class="form-control form-control-sm" v-model="cm.detail" placeholder="e.g. CN470 8通道" /></td>
-                  <td><button class="btn btn-sm btn-outline-danger py-0 px-1" @click="form.comm_methods.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
+                  <td><button class="btn btn-sm btn-outline-danger btn-sm-icon" @click="form.comm_methods.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
                 </tr>
               </tbody>
             </table>
             <div class="p-2">
-              <button class="btn btn-outline-secondary btn-sm" @click="form.comm_methods.push({ dict_id: null, detail: '' })">
+              <button class="btn btn-outline-secondary btn-sm btn-modern" @click="form.comm_methods.push({ dict_id: null, detail: '' })">
                 <i class="bi bi-plus-lg me-1"></i>添加通讯方式
               </button>
             </div>
@@ -137,11 +137,11 @@
 
       <!-- Comm Protocols -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-diagram-3 me-1"></i>通讯协议</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-diagram-3 text-primary"></i>通讯协议</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th style="width:150px">协议</th><th style="width:120px">方向</th><th style="width:40px"></th></tr>
               </thead>
               <tbody>
@@ -159,12 +159,12 @@
                       <option value="forwarding">转发(上行)</option>
                     </select>
                   </td>
-                  <td><button class="btn btn-sm btn-outline-danger py-0 px-1" @click="form.comm_protocols.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
+                  <td><button class="btn btn-sm btn-outline-danger btn-sm-icon" @click="form.comm_protocols.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
                 </tr>
               </tbody>
             </table>
             <div class="p-2">
-              <button class="btn btn-outline-secondary btn-sm" @click="form.comm_protocols.push({ dict_id: null, direction: 'both' })">
+              <button class="btn btn-outline-secondary btn-sm btn-modern" @click="form.comm_protocols.push({ dict_id: null, direction: 'both' })">
                 <i class="bi bi-plus-lg me-1"></i>添加协议
               </button>
             </div>
@@ -174,11 +174,11 @@
 
       <!-- Power Supplies -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-battery-full me-1"></i>供电方式</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-battery-full text-primary"></i>供电方式</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th style="width:150px">方式</th><th>电压/规格</th><th>续航</th><th style="width:40px"></th></tr>
               </thead>
               <tbody>
@@ -191,12 +191,12 @@
                   </td>
                   <td><input class="form-control form-control-sm" v-model="ps.voltage_range" placeholder="e.g. 9-24V DC" /></td>
                   <td><input class="form-control form-control-sm" v-model="ps.battery_life" placeholder="e.g. 5年" /></td>
-                  <td><button class="btn btn-sm btn-outline-danger py-0 px-1" @click="form.power_supplies.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
+                  <td><button class="btn btn-sm btn-outline-danger btn-sm-icon" @click="form.power_supplies.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
                 </tr>
               </tbody>
             </table>
             <div class="p-2">
-              <button class="btn btn-outline-secondary btn-sm" @click="form.power_supplies.push({ dict_id: null, voltage_range: '', battery_life: '' })">
+              <button class="btn btn-outline-secondary btn-sm btn-modern" @click="form.power_supplies.push({ dict_id: null, voltage_range: '', battery_life: '' })">
                 <i class="bi bi-plus-lg me-1"></i>添加供电方式
               </button>
             </div>
@@ -206,11 +206,11 @@
 
       <!-- Hardware Interfaces -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-plug me-1"></i>硬件接口</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-plug text-primary"></i>硬件接口</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>接口名称</th><th style="width:80px">数量</th><th>描述</th><th style="width:40px"></th></tr>
               </thead>
               <tbody>
@@ -218,12 +218,12 @@
                   <td><input class="form-control form-control-sm" v-model="hi.interface_name" placeholder="e.g. RS485" /></td>
                   <td><input class="form-control form-control-sm" v-model.number="hi.quantity" type="number" min="1" /></td>
                   <td><input class="form-control form-control-sm" v-model="hi.description" placeholder="e.g. 波特率1200~115200" /></td>
-                  <td><button class="btn btn-sm btn-outline-danger py-0 px-1" @click="form.hardware_interfaces.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
+                  <td><button class="btn btn-sm btn-outline-danger btn-sm-icon" @click="form.hardware_interfaces.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
                 </tr>
               </tbody>
             </table>
             <div class="p-2">
-              <button class="btn btn-outline-secondary btn-sm" @click="form.hardware_interfaces.push({ interface_name: '', quantity: 1, description: '' })">
+              <button class="btn btn-outline-secondary btn-sm btn-modern" @click="form.hardware_interfaces.push({ interface_name: '', quantity: 1, description: '' })">
                 <i class="bi bi-plus-lg me-1"></i>添加接口
               </button>
             </div>
@@ -233,11 +233,11 @@
 
       <!-- Sensor Capabilities -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-activity me-1"></i>传感能力</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-activity text-primary"></i>传感能力</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th style="width:120px">指标</th><th>量程</th><th>精度</th><th>分辨率</th><th style="width:40px"></th></tr>
               </thead>
               <tbody>
@@ -251,12 +251,12 @@
                   <td><input class="form-control form-control-sm" v-model="sc.measure_range" placeholder="e.g. -20°C~60°C" /></td>
                   <td><input class="form-control form-control-sm" v-model="sc.accuracy" placeholder="e.g. ±0.2°C" /></td>
                   <td><input class="form-control form-control-sm" v-model="sc.resolution" placeholder="e.g. 0.1°C" /></td>
-                  <td><button class="btn btn-sm btn-outline-danger py-0 px-1" @click="form.sensor_capabilities.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
+                  <td><button class="btn btn-sm btn-outline-danger btn-sm-icon" @click="form.sensor_capabilities.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
                 </tr>
               </tbody>
             </table>
             <div class="p-2">
-              <button class="btn btn-outline-secondary btn-sm" @click="form.sensor_capabilities.push({ dict_id: null, measure_range: '', accuracy: '', resolution: '' })">
+              <button class="btn btn-outline-secondary btn-sm btn-modern" @click="form.sensor_capabilities.push({ dict_id: null, measure_range: '', accuracy: '', resolution: '' })">
                 <i class="bi bi-plus-lg me-1"></i>添加传感指标
               </button>
             </div>
@@ -266,9 +266,9 @@
 
       <!-- Dynamic Specs -->
       <div class="col-12" v-if="specDefs.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-sliders me-1"></i>品类规格参数</div>
-          <div class="card-body">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-sliders text-primary"></i>品类规格参数</div>
+          <div style="padding:16px">
             <div class="row g-2">
               <div v-for="sd in specDefs" :key="sd.id" class="col-md-4">
                 <label class="form-label small">
@@ -294,9 +294,9 @@
 
       <!-- Description -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-text-paragraph me-1"></i>描述</div>
-          <div class="card-body">
+        <div class="card-modern">
+        <div class="card-title-modern"><i class="bi bi-text-paragraph text-primary"></i>描述</div>
+          <div style="padding:16px">
             <textarea class="form-control" v-model="form.function_desc" rows="3" placeholder="功能描述"></textarea>
           </div>
         </div>

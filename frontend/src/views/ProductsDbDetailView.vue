@@ -1,16 +1,16 @@
 <template>
   <div>
     <!-- Page header -->
-    <div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-2">
-      <h5 class="mb-0"><i class="bi bi-database me-2"></i>{{ product?.name || '产品详情' }}</h5>
-      <div class="d-flex gap-2">
-        <a v-if="product" :href="specSheetUrl" target="_blank" class="btn btn-outline-secondary btn-sm">
+    <div class="page-header justify-content-between">
+      <h5><i class="bi bi-database me-2"></i>{{ product?.name || '产品详情' }}</h5>
+      <div style="display:flex;gap:8px">
+        <a v-if="product" :href="specSheetUrl" target="_blank" class="btn btn-outline-primary btn-modern">
           <i class="bi bi-file-text me-1"></i>规格书
         </a>
-        <button class="btn btn-outline-secondary btn-sm" @click="$router.push('/products-db/' + product?.id + '/edit')">
+        <button class="btn btn-outline-primary btn-modern" @click="$router.push('/products-db/' + product?.id + '/edit')">
           <i class="bi bi-pencil me-1"></i>编辑
         </button>
-        <button class="btn btn-outline-secondary btn-sm" @click="$router.back()">
+        <button class="btn btn-outline-secondary btn-modern" @click="$router.back()">
           <i class="bi bi-arrow-left me-1"></i>返回
         </button>
       </div>
@@ -19,8 +19,8 @@
     <div v-if="product" class="row g-3">
       <!-- Images -->
       <div class="col-12" v-if="product.images?.length">
-        <div class="card">
-          <div class="card-body">
+        <div class="card-modern">
+          <div style="padding:12px">
             <img v-for="img in primaryImages" :key="img.id || img.url"
               :src="img.url" style="max-height:180px;max-width:300px;border-radius:6px;border:1px solid #dee2e6" />
             <div v-if="product.images.length > 1" class="d-flex gap-2 flex-wrap mt-2">
@@ -33,9 +33,9 @@
 
       <!-- Basic info -->
       <div class="col-12">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-info-circle me-1"></i>基本信息</div>
-          <div class="card-body">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-info-circle text-primary"></i>基本信息</div>
+          <div style="padding:16px">
             <div class="row g-3">
               <div class="col-md-3">
                 <div class="small text-muted">型号</div>
@@ -76,11 +76,11 @@
 
       <!-- Comm Methods -->
       <div class="col-12" v-if="product.comm_methods?.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-wifi me-1"></i>通讯方式</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-wifi text-primary"></i>通讯方式</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>类型</th><th>方式</th><th>详情</th></tr>
               </thead>
               <tbody>
@@ -97,11 +97,11 @@
 
       <!-- Comm Protocols -->
       <div class="col-12" v-if="product.comm_protocols?.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-diagram-3 me-1"></i>通讯协议</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-diagram-3 text-primary"></i>通讯协议</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>协议</th><th>方向</th></tr>
               </thead>
               <tbody>
@@ -117,11 +117,11 @@
 
       <!-- Power Supplies -->
       <div class="col-12" v-if="product.power_supplies?.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-battery-full me-1"></i>供电方式</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-battery-full text-primary"></i>供电方式</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>方式</th><th>电压/规格</th><th>续航</th></tr>
               </thead>
               <tbody>
@@ -138,11 +138,11 @@
 
       <!-- Hardware Interfaces -->
       <div class="col-12" v-if="product.hardware_interfaces?.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-plug me-1"></i>硬件接口</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-plug text-primary"></i>硬件接口</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>接口</th><th>数量</th><th>描述</th></tr>
               </thead>
               <tbody>
@@ -159,11 +159,11 @@
 
       <!-- Sensor Capabilities -->
       <div class="col-12" v-if="product.sensor_capabilities?.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-activity me-1"></i>传感能力</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-activity text-primary"></i>传感能力</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>指标</th><th>单位</th><th>量程</th><th>精度</th><th>分辨率</th></tr>
               </thead>
               <tbody>
@@ -182,12 +182,12 @@
 
       <!-- Specs by group -->
       <div class="col-12" v-if="specDefs.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-sliders me-1"></i>规格参数</div>
-          <div class="card-body">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-sliders text-primary"></i>规格参数</div>
+          <div style="padding:16px">
             <div v-for="group in specGroups" :key="group.name" class="mb-3">
               <div v-if="group.name" class="small text-muted fw-semibold mb-1">{{ group.name }}</div>
-              <table class="table table-sm mb-0">
+              <table class="table table-modern">
                 <tbody>
                   <tr v-for="sd in group.items" :key="sd.spec_key">
                     <td style="width:200px">{{ sd.display_name }} <span v-if="sd.unit" class="text-muted">({{ sd.unit }})</span></td>
@@ -198,7 +198,7 @@
             </div>
             <div v-if="unmatchedSpecs.length">
               <div class="small text-muted fw-semibold mb-1">其他</div>
-              <table class="table table-sm mb-0">
+              <table class="table table-modern">
                 <tbody>
                   <tr v-for="key in unmatchedSpecs" :key="key">
                     <td style="width:200px">{{ key }}</td>
@@ -213,11 +213,11 @@
 
       <!-- Variants -->
       <div class="col-12" v-if="product.variants?.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-diagram-2 me-1"></i>变体</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-diagram-2 text-primary"></i>变体</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>名称</th><th>型号</th></tr>
               </thead>
               <tbody>
@@ -233,11 +233,11 @@
 
       <!-- Dependencies -->
       <div class="col-12" v-if="product.dependencies?.length">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-link-45deg me-1"></i>依赖关系</div>
-          <div class="card-body p-0">
-            <table class="table table-sm mb-0">
-              <thead class="table-light">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-link-45deg text-primary"></i>依赖关系</div>
+          <div>
+            <table class="table table-modern">
+              <thead>
                 <tr><th>类型</th><th>目标</th><th>描述</th></tr>
               </thead>
               <tbody>
@@ -258,9 +258,9 @@
 
       <!-- Description -->
       <div class="col-12" v-if="product.function_desc">
-        <div class="card">
-          <div class="card-header"><i class="bi bi-text-paragraph me-1"></i>描述</div>
-          <div class="card-body">
+        <div class="card-modern">
+          <div class="card-title-modern"><i class="bi bi-text-paragraph text-primary"></i>描述</div>
+          <div style="padding:16px">
             <p class="mb-0" style="white-space:pre-wrap">{{ product.function_desc }}</p>
           </div>
         </div>
