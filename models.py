@@ -290,6 +290,34 @@ class AIUsageLog(db.Model):
         }
 
 
+class AIConversation(db.Model):
+    """AI 对话会话 — 替代 Hermes Gateway 的 conversation 状态"""
+    __tablename__ = 'ai_conversations'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    session_id = db.Column(db.String(64), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=True)
+    message_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AIMessage(db.Model):
+    """AI 对话消息 — 完整服务端持久化"""
+    __tablename__ = 'ai_messages'
+    __table_args__ = (
+        db.Index('ix_ai_msg_conv_created', 'conversation_id', 'created_at'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey('ai_conversations.id', ondelete='CASCADE'), nullable=False, index=True)
+    role = db.Column(db.String(20), nullable=False)
+    content = db.Column(db.Text, nullable=True)
+    tool_calls = db.Column(db.Text, nullable=True)
+    tool_call_id = db.Column(db.String(64), nullable=True)
+    name = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+
+
 class LoginLog(db.Model):
     """用户登录记录 — 记录登录时间、IP、区域"""
     __tablename__ = 'login_logs'

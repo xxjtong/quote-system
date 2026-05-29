@@ -140,5 +140,5 @@ class TestMyAIUsage:
         r = api("GET", "/api/ai/my-usage", admin_token)
         assert r.status_code == 200
         data = r.json()
-        assert "my_count" in data
-        assert "total_count" in data
+        assert "total" in data
+        assert "logs" in data

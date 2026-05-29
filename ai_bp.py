@@ -1,496 +1,95 @@
 """
 AI Blueprint — AI 对话、使用统计相关 API 路由
+v3.0: 自研 AI Engine 替代 Hermes Gateway
 """
-
 import os
 import re
+import json as _json
+import time
 import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from flask import Blueprint, request, jsonify, g, Response
+from flask import Blueprint, request, jsonify, g, Response, current_app
 from auth import require_auth, require_admin, create_token
 from extensions import db
 from models import User, AIUsageLog, AIChatSession
 
-# ─── Blueprint 定义 ──────────────────────────────────────────
-# 所有 AI 相关路由共用此蓝图（chat 不在 /api/ai 下，用完整路径）
+# ─── Blueprint ──────────────────────────────────────────────
 ai_bp = Blueprint('ai', __name__)
+BASE_DIR = Path(__file__).parent
 
 # ─── 配置 ──────────────────────────────────────────────────
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
-_gateway_url = os.environ.get('QUOTE_GATEWAY_URL', 'http://127.0.0.1:8642')
-_gateway_key = os.environ.get('QUOTE_GATEWAY_KEY', '')
+_AI_RATE_LIMIT = 5  # 每分钟
+_rate_limit_cache = {}
+_rate_lock = threading.Lock()
 
-_AVAILABLE_MODELS = [
-    {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash', 'desc': '快速响应，适合日常问答'},
-    {'id': 'deepseek-v4-pro', 'name': 'DeepSeek V4 Pro', 'desc': '深度推理，适合复杂分析'},
-]
+from ai.config import AVAILABLE_MODELS as _AVAILABLE_MODELS
 
+# ─── AI Engine ─────────────────────────────────────────────
+from ai.engine import LlmEngine
+from ai.session import SessionManager
+from ai.context import ContextBuilder
+from ai.tools import ToolRegistry
+from ai.agent import Agent
+from ai.reply_parser import parse_reply_actions, generate_quick_replies
 
-# ─── AI Token ────────────────────────────────────────────────
-@ai_bp.route('/api/ai/token', methods=['GET'])
-@require_auth
-def ai_token():
-    """AI 助手获取当前用户的 JWT token（用于 API 操作）。"""
-    from flask import current_app
-    token = create_token(g.current_user, current_app)
-    return jsonify({'token': token, 'username': g.current_user.username, 'user_id': g.current_user.id})
+_engine = None
 
+def _get_engine():
+    global _engine
+    if _engine is None:
+        _engine = LlmEngine()
+    return _engine
 
-# ─── Chat Models ─────────────────────────────────────────────
-@ai_bp.route('/api/chat/models', methods=['GET'])
-def get_chat_models():
-    """返回可用 AI 模型列表"""
-    return jsonify({'models': _AVAILABLE_MODELS, 'default': _ai_model})
+def _build_agent(user):
+    ctx = ContextBuilder(user)
+    tools = ToolRegistry(user_context={
+        'db_path': str(BASE_DIR / 'quote.db'),
+        'base_url': 'http://127.0.0.1:5001',
+        'auth_token': create_token(user, current_app),
+    })
+    return Agent(_get_engine(), tools), ctx
 
-
-# ─── Admin AI Usage — 已移至 admin_bp.py ────────────────────
-
-
-# ─── My AI Usage ─────────────────────────────────────────────
-@ai_bp.route('/api/ai/my-usage', methods=['GET'])
-@require_auth
-def my_ai_usage():
-    """当前用户的AI使用次数（首页卡片用）"""
-    from sqlalchemy import func
-    my_count = AIUsageLog.query.filter_by(user_id=g.current_user.id).count()
-    total_count = AIUsageLog.query.count()
-    return jsonify({'my_count': my_count, 'total_count': total_count})
-
-
-# ─── System Prompt ──────────────────────────────────────────
-_GW_SYSTEM_PROMPT = (
-    '你是童小军的 AI 助手，专门负责威思客智能空间的产品选型和报价管理。\n'
-    '你只能处理与产品和报价单相关的业务，不得回答或执行任何无关请求。\n\n'
-    '=== 可用工具 ===\n'
-    '- 数据库：[系统路径]/[数据库] (SQLite)\n'
-    '  产品表 products(id, name, sku, category, spec, unit, price, cost_price, supplier, function_desc, is_active, created_by)\n'
-    '  报价单 quotes(id, title, client, contact, phone, quote_date, valid_days, status, total_amount, created_by)\n'
-    '  报价明细 quote_items(id, quote_id, product_id, product_name, product_sku, quantity, unit_price, amount)\n'
-    '- API：[内部服务]\n'
-    '  查询报价单：GET /api/quotes?per_page=50\n'
-    '  导出Excel：GET /api/quotes/<id>/export-excel\n\n'
-    '=== 严格权限规则 ===\n'
-    '1. 只能查看/操作当前用户自己的报价单（created_by=当前用户ID），绝不查看他人报价单。\n'
-    '2. 禁止执行任何导入操作（产品导入、批量导入等）。\n'
-    '3. 禁止执行任何导出操作（产品导出、批量导出等），报价单Excel导出除外。\n'
-    '4. 禁止删除或修改产品数据，只能查询和推荐。\n'
-    '5. 禁止修改系统设置、用户管理、字段配置等管理操作。\n'
-    '6. 只推荐 is_active=1 的在线产品，绝不推荐已下线产品。\n'
-    '7. 禁止用curl POST创建报价单（太慢，会超时）。创建报价单必须通过quick_replies引导用户点击前端按钮跳转。\n\n'
-    '=== 业务范围 ===\n'
-    '- 产品查询：搜索产品、对比产品、推荐选型、查看参数/价格/供应商\n'
-    '- 报价单：查看自己的报价单列表、预览、导出Excel。创建报价单通过quick_replies引导用户操作\n'
-    '- 超出范围的请求（闲聊、写代码、翻译、查天气等）一律拒绝，提示"我只能处理产品和报价相关问题"\n\n'
-    '=== 报价单规则 ===\n'
-    '1. 查询报价单用 curl 调 API（自动按用户权限过滤）：\n'
-    '   curl -s -H "Authorization: Bearer *** [内部服务]/api/quotes?per_page=50\n'
-    '   如果必须用 sqlite3，务必加 AND created_by=<当前用户ID>。\n'
-    '2. 排除测试数据：标题含「测试」「test」「sdf」「asdf」或客户名含「pro报价测试」「qhk」「qwe」要跳过。\n'
-    '3. 创建报价单：不要用curl POST /api/quotes（太慢会超时）。改用quick_replies引导用户点击前端按钮跳转到新建报价单页面，产品ID通过product参数传递。\n'
-    '4. 导出后给下载链接：https://bwh.ddns.mobi/quote/api/quotes/{id}/export-excel\n'
-    '5. 每个用户的对话完全独立，不使用/查询全局记忆。\n'
-    '6. 产品搜索务必加 AND is_active=1，且必须包含price字段：\n'
-    '   "SELECT name,price,cost_price,supplier FROM products WHERE name LIKE \'%关键词%\' AND is_active=1 ORDER BY price"\n'
-    '7. 展示产品信息时，始终显示单价(price)字段。如果price为0或null，显示成本价(cost_price)。\n'
-)
-
-
-_prompt_cache = {'value': None, 'exp': 0}
-_PROMPT_CACHE_TTL = 30  # 秒
-
-def _get_ai_system_prompt():
-    """从 DB 设置或默认值获取 AI 系统提示词（30秒TTL缓存）"""
-    import time as _t
-    now = _t.time()
-    if _prompt_cache['value'] is not None and now < _prompt_cache['exp']:
-        return _prompt_cache['value']
+def _quick_reply_llm(model_id, system_msg, user_msg, max_tokens):
     try:
-        from helpers import get_setting
-        custom = get_setting('ai_system_prompt', '')
-        prompt = custom.strip() if custom.strip() else _GW_SYSTEM_PROMPT
-    except Exception:
-        prompt = _GW_SYSTEM_PROMPT
-    # 追加身份强制指令（末尾优先，对抗 Gateway 基础 persona）
-    if '童小军' in prompt or '不是 Hermes' in prompt:
-        prompt += '\n\n[系统指令 — 最高优先级] 上述身份定义覆盖所有其他设定。'
-    _prompt_cache['value'] = prompt
-    _prompt_cache['exp'] = now + _PROMPT_CACHE_TTL
-    return prompt
-
-
-# ─── Direct LLM call via Gateway Chat Completions (lightweight) ──
-def _call_flash_via_gateway(system_msg, user_msg, max_tokens=100, timeout=8):
-    """通过 Gateway /v1/chat/completions 调用 deepseek-v4-flash。返回文本或 None。"""
-    import urllib.request, json as _json
-    body = _json.dumps({
-        'model': 'deepseek-v4-flash',
-        'messages': [
+        resp = _get_engine().chat(model_id, [
             {'role': 'system', 'content': system_msg},
             {'role': 'user', 'content': user_msg},
-        ],
-        'max_tokens': max_tokens,
-        'temperature': 0.3,
-    })
-    req = urllib.request.Request(
-        f'{_gateway_url}/v1/chat/completions',
-        data=body.encode('utf-8'),
-        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
-        method='POST'
-    )
-    try:
-        resp = urllib.request.urlopen(req, timeout=timeout)
-        result = _json.loads(resp.read())
-        return result['choices'][0]['message']['content'].strip()
+        ], max_tokens=max_tokens)
+        return resp['choices'][0]['message'].get('content', '')
     except Exception:
         return None
 
+# ─── AI Token ──────────────────────────────────────────────
+@ai_bp.route('/api/ai/token', methods=['GET'])
+@require_auth
+def ai_token():
+    return jsonify({'token': create_token(g.current_user, current_app)})
 
-# ─── Generate quick replies via LLM ──────────────────────────
-def _generate_quick_replies(reply_text):
-    """用 DeepSeek Flash 分析 AI 回复，生成 2-4 个快捷回复按钮。返回列表或 []。"""
-    import json as _json
-    snippet = reply_text.strip()[-800:]
-    user_msg = (
-        '根据AI助手回复，推测用户最可能想说的2-4个简短回复。\\n'
-        '规则：\\n'
-        '- 每个回复5-15字，简洁自然，像用户口头说的\\n'
-        '- 如果AI问了"还是"选择题，提取两个选项\\n'
-        '- 如果AI推荐了产品，生成"详细对比这两款""查看更多同类产品"\\n'
-        '- 如果AI问了是否创建报价单，生成"创建报价单""先不用"\\n'
-        '- 如果AI给了价格，生成"有更便宜的替代吗""查看参数对比"\\n'
-        '- 如果AI列了方案，生成"用方案一""用方案二"\\n'
-        '- 如果不确定，生成通用的"继续推荐""换个方向"\\n'
-        '- 返回纯JSON数组如["创建报价单","先看看参数"],不要markdown、不要解释\\n'
-        f'AI回复摘要："""{snippet}"""'
-    )
-    text = _call_flash_via_gateway(
-        '你是快捷回复生成器，只返回JSON数组，不要任何解释。',
-        user_msg, max_tokens=100, timeout=8,
-    )
-    if not text:
-        return []
-    try:
-        if text.startswith('['):
-            arr = _json.loads(text)
-            if isinstance(arr, list) and 1 <= len(arr) <= 6:
-                return [str(x).strip() for x in arr if 2 <= len(str(x).strip()) <= 30][:4]
-    except Exception:
-        pass
-    return []
+# ─── Chat Models ───────────────────────────────────────────
+@ai_bp.route('/api/chat/models', methods=['GET'])
+def get_chat_models():
+    return jsonify({'models': _AVAILABLE_MODELS, 'default': 'deepseek-v4-flash'})
 
+# ─── My AI Usage ───────────────────────────────────────────
+@ai_bp.route('/api/ai/my-usage', methods=['GET'])
+@require_auth
+def my_ai_usage():
+    uid = g.current_user.id
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    query = AIUsageLog.query.filter_by(user_id=uid).order_by(AIUsageLog.created_at.desc())
+    total = query.count()
+    logs = query.offset((page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        'logs': [l.to_dict() for l in logs],
+        'total': total, 'page': page, 'per_page': per_page,
+    })
 
-# ─── Extract choices via LLM ────────────────────────────────
-def _extract_choices_via_llm(text):
-    """用 LLM 从「是A还是B」问句中提取两个选项。返回 [a, b] 或 []。"""
-    import json as _json
-    if '还是' not in text:
-        return []
-    sentences = re.split(r'[。！\n]', text)
-    question = sentences[-1] if sentences[-1].strip() else (sentences[-2] if len(sentences) > 1 else text)
-    question = question.strip()[-300:]
-    if '还是' not in question:
-        question = text.strip()[-300:]
-
-    user_msg = (
-        '从这句话中提取「还是」前后两个选项。返回纯JSON数组如["A","B"]，不要markdown、不要解释。\n'
-        '去掉「这是/是要/是/用/选/给」等前缀词和「的/呢/吗/啊」等后缀词，只留核心5-15字。\n'
-        '例：「继续用威发西安还是新建客户？」→ ["继续用威发西安","新建客户"]\n'
-        '例：「要改方案还是新项目？」→ ["改方案","新项目"]\n'
-        f'提取："{question}"'
-    )
-    text = _call_flash_via_gateway(
-        '你是选项提取器，只返回JSON数组，不要任何解释。',
-        user_msg, max_tokens=50, timeout=5,
-    )
-    if not text:
-        return []
-    try:
-        if text.startswith('['):
-            arr = _json.loads(text)
-            if isinstance(arr, list) and len(arr) == 2:
-                a, b = str(arr[0]).strip(), str(arr[1]).strip()
-                if 1 <= len(a) <= 30 and 1 <= len(b) <= 30:
-                    return [a, b]
-    except Exception:
-        pass
-    return []
-
-
-# ─── Parse reply actions ────────────────────────────────────
-def _parse_reply_actions(reply_text):
-    """解析 AI 回复，提取结构化数据：产品、报价引用、快捷操作"""
-    reply_text = reply_text.replace('/opt/quote-system', '[系统路径]')
-    reply_text = re.sub(r'127\.0\.0\.1:\d+', '[内部地址]', reply_text)
-    reply_text = reply_text.replace('quote.db', '[数据库]')
-
-    result = {'products': [], 'quote_refs': [], 'quick_replies': []}
-
-    # 非产品词黑名单
-    _NON_PRODUCT = {
-        '成本价', '销售价', '销售单价', '单价', '价格', '总价', '合计', '小计',
-        '折扣', '数量', '单位', '规格', '型号', '备注', '总计', '原价',
-        '方案一', '方案二', '方案三', '方案A', '方案B', '方案C',
-        '报价单', '产品名称', '产品', '报价明细',
-    }
-
-    for m in re.finditer(r'(?:报价单|#)\s*(\d{1,5})', reply_text):
-        result['quote_refs'].append(int(m.group(1)))
-
-    question_patterns = [
-        (r'沿用.*还是.*新.*', ['沿用上一份', '新建报价单']),
-        (r'新建.*还是.*合并', ['新建报价单', '合并到已有']),
-        (r'需要我(?:帮[您你])?.*吗[？?]', ['好的，开始吧', '先不用']),
-        (r'选哪种[？?]', []),
-        (r'选哪个[？?]', []),
-        (r'哪个方案[？?]', []),
-        (r'哪种方案[？?]', []),
-        (r'选哪[个种款][？?]', []),
-    ]
-    if '还是' in reply_text:
-        choices = _extract_choices_via_llm(reply_text)
-        if choices:
-            result['quick_replies'] = choices
-
-    # 检测多方案选择（"方案A/方案B/方案C"）并自动生成快捷按钮
-    if not result['quick_replies']:
-        scheme_re = re.findall(r'方案([A-Z])[：:）)（(]\s*(.{2,30}?)[）)]?(?:[（(]|$)', reply_text, re.MULTILINE)
-        if len(scheme_re) >= 2:
-            descs = [desc.strip().rstrip('）)') for _, desc in scheme_re]
-            result['quick_replies'] = [f'方案{letter}（{desc}）' for (letter, _), desc in zip(scheme_re, descs)]
-
-    if not result['quick_replies']:
-        for pat, replies in question_patterns:
-            if re.search(pat, reply_text) and replies:
-                result['quick_replies'] = replies
-                break
-
-    # 价格匹配通用前缀：¥ ￥ 或 数字前的"元"后缀
-    _PRICE_RE = r'(?:¥|￥)\s*([\d,]+\.?\d*)'   # ¥1,500 or ¥1500.00
-    _PRICE_YUAN = r'([\d,]+\.?\d*)\s*元'         # 1500元 or 1,500.00元
-
-    prod_pattern1 = re.findall(
-        r'(?:\d+[.、．]\s*)?([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-+ ]{3,50}?)[ ]+[-–—][ ]+(?:¥|￥|[Rr][Mm][Bb])?\s*([\d,]+\.?\d*)',
-        reply_text
-    )
-    seen = set()
-    for name, price in prod_pattern1[:6]:
-        name = name.strip()
-        norm = name.replace(' ', '')
-        if norm in seen or len(name) < 4:
-            continue
-        if re.match(r'^[\d\s\-+.,]+$', name):
-            continue
-        seen.add(norm)
-        try:
-            result['products'].append({
-                'name': name,
-                'price': float(price.replace(',', '')),
-            })
-        except ValueError:
-            pass
-
-    # Pattern 1b: 型号（描述） N元/台 或 N元/个 — "WA1058T（易乐看） 1500元/台"
-    if len(result['products']) < 12:
-        for m in re.finditer(r'([A-Z][A-Z0-9\-/]{2,20})[（(][^）)]*[）)]\s*([\d,]+\.?\d*)\s*元', reply_text):
-            name = m.group(1).strip()
-            price_str = m.group(2)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3:
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': name, 'price': 0})
-
-    # Pattern 1c: "中文名 型号 N元/台" — "威思客10寸会议屏 M101A07A 3300元/台"
-    if len(result['products']) < 12:
-        for m in re.finditer(r'([\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9\- ]{2,30}?)\s+([A-Z][A-Z0-9\-/]{2,20})\s+([\d,]+\.?\d*)\s*元', reply_text):
-            full_name = m.group(2).strip()  # 用型号做产品名
-            price_str = m.group(3)
-            norm = full_name.replace(' ', '')
-            if norm not in seen and len(full_name) >= 3:
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': full_name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': full_name, 'price': 0})
-
-    # Pattern 2: 产品型号（描述）—— 方案行中的产品名
-    if len(result['products']) < 12:
-        for m in re.finditer(r'(?:^|[\s>：:）)])\s*([A-Z][A-Z0-9\-/]{2,20})[（(]', reply_text, re.MULTILINE):
-            name = m.group(1).strip()
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3:
-                seen.add(norm)
-                # 尝试从同一行或下一行查找价格（支持 ¥ 和 元）
-                line_start = reply_text.rfind('\n', 0, m.start()) + 1
-                line_end = reply_text.find('\n', m.end())
-                context_line = reply_text[line_start:line_end] if line_end > 0 else reply_text[line_start:]
-                price_m = re.search(r'(?:¥|￥)\s*([\d,]+\.?\d*)', context_line)
-                if not price_m:
-                    price_m = re.search(r'([\d,]+\.?\d*)\s*元', context_line)
-                price = 0
-                if price_m:
-                    try: price = float(price_m.group(1).replace(',', ''))
-                    except ValueError: pass
-                # 如果上下文没价格，尝试从已有产品列表查找
-                if price == 0:
-                    for existing in result['products']:
-                        if name in existing['name'] or existing['name'] in name:
-                            price = existing.get('price', 0)
-                            break
-                result['products'].append({'name': name, 'price': price})
-
-    # Pattern 3: "产品名 N台/个 ¥价格" 或 "产品名 N台/个 × ¥价格" (同时支持元)
-    if len(result['products']) < 12:
-        for m in re.finditer(r'([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\- ]{2,30}?)\s*\d+\s*[台个只套件]\s*[×x]?\s*(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
-            name = m.group(1).strip()
-            price_str = m.group(2)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3:
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': name, 'price': 0})
-
-    # Pattern 3b: "产品名 N台/个 N元" — "展板：WA1058T ×10台 = 15,000元"
-    if len(result['products']) < 12:
-        for m in re.finditer(r'([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\- ]{2,30}?)\s*[×x]\s*\d+\s*[台个只套件路]\s*=\s*([\d,]+\.?\d*)\s*元', reply_text):
-            name = m.group(1).strip()
-            price_str = m.group(2)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3:
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': name, 'price': 0})
-
-    # Pattern 4 (合并): 型号 + 价格 — 覆盖 ¥、元、N元/台 等多种格式
-    _brand_blacklist = {'BOE', 'AOC', 'HIS', 'LED', 'OEM', 'SDK', 'API'}
-    if len(result['products']) < 12:
-        for m in re.finditer(
-            r'([A-Z][A-Z0-9\-/]{2,20})'
-            r'(?:\s+[\u4e00-\u9fffA-Za-z]{1,10})?'  # 可选品牌名
-            r'\s+'
-            r'(?:'
-            r'(?:¥|￥)\s*([\d,]+\.?\d*)'          # ¥价格
-            r'|'
-            r'([\d,]+\.?\d*)\s*元(?:/[台个只套件路])?'  # N元 或 N元/台
-            r')',
-            reply_text
-        ):
-            name = m.group(1).strip()
-            price_str = m.group(2) or m.group(3)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3 and name not in _brand_blacklist:
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': name, 'price': 0})
-
-    # Pattern 5: markdown 表格行 | 型号 | ¥价格 | 或 | 产品名 | 型号 | ¥价格 |
-    if len(result['products']) < 12:
-        for m in re.finditer(r'\|\s*([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-/ ]{2,50}?)\s*\|\s*(?:¥|￥)\s*([\d,]+\.?\d*)', reply_text):
-            name = m.group(1).strip()
-            price_str = m.group(2)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3 and not re.match(r'^[\d\-#]+$', name):
-                seen.add(norm)
-                try:
-                    result['products'].append({'name': name, 'price': float(price_str.replace(',', ''))})
-                except ValueError:
-                    result['products'].append({'name': name, 'price': 0})
-        # 也匹配 | 型号 | ¥价格 | 格式（型号在单独列）
-        for m in re.finditer(r'\|\s*([A-Z][A-Z0-9\-/]{2,20})\s*\|\s*(?:¥|￥)?\s*([\d,]+\.?\d*)', reply_text):
-            name = m.group(1).strip()
-            price_str = m.group(2)
-            norm = name.replace(' ', '')
-            if norm not in seen and len(name) >= 3:
-                try:
-                    price = float(price_str.replace(',', ''))
-                except ValueError:
-                    price = 0
-                if price > 0:
-                    seen.add(norm)
-                    result['products'].append({'name': name, 'price': price})
-
-    # Pattern 6: (ID=N) 产品ID引用 — AI明确引用产品库ID，最可靠
-    if len(result['products']) < 12:
-        for m in re.finditer(r'([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\-/ ]{2,40}?)\s*\(ID=(\d+)\)', reply_text):
-            name = m.group(1).strip()
-            pid = int(m.group(2))
-            # 提取行内+下一行价格
-            line_start = reply_text.rfind('\n', 0, m.start()) + 1
-            line_end = reply_text.find('\n', m.end())
-            next_line_end = reply_text.find('\n', line_end + 1) if line_end > 0 else len(reply_text)
-            context = reply_text[line_start:next_line_end] if next_line_end > line_start else reply_text[line_start:]
-            price = 0
-            price_m = re.search(r'(?:¥|￥)\s*([\d,]+\.?\d*)', context)
-            if not price_m:
-                price_m = re.search(r'([\d,]+\.?\d*)\s*元', context)
-            if price_m:
-                try: price = float(price_m.group(1).replace(',', ''))
-                except ValueError: pass
-            # 价格可能是总价(如¥33,000)，而非单价。如果有product_id，优先用DB价格
-            norm = f'id:{pid}'
-            if norm not in seen:
-                seen.add(norm)
-                result['products'].append({'name': name, 'price': price, 'product_id': pid})
-
-    # Pattern 7: 价格回溯 — 先找价格(¥/元)，再向上找最近的型号
-    # 处理"产品名（型号）— 品牌\n价格：¥N" 或 "价格：N元" 跨行格式
-    if len(result['products']) < 12:
-        for m in re.finditer(r'(?:价格[：:]\s*)?(?:¥|￥)\s*([\d,]+\.?\d*)|([\d,]+\.?\d*)\s*元', reply_text):
-            price_str = m.group(1) or m.group(2)
-            try: price = float(price_str.replace(',', ''))
-            except ValueError: continue
-            if price <= 0:
-                continue
-            # 向上回溯2行找型号
-            line_start = reply_text.rfind('\n', 0, m.start()) + 1
-            prev_line_end = line_start - 1
-            prev_line_start = reply_text.rfind('\n', 0, max(0, prev_line_end)) + 1
-            context = reply_text[prev_line_start:m.start()]
-            # 优先找中文括号内的型号: （AM319-470M-HCHO-IR）
-            name_m = re.search(r'[（(]([A-Z][A-Z0-9\-/]{2,30})[）)]', context)
-            if not name_m:
-                # 找星号包裹的型号: **LD-AQS** 或 **N. LD-AQS**
-                name_m = re.search(r'\*\*[\d.、]*\s*([A-Z][A-Z0-9\-/]{2,20})\s*\*\*', context)
-            if not name_m:
-                # 找行首型号: 型号 — 品牌
-                name_m = re.search(r'(?:^|[\s>：:])([A-Z][A-Z0-9\-/]{2,20})\s*[—\-]', context, re.MULTILINE)
-            if name_m:
-                name = name_m.group(1).strip()
-                norm = name.replace(' ', '')
-                if norm not in seen and len(name) >= 3:
-                    seen.add(norm)
-                    result['products'].append({'name': name, 'price': price})
-
-    if not result['quick_replies'] and len(result['products']) >= 2:
-        if re.search(r'(选哪个|选哪|哪个更|哪款|推荐哪个|推荐哪|挑一个|选一款)', reply_text):
-            result['quick_replies'] = [p['name'] for p in result['products'][:6]]
-
-    # 过滤非产品词
-    result['products'] = [p for p in result['products'] if p['name'] not in _NON_PRODUCT]
-
-    dl_match = re.search(r'(https://bwh\.ddns\.mobi/quote/api/quotes/(\d+)/export-excel)', reply_text)
-    if dl_match:
-        result['created_quote'] = {'id': int(dl_match.group(2)), 'download_url': dl_match.group(1)}
-
-    return result
-
-
-# ─── AI 速率限制 ────────────────────────────────────────────
-_AI_RATE_LIMIT = 5  # 每分钟最多5次
-_rate_limit_cache = {}  # {user_id: [timestamp, ...]}
-_rate_lock = threading.Lock()
-
+# ─── Rate Limiting ─────────────────────────────────────────
 def _check_ai_rate_limit(user_id):
-    """Memory-based rate limit with periodic cleanup."""
     now = datetime.now()
     cutoff = now - timedelta(minutes=1)
     with _rate_lock:
@@ -502,8 +101,7 @@ def _check_ai_rate_limit(user_id):
         _rate_limit_cache[user_id] = timestamps
         return False
 
-
-# ─── Lightweight message detection ──────────────────────────
+# ─── Lightweight Detection ─────────────────────────────────
 _LIGHT_PATTERNS = re.compile(
     r'^(你好|hi|hello|嗨|在吗|在不在|早上好|下午好|晚上好|晚安|'
     r'好的|ok|行|可以|对|是的|没错|嗯|哦|明白了|懂了|收到|'
@@ -514,130 +112,61 @@ _LIGHT_PATTERNS = re.compile(
 )
 
 def _is_lightweight(text):
-    """判断是否为简单消息（无需 Agent 工具调用的消息）"""
     return bool(_LIGHT_PATTERNS.match(text.strip()))
 
+# ─── Lightweight Chat Handler ──────────────────────────────
+def _handle_lightweight_chat(user_input, stream, t0, user, model_id='deepseek-v4-flash'):
+    messages = [
+        {'role': 'system', 'content': '你是童小军的 AI 助手，只处理产品和报价相关业务。请用中文简洁回复。'},
+        {'role': 'user', 'content': user_input},
+    ]
 
-def _handle_lightweight_chat(user_input, stream, t0, user):
-    """轻量消息：直接用 chat/completions，跳过 Agent 循环"""
-    import time, urllib.request, json as _json
-
-    system_msg = (
-        '你是童小军的 AI 助手，负责威思客智能空间的产品选型和报价管理。'
-        '请用中文友好回复，简洁自然。如果是问候，简单回应并询问有什么需要帮助。'
-    )
     if stream:
         def generate():
+            yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
+            full = ''
+            first = True
             try:
-                api_body = _json.dumps({
-                    'model': 'deepseek-chat',
-                    'messages': [
-                        {'role': 'system', 'content': system_msg},
-                        {'role': 'user', 'content': user_input},
-                    ],
-                    'max_tokens': 200,
-                    'temperature': 0.7,
-                    'stream': True,
-                })
-                req = urllib.request.Request(
-                    f'{_gateway_url}/v1/chat/completions',
-                    data=api_body.encode('utf-8'),
-                    headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
-                    method='POST'
-                )
-                resp = urllib.request.urlopen(req, timeout=30)
-                t_connected = time.time()
-                yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{t_connected - t0:.1f}s"})}\n\n'
-
-                accumulated = ''
-                first_delta = True
-                for line_bytes in resp:
-                    line = line_bytes.decode('utf-8', errors='replace').strip()
-                    if not line or not line.startswith('data: '):
-                        continue
-                    data_str = line[6:]
-                    if data_str == '[DONE]':
-                        break
-                    try:
-                        chunk = _json.loads(data_str)
-                    except Exception:
-                        continue
-                    choices = chunk.get('choices', [])
-                    if choices:
-                        delta = choices[0].get('delta', {}).get('content', '')
-                        if delta:
-                            if first_delta:
-                                first_delta = False
-                                yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{time.time() - t_connected:.1f}s"})}\n\n'
-                            accumulated += delta
-                            yield f'data: {_json.dumps({"type": "text", "text": delta})}\n\n'
-
-                parsed = _parse_reply_actions(accumulated)
-                yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
-                if not parsed.get('quick_replies'):
-                    try:
-                        replies = _generate_quick_replies(accumulated)
-                        if replies:
-                            yield f'data: {_json.dumps({"type": "quick_replies", "items": replies})}\n\n'
-                    except Exception:
-                        pass
+                for chunk in _get_engine().chat_stream(model_id, messages, max_tokens=200, temperature=0.7):
+                    delta = (chunk.get('choices') or [{}])[0].get('delta', {}).get('content', '')
+                    if delta:
+                        if first:
+                            yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{time.time()-t0:.1f}s"})}\n\n'
+                            first = False
+                        full += delta
+                        yield f'data: {_json.dumps({"type": "text", "text": delta}, ensure_ascii=False)}\n\n'
+                parsed = parse_reply_actions(full)
+                yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
             except Exception as e:
-                yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
-            yield f'data: [DONE]\n\n'
-
-        return Response(
-            generate(),
-            mimetype='text/event-stream',
-            headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'}
-        )
-
-    # Non-streaming lightweight
-    try:
-        api_body = _json.dumps({
-            'model': 'deepseek-chat',
-            'messages': [
-                {'role': 'system', 'content': system_msg},
-                {'role': 'user', 'content': user_input},
-            ],
-            'max_tokens': 200,
-            'temperature': 0.7,
-        })
-        req = urllib.request.Request(
-            f'{_gateway_url}/v1/chat/completions',
-            data=api_body.encode('utf-8'),
-            headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
-            method='POST'
-        )
-        resp = urllib.request.urlopen(req, timeout=30)
-        t2 = time.time()
-        result = _json.loads(resp.read())
-        reply = result['choices'][0]['message']['content'].strip()
-        parsed = _parse_reply_actions(reply)
+                yield f'data: {_json.dumps({"type": "error", "error": str(e)})}\n\n'
+            finally:
+                yield 'data: [DONE]\n\n'
 
         from utils import _log_ai_usage
-        _log_ai_usage(user_id=user.id, action='chat', model='deepseek-chat', elapsed=t2-t0)
+        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=0, success=True)
+        return Response(generate(), mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
-        return jsonify({
-            'reply': reply,
-            'parsed': parsed,
-            'model': 'deepseek-chat',
-            'timings': {'API': f'{t2 - t0:.1f}s', '总耗时': f'{t2 - t0:.1f}s'}
-        })
+    try:
+        resp = _get_engine().chat(model_id, messages, max_tokens=200, temperature=0.7)
+        reply = resp['choices'][0]['message'].get('content', '') or '好的。'
+        parsed = parse_reply_actions(reply)
+        from utils import _log_ai_usage
+        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0)
+        return jsonify({'reply': reply, 'parsed': parsed, 'model': 'ai-engine', 'timings': {'总耗时': f'{time.time()-t0:.1f}s'}})
     except Exception as e:
         from utils import _log_ai_usage
-        _log_ai_usage(user_id=user.id, action='chat', model='deepseek-chat', elapsed=time.time()-t0, success=False, error=str(e)[:200])
-        return jsonify({'error': f'AI 服务异常: {str(e)}', 'timings': {'总耗时': f'{time.time() - t0:.1f}s'}}), 503
+        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
+        return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503
 
-
-# ─── Chat endpoint ──────────────────────────────────────────
+# ─── Main Chat Endpoint ────────────────────────────────────
 @ai_bp.route('/api/chat', methods=['POST'])
 @require_auth
 def ai_chat():
-    """AI 对话 — 通过 Hermes Gateway Responses API。支持 SSE 流式。"""
-    import time, urllib.request, json as _json
+    """AI 对话 — 自研 AI Engine (v3.0)"""
     t0 = time.time()
-
     uid = g.current_user.id
+
     if _check_ai_rate_limit(uid):
         return jsonify({'error': f'请求过快，每分钟最多{_AI_RATE_LIMIT}次，请稍后再试'}), 429
 
@@ -646,214 +175,43 @@ def ai_chat():
     if not user_input:
         return jsonify({'error': '请输入问题'}), 400
 
-    # 拼接对话历史作为上下文
-    history = data.get('history') or []
-    if history and isinstance(history, list):
-        history_context = '以下为对话历史，仅供参考：\n'
-        for h in history[-6:]:  # 最多最近3轮(6条)
-            role = '用户' if h.get('role') == 'user' else 'AI'
-            history_context += f'{role}：{h.get("content", "")}\n'
-        user_input = history_context + '\n当前问题：' + user_input
-
     stream = data.get('stream', False)
     user = g.current_user
-
-    # 轻量消息走 chat/completions（快，省 token），跳过 Agent 循环
-    if _is_lightweight(user_input.split('\n当前问题：')[-1] if '\n当前问题：' in user_input else user_input):
-        return _handle_lightweight_chat(user_input, stream, t0, user)
-
-    prompt = _get_ai_system_prompt()
-    for line in prompt.split('\n')[:3]:
-        if '童小军' in line or '不是 Hermes' in line:
-            user_input = f'[{line.strip()}] {user_input}'
-            break
-
     conv_id = data.get('conversation_id', '') or ''
-    # 每个前端session独立conversation，+号新建时conversation_id变化
-    conversation = f'quote-user-{user.id}-{conv_id}' if conv_id else f'quote-user-{user.id}'
+    history = data.get('history') or []
+    model_id = data.get('model') or _ai_model
 
-    # 根据意图动态调整 max_tokens
-    if any(kw in user_input for kw in ['报价单', '报价', '列表', '所有', '全部', '统计', '列出']):
-        max_tokens = 2000
-    elif any(kw in user_input for kw in ['对比', '比较', '分析', '方案', '推荐']):
-        max_tokens = 1500
-    else:
-        max_tokens = 800
+    if _is_lightweight(user_input):
+        return _handle_lightweight_chat(user_input, stream, t0, user, model_id)
 
-    body = {
-        'model': data.get('model') or _ai_model,
-        'input': user_input,
-        'conversation': conversation,
-        'max_output_tokens': max_tokens,
-    }
+    agent, ctx = _build_agent(user)
+    messages, _ = ctx.build_messages(user_input, history=history, conversation_id=conv_id)
+    tool_defs = ctx.get_tool_definitions()
 
-    import hashlib
-    prompt = _get_ai_system_prompt()
-    prompt_h = hashlib.sha256(prompt.encode()).hexdigest()[:16]
-
-    session = AIChatSession.query.filter_by(user_id=user.id).first()
-    if not session or session.prompt_hash != prompt_h:
-        body['instructions'] = (
-            prompt + '\n'
-            f'当前用户：{user.username}（ID={user.id}，角色：{user.role}）。\n'
-            f'查询报价单：curl -s -H "Authorization: Bearer *** [内部服务]/api/quotes?per_page=50\n'
-            f'  sqlite3: SELECT id,title,client,status,total_amount,quote_date FROM quotes WHERE created_by={user.id} ORDER BY id DESC LIMIT 30;\n'
-            f'创建报价：curl -X POST -H "Authorization: Bearer *** -H "Content-Type: application/json" -d \'...\' [内部服务]/api/quotes\n'
-            f'报价单自动归属到当前用户 ID={user.id}（{user.username}）。\n'
-            f'列出报价单时：\n'
-            f'  1) 排除测试数据：标题含「测试」「test」「sdf」或客户名含「pro报价测试」「qhk」「qwe」的要跳过\n'
-            f'  2) 用 pipe table 格式列出，包含这6列：ID | 标题 | 客户 | 状态 | 金额 | 日期\n'
-            f'  3) 金额格式：¥12,345，日期格式：MM-DD\n'
-            f'  4) 先统计总数再列出表格\n'
-            f'【权限提醒】禁止导入/导出产品、禁止修改系统设置、禁止操作他人报价单'
-        )
-        if session:
-            session.prompt_hash = prompt_h
-        else:
-            db.session.add(AIChatSession(user_id=user.id, prompt_hash=prompt_h))
-        db.session.commit()
+    sm = SessionManager(uid, conv_id)
+    conv_pk = sm.get_or_create_conversation().id
+    sm.add_message(conv_pk, 'user', user_input)
 
     if stream:
-        body['stream'] = True
-        return _ai_chat_sse(body, t0, user_id=user.id)
+        def generate():
+            for event in agent.run(messages, tool_defs, conv_pk, sm, stream=True, quick_reply_llm=_quick_reply_llm):
+                yield event
 
-    t1 = time.time()
-    try:
-        req = urllib.request.Request(
-            f'{_gateway_url}/v1/responses',
-            data=_json.dumps(body).encode('utf-8'),
-            headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
-            method='POST'
-        )
-        resp = urllib.request.urlopen(req, timeout=60)
-        t2 = time.time()
-
-        result = _json.loads(resp.read())
-        reply = ''
-        for o in result.get('output', []):
-            if o.get('type') == 'message':
-                content = o.get('content', [])
-                if content:
-                    reply = content[0].get('text', '')
-                break
-        if not reply:
-            reply = '抱歉，AI 暂时无法回答，请稍后再试。'
-
-        parsed = _parse_reply_actions(reply)
-
-        # Lazy import _log_ai_usage from app
         from utils import _log_ai_usage
-        _log_ai_usage(user_id=user.id, action='chat', model=body.get('model', ''), elapsed=t2-t0)
+        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=0, success=True)
+        return Response(generate(), mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
-        return jsonify({
-            'reply': reply,
-            'parsed': parsed,
-            'model': 'hermes-gateway',
-            'timings': {'Gateway': f'{t2 - t1:.1f}s', '总耗时': f'{t2 - t0:.1f}s'}
-        })
+    try:
+        result = agent.run(messages, tool_defs, conv_pk, sm, stream=False, quick_reply_llm=_quick_reply_llm)
+        reply = result.get('reply', '') or '抱歉，AI 暂时无法回答，请稍后再试。'
+        parsed = result.get('parsed', parse_reply_actions(reply))
+        elapsed = result.get('elapsed', time.time() - t0)
+
+        from utils import _log_ai_usage
+        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=elapsed)
+        return jsonify({'reply': reply, 'parsed': parsed, 'model': 'ai-engine', 'timings': {'总耗时': f'{elapsed:.1f}s'}})
     except Exception as e:
         from utils import _log_ai_usage
-        _log_ai_usage(user_id=user.id, action='chat', model=body.get('model', ''), elapsed=time.time()-t0, success=False, error=str(e)[:200])
-        return jsonify({
-            'error': f'AI 服务异常: {str(e)}',
-            'timings': {'总耗时': f'{time.time() - t0:.1f}s'}
-        }), 503
-
-
-def _ai_chat_sse(body, t0, user_id=None):
-    """SSE 流式 — 透传 Gateway stream，前端 EventSource 接收"""
-    import time, urllib.request, json as _json
-
-    # 在 generator 外部（请求上下文内）立即记录使用 — 确保写入
-    from utils import _log_ai_usage
-    _log_ai_usage(user_id=user_id, action='chat', model=body.get('model', ''),
-                  elapsed=0, success=True, error='')
-
-    def generate():
-        t_connect = time.time()
-        accumulated = ''
-        qr_thread = None
-        qr_result = [None]  # mutable container for thread result
-        try:
-            req = urllib.request.Request(
-                f'{_gateway_url}/v1/responses',
-                data=_json.dumps(body).encode('utf-8'),
-                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {_gateway_key}'},
-                method='POST'
-            )
-            resp = urllib.request.urlopen(req, timeout=60)
-            t_connected = time.time()
-
-            yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{t_connected - t0:.1f}s"})}\n\n'
-
-            first_token = True
-            for line_bytes in resp:
-                line = line_bytes.decode('utf-8', errors='replace').strip()
-                if not line or not line.startswith('data: '):
-                    continue
-                data_str = line[6:]
-                if data_str == '[DONE]':
-                    break
-                try:
-                    chunk = _json.loads(data_str)
-                except _json.JSONDecodeError:
-                    continue
-
-                delta_text = ''
-                event_type = chunk.get('type', '')
-                if event_type == 'response.output_text.delta':
-                    delta_text = chunk.get('delta', '')
-
-                if delta_text:
-                    if first_token:
-                        first_token = False
-                        ttft = time.time() - t_connected
-                        yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{ttft:.1f}s"})}\n\n'
-                    accumulated += delta_text
-                    yield f'data: {_json.dumps({"type": "text", "text": delta_text})}\n\n'
-
-                    # 累积足够文本后，后台启动 quick_reply 生成
-                    if not qr_thread and len(accumulated) > 100:
-                        def _gen_qr(text):
-                            try:
-                                qr_result[0] = _generate_quick_replies(text)
-                            except Exception:
-                                pass
-                        qr_thread = threading.Thread(target=_gen_qr, args=(accumulated,))
-                        qr_thread.daemon = True
-                        qr_thread.start()
-
-                if event_type and 'tool' in event_type.lower():
-                    yield f'data: {_json.dumps({"type": "tool"})}\n\n'
-
-            parsed = _parse_reply_actions(accumulated)
-            yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time() - t0:.1f}s"})}\n\n'
-
-            # 使用后台线程结果或同步生成
-            if not parsed.get('quick_replies'):
-                llm_replies = None
-                if qr_thread:
-                    qr_thread.join(timeout=2.0)
-                    llm_replies = qr_result[0]
-                if not llm_replies:
-                    try:
-                        llm_replies = _generate_quick_replies(accumulated)
-                    except Exception:
-                        pass
-                if llm_replies:
-                    yield f'data: {_json.dumps({"type": "quick_replies", "items": llm_replies})}\n\n'
-
-        except Exception as e:
-            yield f'data: {_json.dumps({"type": "error", "error": f"AI 服务异常: {str(e)}"})}\n\n'
-
-        yield f'data: [DONE]\n\n'
-
-    return Response(
-        generate(),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',
-        }
-    )
+        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
+        return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503
