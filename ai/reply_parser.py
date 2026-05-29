@@ -82,11 +82,25 @@ def parse_reply_actions(reply_text):
             if 2 <= len(m) <= 30 and m not in quick_replies:
                 quick_replies.append(m)
 
-    # 去重
+    # 过滤：去掉含管道符/表格标记的产品名，以及黑名单词
+    def _valid_name(name):
+        name = name.strip()
+        if len(name) < 2 or len(name) > 60:
+            return False
+        if '|' in name or name.startswith('-') or name.startswith(':'):
+            return False
+        if _is_blacklisted(name):
+            return False
+        return True
+
+    # 去重 + 过滤
     seen = set()
     unique_products = []
     for p in products:
-        key = (p['name'], p.get('price'))
+        name = (p.get('name') or '').strip()
+        if not _valid_name(name):
+            continue
+        key = (name, p.get('price'))
         if key not in seen:
             seen.add(key)
             unique_products.append(p)
