@@ -141,7 +141,7 @@ def _handle_lightweight_chat(user_input, stream, t0, user, model_id='deepseek-v4
                 yield f'data: {_json.dumps({"type": "error", "error": str(e)})}\n\n'
             finally:
                 yield 'data: [DONE]\n\n'
-_log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
+                _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
 
         return Response(generate(), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
@@ -150,10 +150,10 @@ _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time(
         resp = _get_engine().chat(model_id, messages, max_tokens=200, temperature=0.7)
         reply = resp['choices'][0]['message'].get('content', '') or '好的。'
         parsed = parse_reply_actions(reply)
-_log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0)
+        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0)
         return jsonify({'reply': reply, 'parsed': parsed, 'model': 'ai-engine', 'timings': {'总耗时': f'{time.time()-t0:.1f}s'}})
     except Exception as e:
-_log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
+        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
         return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503
 
 # ─── Main Chat Endpoint ────────────────────────────────────
@@ -212,6 +212,12 @@ def ai_chat():
                         parsed = parse_reply_actions(reply)
                         yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
 
+                        # GenUI: 自动生成动态组件
+                        if len(parsed.get('products') or []) >= 2:
+                            yield f'data: {_json.dumps({"type": "component", "component": "ProductCompareCard", "props": {"products": parsed["products"]}}, ensure_ascii=False)}\n\n'
+                        if parsed.get('created_quote'):
+                            yield f'data: {_json.dumps({"type": "component", "component": "QuoteDraftCard", "props": parsed["created_quote"]}, ensure_ascii=False)}\n\n'
+
                         # 持久化 AI 回复（多轮对话上下文）
                         sm.add_message(conv_pk, 'assistant', reply)
 
@@ -250,7 +256,7 @@ def ai_chat():
                 yield f'data: {_json.dumps({"type": "error", "error": err_msg})}\n\n'
             finally:
                 yield 'data: [DONE]\n\n'
-_log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
+                _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=True)
 
         return Response(stream_with_context(generate()), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
@@ -277,8 +283,15 @@ _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0
         parsed = parse_reply_actions(reply)
         elapsed = time.time() - t0
 
-_log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=elapsed)
-        return jsonify({'reply': reply, 'parsed': parsed, 'model': 'ai-engine', 'timings': {'总耗时': f'{elapsed:.1f}s'}})
+        # GenUI components for non-streaming response
+        components = []
+        if len(parsed.get('products') or []) >= 2:
+            components.append({'component': 'ProductCompareCard', 'props': {'products': parsed['products']}})
+        if parsed.get('created_quote'):
+            components.append({'component': 'QuoteDraftCard', 'props': parsed['created_quote']})
+
+        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=elapsed)
+        return jsonify({'reply': reply, 'parsed': parsed, 'components': components, 'model': 'ai-engine', 'timings': {'总耗时': f'{elapsed:.1f}s'}})
     except Exception as e:
-_log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
+        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=time.time()-t0, success=False, error=str(e)[:200])
         return jsonify({'error': f'AI 服务异常: {str(e)}'}), 503

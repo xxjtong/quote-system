@@ -5,6 +5,13 @@ import { useApi } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
 import DOMPurify from 'dompurify'
 import QuotePreviewModal from './QuotePreviewModal.vue'
+import ProductCompareCard from './GenUI/ProductCompareCard.vue'
+import QuoteDraftCard from './GenUI/QuoteDraftCard.vue'
+
+const componentRegistry = {
+  ProductCompareCard,
+  QuoteDraftCard,
+}
 
 const emit = defineEmits(['navigate', 'create-quote', 'chat-completed'])
 
@@ -238,10 +245,12 @@ async function sendMessage(textOverride) {
             currentPhase.value = phases.length - 1
             emit('chat-completed')
           } else if (data.type === 'quick_replies') {
-            // LLM 异步补发的 quick_replies，追加到 parsed
             if (data.items?.length && chatMessages.value[msgIndex]?.parsed) {
               chatMessages.value[msgIndex].parsed.quick_replies = data.items
             }
+          } else if (data.type === 'component') {
+            if (!chatMessages.value[msgIndex].components) chatMessages.value[msgIndex].components = []
+            chatMessages.value[msgIndex].components.push(data)
           } else if (data.type === 'error') {
             chatMessages.value[msgIndex].content = `❌ ${data.error}`
           }
@@ -542,6 +551,15 @@ onMounted(() => { loadHistory(); fetchModels() })
               </button>
               <button class="btn btn-sm btn-outline-secondary" @click="compareList = []">清除选择</button>
             </div>
+          </div>
+
+          <!-- GenUI: Dynamically rendered components from AI -->
+          <div v-if="msg.role === 'assistant' && msg.components?.length" class="mt-2">
+            <component
+              v-for="(comp, ci) in msg.components" :key="ci"
+              :is="componentRegistry[comp.component]"
+              v-bind="comp.props || {}"
+            />
           </div>
 
           <!-- Parsed: Quick Reply Buttons -->
