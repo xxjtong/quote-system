@@ -78,9 +78,17 @@ def parse_reply_actions(reply_text):
 
     # Pattern 6: 快捷回复提取 — 只提取产品型号 + 操作建议
     # 产品型号模式: 大写字母+数字+连字符 (如 AM319-470M-HCHO-IR, NANO, LD-AQS, SE-200P)
+    _MODEL_BLACKLIST = {
+        'PM1', 'PM2', 'PM25', 'PM10', 'CO2', 'TVOC', 'HCHO', 'VOC', 'PIR',
+        'LED', 'LCD', 'USB', 'NFC', 'GPS', 'BLE', 'WiFi', 'WIFI', 'POE', 'POE+',
+        'DC', 'AC', 'RJ45', 'RS485', 'RS232', 'MQTT', 'HTTP', 'HTTPS',
+        'IP20', 'IP30', 'IP65', 'IP67', 'IP68', 'TypeC', 'USBC',
+    }
     model_matches = re.findall(r'\b((?:[A-Z]{1,3}-)?[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)*)\b', text)
     for m in model_matches:
         m = m.strip()
+        if m.upper() in _MODEL_BLACKLIST:
+            continue
         if 3 <= len(m) <= 30 and m not in quick_replies:
             quick_replies.append(m)
 
