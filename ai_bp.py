@@ -213,7 +213,7 @@ def ai_chat():
                         yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
 
                         # GenUI: 自动生成动态组件
-                        if len(parsed.get('products') or []) >= 2:
+                        if len(parsed.get('products') or []) >= 1:
                             yield f'data: {_json.dumps({"type": "component", "component": "ProductCompareCard", "props": {"products": parsed["products"]}}, ensure_ascii=False)}\n\n'
                         if parsed.get('created_quote'):
                             yield f'data: {_json.dumps({"type": "component", "component": "QuoteDraftCard", "props": parsed["created_quote"]}, ensure_ascii=False)}\n\n'
@@ -285,7 +285,7 @@ def ai_chat():
 
         # GenUI components for non-streaming response
         components = []
-        if len(parsed.get('products') or []) >= 2:
+        if len(parsed.get('products') or []) >= 1:
             components.append({'component': 'ProductCompareCard', 'props': {'products': parsed['products']}})
         if parsed.get('created_quote'):
             components.append({'component': 'QuoteDraftCard', 'props': parsed['created_quote']})

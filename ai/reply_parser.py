@@ -91,6 +91,8 @@ def parse_reply_actions(reply_text):
             continue
         if 3 <= len(m) <= 30 and m not in quick_replies:
             quick_replies.append(m)
+        if len(quick_replies) >= 3:
+            break
 
     # 操作建议关键词
     action_keywords = [
@@ -102,6 +104,8 @@ def parse_reply_actions(reply_text):
     for kw in action_keywords:
         if kw in text and kw not in quick_replies:
             quick_replies.append(kw)
+        if len(quick_replies) >= 4:
+            break
 
     # 过滤：去掉含管道符/表格标记的产品名，以及黑名单词
     def _valid_name(name):

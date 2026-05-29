@@ -32,12 +32,22 @@ onMounted(async () => {
   if (idsParam) {
     compareIds.value = idsParam.split(',').map(Number).filter(Boolean)
   } else if (namesParam) {
-    // 从产品名搜索ID
-    const names = namesParam.split(',').map(decodeURIComponent)
+    // 从产品名搜索ID（先试型号，再试全名）
+    const names = namesParam.split(',')
     const ids = []
     for (const name of names) {
       try {
-        const r = await api('/api/products?search=' + encodeURIComponent(name.trim()) + '&per_page=1')
+        // 提取可能的型号（大写字母+数字组合）
+        const modelMatch = name.match(/[A-Z][A-Z0-9\-]{2,}/)
+        let r
+        if (modelMatch) {
+          r = await api('/api/products?search=' + encodeURIComponent(modelMatch[0]) + '&per_page=1')
+        }
+        if (!r?.products?.length) {
+          // 用简短关键词搜
+          const shortName = name.split(/\s+/).slice(-2).join(' ')
+          r = await api('/api/products?search=' + encodeURIComponent(shortName) + '&per_page=1')
+        }
         if (r?.products?.length) ids.push(r.products[0].id)
       } catch (e) { /* skip */ }
     }

@@ -15,7 +15,7 @@ function toggle(p) {
 
 function compareSelected() {
   if (checked.value.length >= 2) {
-    const names = checked.value.map(p => encodeURIComponent(p.name)).join(',')
+    const names = checked.value.map(p => p.name).join(',')
     router.push({ name: 'compare', query: { products: names } })
   }
 }
