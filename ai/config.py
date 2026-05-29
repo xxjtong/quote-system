@@ -20,11 +20,12 @@ MODEL_MAP = {
     'deepseek-v4-pro':   {'provider': 'deepseek', 'model': 'deepseek-reasoner'},
     'mimo-v2.5-pro':     {'provider': 'xiaomi',  'model': 'mimo-v2.5-pro'},
     'mimo-v2.5':         {'provider': 'xiaomi',  'model': 'mimo-v2.5'},
+    'mimo-v2-omni':      {'provider': 'xiaomi',  'model': 'mimo-v2-omni'},
 }
 
 # 辅助模型: OCR / 视觉识别 / Quick Reply / 降级备用
 AUX_MODEL = 'mimo-v2.5-pro'
-VISION_MODEL = 'mimo-v2.5'
+VISION_MODEL = 'mimo-v2-omni'
 
 DEFAULT_MODEL = 'deepseek-v4-flash'
 MAX_AGENT_TURNS = 5

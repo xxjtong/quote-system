@@ -130,5 +130,5 @@ class LlmEngine:
                 {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{image_base64}'}},
             ]
         }]
-        return self.chat(VISION_MODEL, messages, max_tokens=kwargs.get('max_tokens', 500),
+        return self.chat(VISION_MODEL, messages, max_tokens=kwargs.get('max_tokens', 2000),
                          temperature=kwargs.get('temperature', 0.1))
