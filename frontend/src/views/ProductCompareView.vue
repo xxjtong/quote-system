@@ -28,8 +28,20 @@ const allProductIds = computed(() => compareIds.value)
 // ─── Init from query or localStorage ───
 onMounted(async () => {
   const idsParam = route.query.ids
+  const namesParam = route.query.products
   if (idsParam) {
     compareIds.value = idsParam.split(',').map(Number).filter(Boolean)
+  } else if (namesParam) {
+    // 从产品名搜索ID
+    const names = namesParam.split(',').map(decodeURIComponent)
+    const ids = []
+    for (const name of names) {
+      try {
+        const r = await api('/api/products?search=' + encodeURIComponent(name.trim()) + '&per_page=1')
+        if (r?.products?.length) ids.push(r.products[0].id)
+      } catch (e) { /* skip */ }
+    }
+    compareIds.value = ids
   } else {
     try {
       const stored = localStorage.getItem('quote_compare_ids')
