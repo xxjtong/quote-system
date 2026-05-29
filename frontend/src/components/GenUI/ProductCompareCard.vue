@@ -33,7 +33,10 @@ function createQuote() {
       <div v-for="p in products" :key="p.name" class="d-flex align-items-center gap-2 py-1 border-bottom"
         style="cursor:pointer" @click="toggle(p)">
         <i :class="checked.some(c => c.name === p.name) ? 'bi bi-check-circle-fill text-primary' : 'bi bi-circle text-muted'"></i>
-        <span class="flex-grow-1 small fw-medium">{{ p.name }}</span>
+        <div class="flex-grow-1">
+          <div class="small fw-medium">{{ p.name }}</div>
+          <div v-if="p.model" class="text-muted" style="font-size:.7rem;font-family:monospace">{{ p.model }}</div>
+        </div>
         <span class="fw-bold text-nowrap" v-if="p.price">¥{{ p.price?.toLocaleString() }}</span>
       </div>
       <div class="d-flex gap-2 mt-2" v-if="checked.length > 0">

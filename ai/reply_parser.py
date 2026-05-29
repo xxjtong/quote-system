@@ -107,6 +107,22 @@ def parse_reply_actions(reply_text):
         if len(quick_replies) >= 4:
             break
 
+    # 为每个产品提取型号
+    for p in products:
+        name = p['name']
+        # 搜索产品名附近的型号: "型号: xxx" 或 "型号：xxx"
+        name_pos = text.find(name[:10]) if len(name) >= 10 else text.find(name)
+        if name_pos >= 0:
+            nearby = text[name_pos:name_pos + 200]
+            m = re.search(r'型号[：:]\s*([A-Za-z0-9\-/]+(?:\s*[A-Za-z0-9\-/]+)*)', nearby)
+            if m:
+                p['model'] = m.group(1).strip()[:30]
+        if 'model' not in p:
+            # Fallback: extract model-like tokens from the name itself
+            model_match = re.search(r'\b([A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+)\b', name)
+            if model_match:
+                p['model'] = model_match.group(1)
+
     # 过滤：去掉含管道符/表格标记的产品名，以及黑名单词
     def _valid_name(name):
         name = name.strip()
