@@ -312,26 +312,6 @@ function createQuoteFromProducts(products) {
 
 // Handle quick reply button
 function quickReply(text) {
-  if (text === '创建报价单' || text === '一键创建报价') {
-    // 收集整个对话中所有 AI 提取到的产品
-    const allProducts = []
-    const seen = new Set()
-    for (const m of chatMessages.value) {
-      if (m.role === 'assistant' && m.parsed?.products) {
-        for (const p of m.parsed.products) {
-          const key = (p.name || '').substring(0, 8)
-          if (!seen.has(key)) {
-            seen.add(key)
-            allProducts.push(p)
-          }
-        }
-      }
-    }
-    if (allProducts.length > 0) {
-      createQuoteFromProducts(allProducts)
-      return
-    }
-  }
   sendMessage(text)
 }
 
