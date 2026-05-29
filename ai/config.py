@@ -37,5 +37,4 @@ FALLBACK_CHAIN = ['deepseek', 'xiaomi']
 AVAILABLE_MODELS = [
     {'id': 'deepseek-v4-flash', 'name': 'DeepSeek V4 Flash (快速)', 'provider': 'deepseek'},
     {'id': 'deepseek-v4-pro',   'name': 'DeepSeek V4 Pro (深度推理)', 'provider': 'deepseek'},
-    {'id': 'mimo-v2.5-pro',     'name': '小米 MiMo V2.5 Pro', 'provider': 'xiaomi'},
 ]
