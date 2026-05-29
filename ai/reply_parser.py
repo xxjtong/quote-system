@@ -146,9 +146,9 @@ def parse_reply_actions(reply_text):
         name = (p.get('name') or '').strip()
         if not _valid_name(name):
             continue
-        # Dedup by first 8 normalized chars (brand+prefix, ignores model suffix)
+        # Dedup by first 20 normalized chars (brand+name, includes model suffix)
         import re as _re
-        short = _re.sub(r'\s+', '', name)[:8]
+        short = _re.sub(r'\s+', '', name)[:20]
         if short not in seen:
             seen.add(short)
             unique_products.append(p)
