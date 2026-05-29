@@ -315,7 +315,7 @@ async function autoAddProducts() {
   for (const name of names) {
     let found = []
     // 1. 按型号搜索
-    const modelMatch = name.match(/[A-Z]{2,}[\d\-]+/gi) || []
+    const modelMatch = name.match(/[A-Z]{2,}[A-Z\d\-\/]+/gi) || []
     for (const m of modelMatch) {
       if (found.length > 0) break
       try {
@@ -343,15 +343,18 @@ async function autoAddProducts() {
         } catch {}
       }
     }
-    for (const p of found) {
+    // Only add the FIRST (best) match for each name
+    if (found.length > 0) {
+      const p = found[0]
       const existing = items.find(i => i.product_id === p.id)
-      if (existing) continue
-      items.push({
-        product_id: p.id, name: p.name, spec: p.spec || '',
-        unit: p.unit || '', price: p.price || 0,
-        quantity: 1, discount: 100, remark: '',
-      })
-      added++
+      if (!existing) {
+        items.push({
+          product_id: p.id, name: p.name, spec: p.spec || '',
+          unit: p.unit || '', price: p.price || 0,
+          quantity: 1, discount: 100, remark: '',
+        })
+        added++
+      }
     }
   }
   if (added > 0) {
