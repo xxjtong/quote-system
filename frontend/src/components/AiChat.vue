@@ -415,8 +415,9 @@ function previewCreatedQuote(id) {
 
 function downloadCreatedQuote(url) {
   const token = authToken.value
+  const base = import.meta.env.DEV ? 'http://127.0.0.1:5001' : ''
   const a = document.createElement('a')
-  a.href = url + '?token=' + token
+  a.href = base + url + '?token=' + token
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -531,7 +532,7 @@ onMounted(() => { loadHistory(); fetchModels() })
           </div>
 
           <!-- Parsed: Quick Reply Buttons -->
-          <div v-if="msg.role === 'assistant' && msg.parsed?.quick_replies?.length && !chatLoading" class="mt-2 d-flex flex-wrap gap-1">
+          <div v-if="msg.role === 'assistant' && msg.parsed?.quick_replies?.length && !msg.parsed?.created_quote && !chatLoading" class="mt-2 d-flex flex-wrap gap-1">
             <button v-for="(qr, qi) in msg.parsed.quick_replies" :key="qi"
               class="btn btn-sm btn-outline-primary" style="font-size:.78rem"
               @click="quickReply(qr)">{{ qr }}</button>
