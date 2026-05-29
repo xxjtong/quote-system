@@ -194,8 +194,9 @@ def ai_chat():
 
     if stream:
         def generate():
-            for event in agent.run(messages, tool_defs, conv_pk, sm, stream=True, quick_reply_llm=_quick_reply_llm):
-                yield event
+            with current_app.app_context():
+                for event in agent.run(messages, tool_defs, conv_pk, sm, stream=True, quick_reply_llm=_quick_reply_llm):
+                    yield event
 
         from utils import _log_ai_usage
         _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=0, success=True)
