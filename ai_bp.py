@@ -195,8 +195,24 @@ def ai_chat():
     if stream:
         def generate():
             with current_app.app_context():
-                for event in agent.run(messages, tool_defs, conv_pk, sm, stream=True, quick_reply_llm=_quick_reply_llm):
-                    yield event
+                # Direct engine call for first response (no tool loop for now)
+                try:
+                    engine = _get_engine()
+                    resp = engine.chat('deepseek-v4-flash', messages, tools=tool_defs, max_tokens=2000)
+                    msg = resp['choices'][0]['message']
+                    reply = msg.get('content', '')
+                    elapsed = time.time() - t0
+                    yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{elapsed:.1f}s"})}\n\n'
+                    if reply:
+                        yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{elapsed:.1f}s"})}\n\n'
+                        for i in range(0, len(reply), 3):
+                            yield f'data: {_json.dumps({"type": "text", "text": reply[i:i+3]}, ensure_ascii=False)}\n\n'
+                    parsed = parse_reply_actions(reply)
+                    yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
+                except Exception as e:
+                    yield f'data: {_json.dumps({"type": "error", "error": str(e)})}\n\n'
+                finally:
+                    yield 'data: [DONE]\n\n'
 
         from utils import _log_ai_usage
         _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=0, success=True)
@@ -204,11 +220,10 @@ def ai_chat():
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
     try:
-        result = agent.run(messages, tool_defs, conv_pk, sm, stream=False, quick_reply_llm=_quick_reply_llm)
-        agent_error = result.get('error', '')
-        reply = result.get('reply', '') or agent_error or '抱歉，AI 暂时无法回答，请稍后再试。'
-        parsed = result.get('parsed', parse_reply_actions(reply))
-        elapsed = result.get('elapsed', time.time() - t0)
+        resp = _get_engine().chat('deepseek-v4-flash', messages, tools=tool_defs, max_tokens=2000)
+        reply = resp['choices'][0]['message'].get('content', '') or '抱歉，AI 暂时无法回答。'
+        parsed = parse_reply_actions(reply)
+        elapsed = time.time() - t0
 
         from utils import _log_ai_usage
         _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=elapsed)
