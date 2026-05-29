@@ -1,6 +1,8 @@
-"""LlmEngine — OpenAI 兼容 HTTP 客户端（流式 + 非流式）"""
+"""LlmEngine — OpenAI 兼容 HTTP 客户端（流式 + 非流式，含自动重试）"""
 import json
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from ai.config import MODEL_MAP, PROVIDERS
 
 
@@ -8,6 +10,15 @@ class LlmEngine:
     def __init__(self):
         self._session = requests.Session()
         self._session.headers.update({'Content-Type': 'application/json'})
+        # 502/503/504 自动重试 3 次，间隔 1s/2s/4s
+        retry = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[502, 503, 504],
+            allowed_methods=['POST'],
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self._session.mount('https://', adapter)
 
     def _resolve(self, model_id):
         mapping = MODEL_MAP.get(model_id)
