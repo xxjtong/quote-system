@@ -143,6 +143,7 @@ _HEADER_PATTERNS = [
     r'推荐建议', r'若\s*需要', r'如果', r'请问', r'总结', r'综上', r'注意',
     r'提示', r'建议', r'可选', r'另外', r'此外', r'或者', r'还可',
     r'^\d+\.\s*$',  # just a number like "1."
+    r'^#+', r'方案', r'报价单', r'客户', r'数量', r'总价',
 ]
 
 
@@ -168,6 +169,9 @@ def _is_valid_product_name(name):
         return False
     # Sentences with 建议/需要/感兴趣 are headers, not products
     if any(kw in name for kw in ['建议', '推荐', '需要', '感兴趣', '请问', '如果']):
+        return False
+    # Markdown headers (###) and scheme labels
+    if name.startswith('#') or '方案' in name:
         return False
     return True
 
