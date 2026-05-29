@@ -77,8 +77,8 @@ def parse_reply_actions(reply_text):
             pass
 
     # Pattern 6: 快捷回复提取 — 只提取产品型号 + 操作建议
-    # 产品型号模式: 大写字母+数字+连字符 (如 AM319-470M-HCHO-IR, NANO, LD-AQS)
-    model_matches = re.findall(r'\b([A-Z][A-Z0-9]{1,3}(?:-[A-Z0-9]+){1,5})\b', text)
+    # 产品型号模式: 大写字母+数字+连字符 (如 AM319-470M-HCHO-IR, NANO, LD-AQS, SE-200P)
+    model_matches = re.findall(r'\b((?:[A-Z]{1,3}-)?[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)*)\b', text)
     for m in model_matches:
         m = m.strip()
         if 3 <= len(m) <= 30 and m not in quick_replies:

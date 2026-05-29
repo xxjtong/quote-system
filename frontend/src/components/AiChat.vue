@@ -291,8 +291,9 @@ function onChatLinkClick(e) {
 }
 
 // Create quote from product
-async function createQuoteFromProduct(productName) {
-  emit('create-quote', { type: 'single', product: productName })
+function createQuoteFromProduct(productName) {
+  if (!productName) return
+  router.push({ name: 'newquote', query: { products: productName } })
 }
 
 function createQuoteFromProducts(products) {
