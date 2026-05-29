@@ -16,9 +16,9 @@ _DEFAULT_PROMPT = (
     '  image_url, status, is_active, category_id, manufacturer_id, supplier_id,\n'
     '  specs(JSON规格), pinyin_search(拼音索引), created_by, created_at\n'
     '【常用查询示例】务必使用这些列名：\n'
-    '  精确搜索: SELECT id,name,model,price,function_desc FROM products WHERE (name LIKE "%关键词1%" OR function_desc LIKE "%关键词1%") AND is_active=1 LIMIT 10\n'
+    '  精确搜索: SELECT id,name,model,price,function_desc FROM products WHERE (name LIKE "%关键词1%" OR function_desc LIKE "%关键词1%") AND is_active=1 LIMIT 3\n'
     '  多关键词用 AND 连接：WHERE name LIKE "%甲醛%" AND name LIKE "%检测%" AND is_active=1\n'
-    '  只推荐包含用户所有需求的产品，不要推荐只匹配部分关键词的产品。\n'
+    '  只推荐包含用户所有需求的产品，最多推荐前2个最匹配的产品。\n'
     '【关联表】device_categories(id,name), suppliers(id,name), manufacturers(id,name)\n'
     '  quotes(id,title,client,status,total_amount,created_by)\n'
     '  quote_items(id,quote_id,product_id,product_name,quantity,unit_price,amount)\n\n'
@@ -30,13 +30,14 @@ _DEFAULT_PROMPT = (
     '5. 只推荐 is_active=1 的在线产品。\n\n'
     '=== 报价单生成流程（多轮对话） ===\n'
     '当用户提到项目需求时，按以下步骤引导：\n'
-    '1. 先查产品推荐方案，给出2-3个选项和成本对比\n'
-    '2. 等用户确认方案后，确认产品/型号/数量/单价\n'
-    '3. 收集必要信息：报价单标题、客户名称\n'
-    '4. 信息齐全后，提醒用户点击「一键创建报价单」按钮跳转\n'
+    '1. 先查产品推荐方案，最多给2个方案选项和成本对比（按匹配度排序）\n'
+    '2. 每个方案只推荐最匹配的1-2款产品\n'
+    '3. 等用户确认方案后，确认产品/型号/数量/单价\n'
+    '4. 收集必要信息：报价单标题、客户名称\n'
+    '5. 信息齐全后，提醒用户点击「一键创建报价单」按钮跳转\n'
     '重要：每轮只问一个问题，不要一次性问太多。记住上一轮的对话内容。\n\n'
     '=== 回复格式规则 ===\n'
-    '1. 只展示真正匹配用户需求的产品。用 SQL 筛选后，如果产品不含用户要的功能，不要列出。\n'
+    '1. 最多推荐2款产品或2个方案。按匹配程度排序，只展示最匹配的。\n'
     '2. 产品信息格式：**产品名 — ¥价格**（每行一个，用 — 分隔名称和价格）\n'
     '3. 推荐产品时用加粗编号：**1. 品牌 型号 产品名**\n'
     '4. 每项下一行写：型号: xxx / 价格: ¥xxx / 厂商: xxx\n'
@@ -102,7 +103,7 @@ class ContextBuilder:
                 'type': 'function',
                 'function': {
                     'name': 'query_database',
-                    'description': '查询报价系统 SQLite 数据库。只允许 SELECT 查询。products表列名: id,name(产品名),model(型号),spec(规格),price,cost_price,unit,supplier,function_desc,is_active,status,category_id,manufacturer_id,supplier_id。按名称搜索示例: SELECT id,name,model,price,function_desc FROM products WHERE name LIKE "%关键词%" AND is_active=1 LIMIT 10',
+                    'description': '查询报价系统 SQLite 数据库。只允许 SELECT。products列名: id,name,model,spec,price,cost_price,unit,supplier,function_desc,is_active,status。按名称搜索示例: SELECT id,name,model,price,function_desc FROM products WHERE name LIKE "%关键词%" AND is_active=1 ORDER BY price LIMIT 3。只查前3条即可，最终只推荐最匹配的2款。',
                     'parameters': {
                         'type': 'object',
                         'properties': {
