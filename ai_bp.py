@@ -223,18 +223,17 @@ def ai_chat():
                         # 持久化 AI 回复（多轮对话上下文）
                         sm.add_message(conv_pk, 'assistant', reply)
 
-                        # LLM 生成智能快捷回复
-                        try:
-                            llm_replies = generate_quick_replies(reply, _quick_reply_llm)
-                            # 合并：LLM 优先，正则兜底
-                            merged = list(llm_replies) if llm_replies else []
-                            for r in (parsed.get('quick_replies') or []):
-                                if r not in merged:
-                                    merged.append(r)
-                            if merged:
-                                yield f'data: {_json.dumps({"type": "quick_replies", "items": merged[:5]}, ensure_ascii=False)}\n\n'
-                        except Exception:
-                            pass
+                        # LLM 生成智能快捷回复（已创建报价单时跳过）
+                        if not parsed.get('created_quote'):
+                            try:
+                                llm_replies = generate_quick_replies(reply, _quick_reply_llm)
+                                merged = list(llm_replies) if llm_replies else []
+                                for r in (parsed.get('quick_replies') or []):
+                                    if r not in merged: merged.append(r)
+                                if merged:
+                                    yield f'data: {_json.dumps({"type": "quick_replies", "items": merged[:5]}, ensure_ascii=False)}\n\n'
+                            except Exception:
+                                pass
                         return
 
                     yield f'data: {_json.dumps({"type": "tool"})}\n\n'

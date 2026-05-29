@@ -163,10 +163,11 @@ def parse_reply_actions(reply_text):
             'download_url': f'/api/quotes/{qid}/export-excel',
         }
 
+    # 已创建报价单时，不显示快捷按钮（预览卡片已有按钮）
     return {
         'products': unique_products[:12],
         'quote_refs': list(set(quote_refs))[:10],
-        'quick_replies': quick_replies[:6],
+        'quick_replies': [] if created_quote else quick_replies[:4],
         'created_quote': created_quote,
     }
 
@@ -226,7 +227,7 @@ def generate_quick_replies(reply_text, quick_reply_fn=None):
         '- 如果AI问了"还是"选择题，提取两个选项\n'
         '- 如果AI推荐了产品，生成产品型号按钮 + "对比这两款"\n'
         '- 如果AI问了是否创建报价单，生成"创建报价单""先不用"\n'
-        '- 如果AI已创建报价单（含"已创建报价单#数字"），只生成"查看报价单""下载报价单"，不要生成"编辑报价单""发送客户""创建报价单""一键创建报价单"\n'
+        '- 如果AI已创建报价单（含"已创建报价单#数字"），只生成"预览报价单"，不要再生成其他按钮\n'
         '- 如果AI列了方案，生成"用方案一""用方案二"\n'
         '- 如果不确定，生成通用的"继续推荐""换个方向"\n'
         '- 只返回JSON数组，不要markdown\n'
