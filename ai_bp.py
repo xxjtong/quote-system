@@ -216,7 +216,10 @@ def ai_chat():
                         parsed = parse_reply_actions(reply)
                         yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
 
-                        # LLM 生成智能快捷回复（fire-and-forget，2s timeout）
+                        # 持久化 AI 回复（多轮对话上下文）
+                        sm.add_message(conv_pk, 'assistant', reply)
+
+                        # LLM 生成智能快捷回复
                         try:
                             llm_replies = generate_quick_replies(reply, _quick_reply_llm)
                             # 合并：LLM 优先，正则兜底
@@ -231,6 +234,8 @@ def ai_chat():
                         return
 
                     yield f'data: {_json.dumps({"type": "tool"})}\n\n'
+                    # 持久化工具调用消息
+                    sm.add_message(conv_pk, 'assistant', msg.get('content') or '', tool_calls=msg['tool_calls'])
                     loop_messages.append({'role': 'assistant', 'content': msg.get('content'), 'tool_calls': msg['tool_calls']})
                     for tc in msg['tool_calls']:
                         fn = tc['function']
@@ -239,7 +244,9 @@ def ai_chat():
                         except Exception:
                             args = {}
                         result = agent.tools.execute(fn['name'], args)
-                        loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': _json.dumps(result, ensure_ascii=False)})
+                        result_str = _json.dumps(result, ensure_ascii=False)
+                        sm.add_message(conv_pk, 'tool', result_str, tool_call_id=tc.get('id', ''), name=fn['name'])
+                        loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': result_str})
 
                 yield f'data: {_json.dumps({"type": "done", "parsed": {}, "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
             except Exception as e:
