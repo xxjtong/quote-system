@@ -68,20 +68,21 @@ onMounted(async () => {
 })
 
 async function loadAllDicts() {
-  try {
-    const [cm, cp, ps, sm, mf, cats, sup] = await Promise.all([
-      dicts.commMethods(), dicts.commProtocols(), dicts.powerSupplies(),
-      dicts.sensorMetrics(), dicts.manufacturers(), catApi.tree(),
-      dicts.suppliers(),
-    ])
-    dictData.commMethods = cm?.items || []
-    dictData.commProtocols = cp?.items || []
-    dictData.powerSupplies = ps?.items || []
-    dictData.sensorMetrics = sm?.items || []
-    dictData.manufacturers = mf?.items || []
-    dictData.supplierList = sup?.items || []
-    categoryTree.value = cats?.tree || []
-  } catch (e) { /* silent */ }
+  const results = await Promise.allSettled([
+    dicts.commMethods(), dicts.commProtocols(), dicts.powerSupplies(),
+    dicts.sensorMetrics(), dicts.manufacturers(), catApi.tree(),
+    dicts.suppliers(),
+  ])
+  const [cm, cp, ps, sm, mf, cats, sup] = results.map(r => r.status === 'fulfilled' ? r.value : null)
+  dictData.commMethods = cm?.items || []
+  dictData.commProtocols = cp?.items || []
+  dictData.powerSupplies = ps?.items || []
+  dictData.sensorMetrics = sm?.items || []
+  dictData.manufacturers = mf?.items || []
+  dictData.supplierList = sup?.items || []
+  categoryTree.value = cats?.tree || []
+  const failed = results.filter(r => r.status === 'rejected').length
+  if (failed > 0) console.warn(`Dict load: ${failed}/7 APIs failed`)
 }
 
 // Flatten category tree for select options

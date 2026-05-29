@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, inject, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { formatMoney, escHtml } from '../composables/useUtils'
 import DOMPurify from 'dompurify'
@@ -8,6 +9,7 @@ import QuotePreviewModal from './QuotePreviewModal.vue'
 const emit = defineEmits(['navigate', 'create-quote', 'chat-completed'])
 
 const { api, apiStream, authToken } = useApi()
+const router = useRouter()
 const toast = inject('toast')
 
 // ─── Quote Preview Modal ──────────────────────────────────
@@ -184,9 +186,21 @@ async function sendMessage(textOverride) {
     chatMessages.value.push({ role: 'assistant', content: '', parsed: null, elapsed: 0 })
     await nextTick(); scrollChat()
 
+    // 30s read timeout
+    let lastRead = Date.now()
     while (true) {
-      const { done, value } = await reader.read()
+      const { done, value } = await Promise.race([
+        reader.read(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000)),
+      ]).catch(e => {
+        if (e.message === 'timeout' && Date.now() - lastRead > 29000) {
+          if (accumulated) chatMessages.value[msgIndex].content = accumulated + '\n\n[响应超时，请重试]'
+          return { done: true, value: null }
+        }
+        throw e
+      })
       if (done) break
+      lastRead = Date.now()
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')

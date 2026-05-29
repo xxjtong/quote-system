@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).parent
 
 # ─── 配置 ──────────────────────────────────────────────────
 _ai_model = os.environ.get('QUOTE_AI_MODEL', 'deepseek-v4-flash')
-_AI_RATE_LIMIT = 5  # 每分钟
+_AI_RATE_LIMIT = 10  # 每分钟
 _rate_limit_cache = {}
 _rate_lock = threading.Lock()
 
@@ -32,7 +32,6 @@ from ai.engine import LlmEngine
 from ai.session import SessionManager
 from ai.context import ContextBuilder
 from ai.tools import ToolRegistry
-from ai.agent import Agent
 from ai.reply_parser import parse_reply_actions, generate_quick_replies
 from ai.context import _DEFAULT_PROMPT as _GW_SYSTEM_PROMPT  # admin_bp 需要
 
@@ -44,14 +43,12 @@ def _get_engine():
         _engine = LlmEngine()
     return _engine
 
-def _build_agent(user):
-    ctx = ContextBuilder(user)
-    tools = ToolRegistry(user_context={
+def _get_tools(user):
+    return ToolRegistry(user_context={
         'db_path': str(BASE_DIR / 'quote.db'),
         'base_url': 'http://127.0.0.1:5001',
         'auth_token': create_token(user, current_app),
     })
-    return Agent(_get_engine(), tools), ctx
 
 def _quick_reply_llm(model_id='deepseek-v4-flash', system_msg='', user_msg='', max_tokens=100):
     # Quick reply 固定用 flash（任务简单，省 token）
@@ -144,8 +141,6 @@ def _handle_lightweight_chat(user_input, stream, t0, user, model_id='deepseek-v4
             finally:
                 yield 'data: [DONE]\n\n'
 
-        from utils import _log_ai_usage
-        _log_ai_usage(user_id=user.id, action='chat', model=model_id, elapsed=0, success=True)
         return Response(stream_with_context(generate()), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
@@ -186,7 +181,8 @@ def ai_chat():
     if _is_lightweight(user_input):
         return _handle_lightweight_chat(user_input, stream, t0, user, model_id)
 
-    agent, ctx = _build_agent(user)
+    tools = _get_tools(user)
+    ctx = ContextBuilder(user)
     messages, _ = ctx.build_messages(user_input, history=history, conversation_id=conv_id)
     tool_defs = ctx.get_tool_definitions()
 
@@ -243,7 +239,7 @@ def ai_chat():
                             args = _json.loads(fn['arguments'])
                         except Exception:
                             args = {}
-                        result = agent.tools.execute(fn['name'], args)
+                        result = tools.execute(fn['name'], args)
                         result_str = _json.dumps(result, ensure_ascii=False)
                         sm.add_message(conv_pk, 'tool', result_str, tool_call_id=tc.get('id', ''), name=fn['name'])
                         loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': result_str})
@@ -256,8 +252,6 @@ def ai_chat():
             finally:
                 yield 'data: [DONE]\n\n'
 
-        from utils import _log_ai_usage
-        _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=0, success=True)
         return Response(stream_with_context(generate()), mimetype='text/event-stream',
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
@@ -266,7 +260,7 @@ def ai_chat():
         loop_messages = list(messages)
         reply = ''
         for turn in range(3):
-            resp = _get_engine().chat('deepseek-v4-flash', loop_messages, tools=tool_defs, max_tokens=2000)
+            resp = _get_engine().chat(model_id, loop_messages, tools=tool_defs, max_tokens=2000)
             msg = resp['choices'][0]['message']
             if not msg.get('tool_calls'):
                 reply = msg.get('content', '') or ''
@@ -276,7 +270,7 @@ def ai_chat():
                 fn = tc['function']
                 try: args = _json.loads(fn['arguments'])
                 except Exception: args = {}
-                result = agent.tools.execute(fn['name'], args)
+                result = tools.execute(fn['name'], args)
                 loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': _json.dumps(result, ensure_ascii=False)})
         if not reply:
             reply = '抱歉，AI 暂时无法回答。'
