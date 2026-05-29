@@ -240,9 +240,24 @@ def ai_chat():
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
     try:
-        resp = _get_engine().chat('deepseek-v4-flash', messages, tools=tool_defs, max_tokens=2000)
-        msg = resp['choices'][0]['message']
-        reply = msg.get('content', '') or '抱歉，AI 暂时无法回答。'
+        # Tool loop (same as streaming path)
+        loop_messages = list(messages)
+        reply = ''
+        for turn in range(3):
+            resp = _get_engine().chat('deepseek-v4-flash', loop_messages, tools=tool_defs, max_tokens=2000)
+            msg = resp['choices'][0]['message']
+            if not msg.get('tool_calls'):
+                reply = msg.get('content', '') or ''
+                break
+            loop_messages.append({'role': 'assistant', 'content': msg.get('content'), 'tool_calls': msg['tool_calls']})
+            for tc in msg['tool_calls']:
+                fn = tc['function']
+                try: args = _json.loads(fn['arguments'])
+                except Exception: args = {}
+                result = agent.tools.execute(fn['name'], args)
+                loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': _json.dumps(result, ensure_ascii=False)})
+        if not reply:
+            reply = '抱歉，AI 暂时无法回答。'
         parsed = parse_reply_actions(reply)
         elapsed = time.time() - t0
 
