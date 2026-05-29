@@ -199,6 +199,7 @@ def ai_chat():
                 yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
 
                 loop_messages = list(messages)
+                created_quote_id = None
                 for turn in range(3):
                     resp = engine.chat(model_id, loop_messages, tools=tool_defs, max_tokens=2000)
                     msg = resp['choices'][0]['message']
@@ -212,6 +213,9 @@ def ai_chat():
                         if turn > 0:
                             yield f'data: {_json.dumps({"type": "tool"})}\n\n'
                         parsed = parse_reply_actions(reply)
+                        # 合并 tool 执行结果中的 created_quote
+                        if created_quote_id and not parsed.get('created_quote'):
+                            parsed['created_quote'] = {'id': created_quote_id, 'download_url': f'/api/quotes/{created_quote_id}/export-excel'}
                         yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
 
                         # GenUI: 自动生成动态组件
@@ -248,6 +252,11 @@ def ai_chat():
                             args = {}
                         result = tools.execute(fn['name'], args)
                         result_str = _json.dumps(result, ensure_ascii=False)
+                        # 从 call_api 创建报价单的返回中提取 quote ID
+                        if fn['name'] == 'call_api' and isinstance(result, dict):
+                            qid = result.get('quote', {}).get('id')
+                            if qid:
+                                created_quote_id = qid
                         sm.add_message(conv_pk, 'tool', result_str, tool_call_id=tc.get('id', ''), name=fn['name'])
                         loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': result_str})
 
@@ -262,9 +271,9 @@ def ai_chat():
                         headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
     try:
-        # Tool loop (same as streaming path)
         loop_messages = list(messages)
         reply = ''
+        created_quote_id = None
         for turn in range(3):
             resp = _get_engine().chat(model_id, loop_messages, tools=tool_defs, max_tokens=2000)
             msg = resp['choices'][0]['message']
@@ -277,10 +286,15 @@ def ai_chat():
                 try: args = _json.loads(fn['arguments'])
                 except Exception: args = {}
                 result = tools.execute(fn['name'], args)
+                if fn['name'] == 'call_api' and isinstance(result, dict):
+                    qid = result.get('quote', {}).get('id')
+                    if qid: created_quote_id = qid
                 loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': _json.dumps(result, ensure_ascii=False)})
         if not reply:
             reply = '抱歉，AI 暂时无法回答。'
         parsed = parse_reply_actions(reply)
+        if created_quote_id and not parsed.get('created_quote'):
+            parsed['created_quote'] = {'id': created_quote_id, 'download_url': f'/api/quotes/{created_quote_id}/export-excel'}
         elapsed = time.time() - t0
 
         # GenUI components for non-streaming response
