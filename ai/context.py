@@ -34,7 +34,9 @@ _DEFAULT_PROMPT = (
     '2. 每个方案只推荐最匹配的1-2款产品\n'
     '3. 等用户确认方案后，确认产品/型号/数量/单价\n'
     '4. 收集必要信息：报价单标题、客户名称\n'
-    '5. 信息齐全后，提醒用户点击「一键创建报价单」按钮跳转\n'
+    '5. 信息齐全+用户说"创建报价单"时，用 call_api 工具 POST /api/quotes 创建报价单\n'
+    '   请求体格式: {"title":"标题","client":"客户","items":[{"product_id":产品ID,"product_name":"品名","product_spec":"型号","product_unit":"台","quantity":数量,"unit_price":单价}]}\n'
+    '   报价单 ID 在响应的 quote.id 字段。创建成功后回复"已创建报价单 #ID"\n'
     '重要：每轮只问一个问题，不要一次性问太多。记住上一轮的对话内容。\n\n'
     '=== 回复格式规则 ===\n'
     '1. 最多推荐2款产品或2个方案。按匹配程度排序，只展示最匹配的。\n'
@@ -120,7 +122,7 @@ class ContextBuilder:
                 'type': 'function',
                 'function': {
                     'name': 'call_api',
-                    'description': '调用报价系统内部 REST API。用于查询报价单列表、获取产品详情等。',
+                    'description': '调用报价系统内部 REST API。可查询报价单列表、产品详情，或 POST /api/quotes 创建报价单。创建报价单 body 格式: {"title":"标题","client":"客户名","items":[{"product_id":ID,"product_name":"名","product_spec":"型号","product_unit":"台","quantity":数量,"unit_price":单价}]}。报价单 ID 在响应的 quote.id 中。',
                     'parameters': {
                         'type': 'object',
                         'properties': {

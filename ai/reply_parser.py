@@ -128,10 +128,21 @@ def parse_reply_actions(reply_text):
             seen.add(short)
             unique_products.append(p)
 
+    # Pattern 7: 已创建报价单 #ID
+    created_quote = None
+    created_match = re.search(r'(?:已创建|已生成|创建了?)\s*报价单?\s*#?(\d+)', text)
+    if created_match:
+        qid = int(created_match.group(1))
+        created_quote = {
+            'id': qid,
+            'download_url': f'/api/quotes/{qid}/export-excel',
+        }
+
     return {
         'products': unique_products[:12],
         'quote_refs': list(set(quote_refs))[:10],
         'quick_replies': quick_replies[:6],
+        'created_quote': created_quote,
     }
 
 
