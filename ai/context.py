@@ -16,9 +16,9 @@ _DEFAULT_PROMPT = (
     '  image_url, status, is_active, category_id, manufacturer_id, supplier_id,\n'
     '  specs(JSON规格), pinyin_search(拼音索引), created_by, created_at\n'
     '【常用查询示例】务必使用这些列名：\n'
-    '  精确搜索: SELECT id,name,model,price,function_desc FROM products WHERE (name LIKE "%关键词1%" OR function_desc LIKE "%关键词1%") AND is_active=1 LIMIT 3\n'
+    '  精确搜索: SELECT id,name,model,price,function_desc FROM products WHERE (name LIKE "%关键词1%" OR function_desc LIKE "%关键词1%") AND is_active=1 LIMIT 20\n'
     '  多关键词用 AND 连接：WHERE name LIKE "%甲醛%" AND name LIKE "%检测%" AND is_active=1\n'
-    '  只推荐包含用户所有需求的产品，最多推荐前2个最匹配的产品。\n'
+    '  先查出所有匹配产品（不限制条数），再从结果中筛选最匹配的2款推荐给用户。\n'
     '【关联表】device_categories(id,name), suppliers(id,name), manufacturers(id,name)\n'
     '  quotes(id,title,client,status,total_amount,created_by)\n'
     '  quote_items(id,quote_id,product_id,product_name,quantity,unit_price,amount)\n\n'
@@ -103,7 +103,7 @@ class ContextBuilder:
                 'type': 'function',
                 'function': {
                     'name': 'query_database',
-                    'description': '查询报价系统 SQLite 数据库。只允许 SELECT。products列名: id,name,model,spec,price,cost_price,unit,supplier,function_desc,is_active,status。按名称搜索示例: SELECT id,name,model,price,function_desc FROM products WHERE name LIKE "%关键词%" AND is_active=1 ORDER BY price LIMIT 3。只查前3条即可，最终只推荐最匹配的2款。',
+                    'description': '查询报价系统 SQLite 数据库。只允许 SELECT。products列名: id,name,model,spec,price,cost_price,unit,supplier,function_desc,is_active,status。示例: SELECT id,name,model,price,function_desc FROM products WHERE name LIKE "%关键词%" AND is_active=1 ORDER BY price LIMIT 20。查出所有匹配的，由你从中筛选最匹配的2款推荐。',
                     'parameters': {
                         'type': 'object',
                         'properties': {
