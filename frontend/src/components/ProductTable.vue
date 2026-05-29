@@ -3,11 +3,12 @@ import { ref, reactive, computed, onMounted, nextTick, inject } from 'vue'
 import { useApi, BASE_URL } from '../composables/useApi'
 import { formatMoney } from '../composables/useUtils'
 import { usePagination } from '../composables/usePagination'
+import TagBadge from './TagBadge.vue'
 
 const emit = defineEmits(['edit', 'view', 'delete', 'toggle-active', 'export-template'])
 
 const toast = inject('toast')
-const { api, authToken, isAdmin, currentUser } = useApi()
+const { api, isAdmin, currentUser } = useApi()
 
 // ─── State ───
 const products = ref([])
@@ -86,22 +87,14 @@ async function fetchProducts() {
 // ─── Tooltip ───
 function productTooltip(p) {
   const parts = [p.name]
+  if (p.model) parts.push('型号: ' + p.model)
+  else if (p.spec) parts.push('规格: ' + p.spec)
   if (p.function_desc) parts.push('功能: ' + p.function_desc)
-  if (p.spec) parts.push('规格: ' + p.spec)
-  if (p.supplier) parts.push('厂商: ' + p.supplier)
+  if (p.manufacturer_name) parts.push('制造商: ' + p.manufacturer_name)
+  if (p.supplier_name || p.supplier) parts.push('厂商: ' + (p.supplier_name || p.supplier))
   if (p.remark) parts.push('备注: ' + p.remark)
   if (p.cost_price) parts.push('成本: ¥' + p.cost_price)
   return parts.join('\n')
-}
-
-function imageSrc(p) {
-  if (!p.has_image && !p.image_url) return ''
-  const token = authToken.value
-  if (p.has_image) return BASE_URL + '/api/products/' + p.id + '/image' + (token ? '?token=' + token : '')
-  if (p.image_url.startsWith('/uploads/')) {
-    return BASE_URL + p.image_url + (token ? '?token=' + token : '')
-  }
-  return p.image_url.startsWith('http') ? p.image_url : BASE_URL + p.image_url
 }
 
 // ─── Select all / single ───
@@ -160,9 +153,6 @@ async function toggleActive(id) {
 function exportTemplate() {
   window.open(BASE_URL + '/api/products/export-template')
 }
-
-// ─── Image preview ───
-const previewImage = ref('')
 
 // ─── Expose for parent ───
 defineExpose({ fetchProducts, selectedIds, categories, suppliers, exportTemplate, products })
@@ -246,18 +236,19 @@ onMounted(() => {
                 @change="toggleAll">
             </th>
             <th>产品名称</th>
-            <th class="d-none d-md-table-cell">规格型号</th>
-            <th class="d-none d-md-table-cell">图片</th>
+            <th class="d-none d-md-table-cell">型号</th>
             <th class="d-none d-md-table-cell">分类</th>
+            <th class="d-none d-md-table-cell">制造商</th>
             <th class="d-none d-md-table-cell">厂商</th>
+            <th class="d-none d-md-table-cell">通讯</th>
             <th>销售单价</th>
-            <th class="d-none d-md-table-cell">创建人</th>
+            <th class="d-none d-md-table-cell">状态</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="products.length === 0">
-            <td colspan="9">
+            <td colspan="10">
               <div class="empty-state">
                 <i class="bi bi-inbox"></i>
                 <p>暂无产品</p>
@@ -276,26 +267,38 @@ onMounted(() => {
               <div class="text-truncate fw-medium" style="max-width:200px;color:var(--gray-800)">{{ p.name }}</div>
               <div v-if="p.function_desc" class="text-truncate small text-muted" style="max-width:200px">{{ p.function_desc }}</div>
             </td>
+            <!-- 型号 -->
             <td class="d-none d-md-table-cell">
-              <span class="text-truncate d-inline-block" style="max-width:120px" :title="p.spec || ''">{{ p.spec || '—' }}</span>
+              <span class="text-truncate d-inline-block" style="max-width:120px">{{ p.model || p.spec || '—' }}</span>
             </td>
+            <!-- 分类 -->
             <td class="d-none d-md-table-cell">
-              <div class="img-cell" style="position:relative;display:inline-block">
-                <img v-if="p.has_image || p.image_url" :src="imageSrc(p)" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer"
-                  class="img-thumb"
-                  @click="previewImage = imageSrc(p)">
-                <img v-if="p.has_image || p.image_url" :src="imageSrc(p)" class="img-thumb-large">
-                <i v-else class="bi bi-image text-muted" style="font-size:1.2rem;opacity:.4"></i>
-              </div>
+              <span v-if="p.category_name || p.category" class="badge bg-light text-dark" style="font-weight:400">{{ p.category_name || p.category }}</span>
+              <span v-else class="text-muted">—</span>
             </td>
+            <!-- 制造商 -->
             <td class="d-none d-md-table-cell">
-              <span v-for="(tag, i) in (p.category || '').split(',').filter(Boolean)" :key="i"
-                class="badge bg-light text-dark me-1" style="font-weight:400">{{ tag.trim() }}</span>
-              <span v-if="!p.category" class="text-muted">—</span>
+              <span class="text-truncate d-inline-block" style="max-width:100px">{{ p.manufacturer_name || '—' }}</span>
             </td>
-            <td class="td-name d-none d-md-table-cell" style="max-width:100px">{{ p.supplier || '—' }}</td>
+            <!-- 厂商 -->
+            <td class="td-name d-none d-md-table-cell" style="max-width:100px">{{ p.supplier_name || p.supplier || '—' }}</td>
+            <!-- 通讯 -->
+            <td class="d-none d-md-table-cell">
+              <span v-for="cm in (p.comm_methods || []).slice(0, 2)" :key="cm.id">
+                <TagBadge :label="cm.dict_name" />
+              </span>
+              <span v-if="p.comm_methods && p.comm_methods.length > 2" class="text-muted small ms-1">+{{ p.comm_methods.length - 2 }}</span>
+              <span v-if="!p.comm_methods || p.comm_methods.length === 0" class="text-muted">—</span>
+            </td>
             <td class="text-end fw-medium">{{ formatMoney(p.price) }}</td>
-            <td class="small text-muted d-none d-md-table-cell">{{ p.created_by_name || '系统' }}</td>
+            <!-- 状态 -->
+            <td class="d-none d-md-table-cell">
+              <span v-if="p.status === 'active' || (!p.status && p.is_active !== false)" class="badge bg-success">在售</span>
+              <span v-else-if="p.status === 'discontinued'" class="badge bg-danger">停售</span>
+              <span v-else-if="p.status === 'planned'" class="badge bg-primary">规划中</span>
+              <span v-else-if="p.status === 'archived'" class="badge bg-secondary">已归档</span>
+              <span v-else class="text-muted">—</span>
+            </td>
             <td v-if="isAdmin() || p.created_by === currentUser?.id">
               <div class="d-flex gap-1">
                 <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="$emit('edit', p)" title="编辑">
@@ -340,13 +343,4 @@ onMounted(() => {
     </nav>
   </div>
 
-  <!-- Image Preview Modal -->
-  <Teleport to="body">
-    <div v-if="previewImage" class="modal-backdrop show" style="z-index:2000" @click="previewImage = ''"></div>
-    <div v-if="previewImage" class="modal d-block" tabindex="-1" style="z-index:2001;display:flex!important;align-items:center;justify-content:center" @click="previewImage = ''">
-      <div class="bg-white p-3 rounded-3" style="box-shadow:0 8px 32px rgba(0,0,0,.3)" @click.stop>
-        <img :src="previewImage" style="max-width:400px;max-height:400px;border-radius:6px;cursor:zoom-out">
-      </div>
-    </div>
-  </Teleport>
 </template>

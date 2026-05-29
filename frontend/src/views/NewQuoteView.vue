@@ -126,7 +126,7 @@ function togglePick(p) {
   if (pickedProducts.has(p.id)) {
     pickedProducts.delete(p.id)
   } else {
-    pickedProducts.set(p.id, { id: p.id, name: p.name, spec: p.spec || '', unit: p.unit || '', price: p.price || 0 })
+    pickedProducts.set(p.id, { id: p.id, name: p.name, spec: p.model || p.spec || '', unit: p.unit || '', price: p.price || 0 })
   }
 }
 
@@ -513,7 +513,10 @@ async function autoAddProducts() {
                   <input type="checkbox" :checked="pickedProducts.has(p.id)" style="pointer-events:none">
                   <div class="flex-grow-1">
                     <div class="fw-medium">{{ p.name }}</div>
-                    <div class="small text-muted">{{ p.spec || '' }} {{ p.supplier ? '· ' + p.supplier : '' }}</div>
+                    <div class="small text-muted">
+                      <span v-if="p.model || p.spec">{{ p.model || p.spec }}</span>
+                      <span v-if="p.category_name || p.category"> · {{ p.category_name || p.category }}</span>
+                    </div>
                   </div>
                   <span class="fw-medium">{{ formatMoney(p.price) }}</span>
                 </div>

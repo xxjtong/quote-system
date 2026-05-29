@@ -13,6 +13,9 @@ const props = defineProps({
   product: { type: Object, default: null },
   categories: { type: Array, default: () => [] },
   suppliers: { type: Array, default: () => [] },
+  categoryTree: { type: Array, default: () => [] },
+  manufacturerList: { type: Array, default: () => [] },
+  supplierList: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['update:show', 'saved'])
@@ -56,6 +59,7 @@ const advancedData = reactive({
 const dictData = reactive({
   commMethods: [], commProtocols: [], powerSupplies: [],
   hardwareInterfaces: [], sensorMetrics: [], manufacturers: [],
+  supplierList: [],
 })
 const categoryTree = ref([])
 
@@ -65,15 +69,17 @@ onMounted(async () => {
 
 async function loadAllDicts() {
   try {
-    const [cm, cp, ps, sm, mf, cats] = await Promise.all([
+    const [cm, cp, ps, sm, mf, cats, sup] = await Promise.all([
       dicts.commMethods(), dicts.commProtocols(), dicts.powerSupplies(),
       dicts.sensorMetrics(), dicts.manufacturers(), catApi.tree(),
+      dicts.suppliers(),
     ])
     dictData.commMethods = cm?.items || []
     dictData.commProtocols = cp?.items || []
     dictData.powerSupplies = ps?.items || []
     dictData.sensorMetrics = sm?.items || []
     dictData.manufacturers = mf?.items || []
+    dictData.supplierList = sup?.items || []
     categoryTree.value = cats?.tree || []
   } catch (e) { /* silent */ }
 }
@@ -99,6 +105,17 @@ watch(() => advancedData.category_id, async (catId) => {
 function onCategoryIdChange() {
   // spec loading handled by the watch above
 }
+
+// Use props if available, otherwise fall back to internally loaded data
+const effectiveCategoryTree = computed(() =>
+  props.categoryTree && props.categoryTree.length ? props.categoryTree : categoryTree.value
+)
+const effectiveManufacturers = computed(() =>
+  props.manufacturerList && props.manufacturerList.length ? props.manufacturerList : dictData.manufacturers
+)
+const effectiveSuppliers = computed(() =>
+  props.supplierList && props.supplierList.length ? props.supplierList : dictData.supplierList
+)
 
 // ─── Watch product prop → populate form ───
 watch(() => props.show, (visible) => {
@@ -363,34 +380,47 @@ async function saveProduct() {
                     <label class="form-label-modern">产品名称 <span class="text-danger">*</span></label>
                     <input class="form-control" v-model="formData.name" maxlength="20" placeholder="产品名称">
                   </div>
-                  <div class="col-md-6">
-                    <label class="form-label-modern">分类</label>
-                    <input class="form-control" v-model="formData.category" list="catList" placeholder="选择或输入分类">
-                    <datalist id="catList">
-                      <option v-for="c in categories" :key="c" :value="c"></option>
-                    </datalist>
+                  <div class="col-md-3">
+                    <label class="form-label-modern">型号</label>
+                    <input class="form-control" v-model="advancedData.model" placeholder="产品型号">
                   </div>
-                  <div class="col-md-6">
+                  <div class="col-md-3">
+                    <label class="form-label-modern">规格型号</label>
+                    <input class="form-control" v-model="formData.spec" placeholder="规格型号">
+                  </div>
+                  <div class="col-md-4">
                     <label class="form-label-modern">设备分类 <small class="text-muted">(触发高级规格)</small></label>
                     <select class="form-select" v-model.number="advancedData.category_id" @change="onCategoryIdChange">
                       <option :value="null">-- 无 --</option>
-                      <option v-for="c in flattenCategories(categoryTree)" :key="c.id" :value="c.id">{{ c.name }}</option>
+                      <option v-for="c in flattenCategories(effectiveCategoryTree)" :key="c.id" :value="c.id">{{ c.name }}</option>
                     </select>
                   </div>
-                  <div class="col-md-6">
-                    <label class="form-label-modern">厂商</label>
-                    <input class="form-control" v-model="formData.supplier" list="supList" placeholder="选择或输入厂商">
-                    <datalist id="supList">
-                      <option v-for="s in suppliers" :key="s" :value="s"></option>
-                    </datalist>
+                  <div class="col-md-4">
+                    <label class="form-label-modern">制造商</label>
+                    <select class="form-select" v-model.number="advancedData.manufacturer_id">
+                      <option :value="null">-- 无 --</option>
+                      <option v-for="m in effectiveManufacturers" :key="m.id" :value="m.id">{{ m.name }}</option>
+                    </select>
                   </div>
-                  <div class="col-md-6">
-                    <label class="form-label-modern">规格型号</label>
-                    <input class="form-control" v-model="formData.spec" placeholder="规格型号">
+                  <div class="col-md-4">
+                    <label class="form-label-modern">供应商</label>
+                    <select class="form-select" v-model.number="advancedData.supplier_id">
+                      <option :value="null">-- 无 --</option>
+                      <option v-for="s in effectiveSuppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
                   </div>
                   <div class="col-md-3">
                     <label class="form-label-modern">单位</label>
                     <input class="form-control" v-model="formData.unit" placeholder="台/个/套">
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label-modern">状态</label>
+                    <select class="form-select" v-model="advancedData.status">
+                      <option value="active">在售</option>
+                      <option value="discontinued">停售</option>
+                      <option value="planned">规划中</option>
+                      <option value="archived">已归档</option>
+                    </select>
                   </div>
                   <div class="col-md-3">
                     <label class="form-label-modern">销售单价</label>

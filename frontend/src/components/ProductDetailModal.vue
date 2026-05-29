@@ -5,6 +5,7 @@ import { BASE_URL, useApi } from '../composables/useApi'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { formatMoney } from '../composables/useUtils'
 import { useAdvancedApi } from '../composables/useAdvancedApi'
+import TagBadge from './TagBadge.vue'
 
 const props = defineProps({
   show: Boolean,
@@ -105,10 +106,11 @@ function onEdit() {
             </div>
             <table class="table table-sm" style="font-size:.85rem">
               <tbody>
-                <tr><td class="text-muted" style="width:80px">分类</td><td class="fw-medium">{{ product.category || '—' }}</td></tr>
-                <tr><td class="text-muted">规格型号</td><td>{{ product.spec || '—' }}</td></tr>
+                <tr><td class="text-muted" style="width:80px">分类</td><td class="fw-medium">{{ product.category_name || product.category || '—' }}</td></tr>
+                <tr><td class="text-muted">型号</td><td>{{ product.model || product.spec || '—' }}</td></tr>
                 <tr><td class="text-muted">单位</td><td>{{ product.unit || '—' }}</td></tr>
-                <tr><td class="text-muted">厂商</td><td>{{ product.supplier || '—' }}</td></tr>
+                <tr><td class="text-muted">制造商</td><td>{{ product.manufacturer_name || '—' }}</td></tr>
+                <tr><td class="text-muted">厂商</td><td>{{ product.supplier_name || product.supplier || '—' }}</td></tr>
                 <tr><td class="text-muted">销售单价</td><td class="fw-medium text-primary">{{ formatMoney(product.price) }}</td></tr>
                 <tr v-if="isAdmin() && product.cost_price"><td class="text-muted">成本价</td><td>¥{{ product.cost_price }}</td></tr>
                 <tr v-if="product.function_desc"><td class="text-muted">功能描述</td><td>{{ product.function_desc }}</td></tr>
@@ -139,7 +141,7 @@ function onEdit() {
               <details v-if="hasM2MData(product.comm_methods)" class="mb-1">
                 <summary class="small fw-medium text-secondary" style="cursor:pointer">通讯方式 ({{ product.comm_methods.length }})</summary>
                 <div class="mt-1 small" v-for="cm in product.comm_methods" :key="cm.id">
-                  <span class="badge bg-info me-1">{{ cm.dict_name }}</span>
+                  <TagBadge :label="cm.dict_name" />
                   <span v-if="cm.detail" class="text-muted">{{ cm.detail }}</span>
                 </div>
               </details>

@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
+import { useAdvancedApi } from '../composables/useAdvancedApi'
 import ProductTable from '../components/ProductTable.vue'
 import ProductDetailModal from '../components/ProductDetailModal.vue'
 import ProductFormModal from '../components/ProductFormModal.vue'
@@ -9,9 +10,28 @@ import ProductFormModal from '../components/ProductFormModal.vue'
 const router = useRouter()
 const route = useRoute()
 const { api } = useApi()
+const { dicts, categories: catApi } = useAdvancedApi()
 
 // ─── Product table ref ───
 const productTable = ref(null)
+
+// ─── Advanced data for form modal ───
+const categoryTree = ref([])
+const manufacturerList = ref([])
+const supplierList = ref([])
+
+onMounted(async () => {
+  try {
+    const [cats, mf, sup] = await Promise.all([
+      catApi.tree(),
+      dicts.manufacturers(),
+      dicts.suppliers(),
+    ])
+    categoryTree.value = cats?.tree || []
+    manufacturerList.value = mf?.items || []
+    supplierList.value = sup?.items || []
+  } catch (e) { /* silent */ }
+})
 
 // ─── Product detail modal ───
 const detailProduct = ref(null)
@@ -72,7 +92,7 @@ function onView(product) {
   <div>
     <!-- Header -->
     <div class="page-header justify-content-between">
-      <h5><i class="bi bi-box"></i>产品管理</h5>
+      <h5><i class="bi bi-box"></i>报价产品</h5>
       <div class="d-flex gap-2">
         <button class="btn btn-outline-primary btn-modern" @click="productTable?.exportTemplate()">
           <i class="bi bi-download"></i> 下载模板
@@ -95,6 +115,9 @@ function onView(product) {
       :product="formProduct"
       :categories="productTable?.categories || []"
       :suppliers="productTable?.suppliers || []"
+      :categoryTree="categoryTree"
+      :manufacturerList="manufacturerList"
+      :supplierList="supplierList"
       @update:show="showForm = $event"
       @saved="onFormSaved"
     />
