@@ -19,20 +19,22 @@ def parse_reply_actions(reply_text):
     # Pattern 1: "产品名 — ¥价格"
     pat1 = re.findall(r'([一-龥A-Za-z0-9\s\-]+?)\s*[—\-]\s*[¥￥]\s*([\d,]+\.?\d*)', text)
     for name, price in pat1:
-        name = name.strip()
-        if len(name) >= 2 and not _is_blacklisted(name):
+        name = re.sub(r'^\*{1,3}\s*', '', name.strip())  # strip markdown bold
+        name = re.sub(r'^\d+\.\s*', '', name).strip()     # strip leading number
+        if _is_valid_product_name(name):
             try:
-                products.append({'name': name, 'price': float(price.replace(',', ''))})
+                products.append({'name': name[:60], 'price': float(price.replace(',', ''))})
             except ValueError:
                 pass
 
     # Pattern 2: "产品名 ¥价格"
     pat2 = re.findall(r'([一-龥A-Za-z0-9\s\-]+?)\s+[¥￥]\s*([\d,]+\.?\d*)', text)
     for name, price in pat2:
-        name = name.strip()
-        if len(name) >= 2 and not _is_blacklisted(name):
+        name = re.sub(r'^\*{1,3}\s*', '', name.strip())
+        name = re.sub(r'^\d+\.\s*', '', name).strip()
+        if _is_valid_product_name(name):
             try:
-                products.append({'name': name, 'price': float(price.replace(',', ''))})
+                products.append({'name': name[:60], 'price': float(price.replace(',', ''))})
             except ValueError:
                 pass
 
@@ -40,26 +42,31 @@ def parse_reply_actions(reply_text):
     table_rows = re.findall(r'\|\s*([一-龥A-Za-z0-9\s\-]+?)\s*\|\s*[^|]*\|\s*[¥￥]?\s*([\d,]+\.?\d*)\s*\|', text)
     for name, price in table_rows:
         name = name.strip()
-        if len(name) >= 2 and not _is_blacklisted(name):
+        if _is_valid_product_name(name):
             try:
-                products.append({'name': name, 'price': float(price.replace(',', ''))})
+                products.append({'name': name[:60], 'price': float(price.replace(',', ''))})
             except ValueError:
                 pass
 
-    # Pattern 4: 价格在前，回溯找产品名
+    # Pattern 4: 价格在前，回溯找产品名（只取第一条）
+    seen_prices = {prod.get('price') for prod in products}
     price_lines = re.findall(r'[¥￥]\s*([\d,]+\.?\d*)', text)
-    for p in price_lines[:5]:
-        if not any(prod.get('price') == float(p.replace(',', '')) for prod in products):
-            lines = text.split('\n')
-            for i, line in enumerate(lines):
-                if p in line:
-                    if i > 0:
-                        prev = lines[i-1].strip()
-                        if len(prev) >= 2 and len(prev) < 60 and not _is_blacklisted(prev):
-                            try:
-                                products.append({'name': prev, 'price': float(p.replace(',', ''))})
-                            except ValueError:
-                                pass
+    for p in price_lines:
+        price_val = float(p.replace(',', ''))
+        if price_val in seen_prices:
+            continue
+        seen_prices.add(price_val)
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if p in line and i > 0:
+                prev = lines[i-1].strip()
+                # Clean markdown prefixes
+                prev = re.sub(r'^\*{1,3}\s*', '', prev)
+                prev = re.sub(r'^\d+\.\s*', '', prev)
+                prev = prev.strip()
+                if _is_valid_product_name(prev):
+                    products.append({'name': prev[:60], 'price': price_val})
+                    break
 
     # Pattern 5: 报价单引用 #数字
     refs = re.findall(r'#(\d+)', text)
@@ -122,10 +129,37 @@ _BLACKLIST = {'成本价', '销售价', '单价', '合计', '总计', '方案一
               '成本', '售价', '总价', '小计', '折扣', '指导价', '最低零售价', '成交价',
               '供应商', '备注', '数量', '型号', '规格', '单位', '序号', '编号'}
 
+_HEADER_PATTERNS = [
+    r'推荐建议', r'若\s*需要', r'如果', r'请问', r'总结', r'综上', r'注意',
+    r'提示', r'建议', r'可选', r'另外', r'此外', r'或者', r'还可',
+    r'^\d+\.\s*$',  # just a number like "1."
+]
+
 
 def _is_blacklisted(name):
     name_clean = name.strip().rstrip('：:')
-    return name_clean in _BLACKLIST or len(name_clean) < 2
+    if name_clean in _BLACKLIST or len(name_clean) < 2:
+        return True
+    import re as _re
+    for pat in _HEADER_PATTERNS:
+        if _re.match(pat, name_clean):
+            return True
+    return False
+
+
+def _is_valid_product_name(name):
+    """Check if a string looks like a real product name (not a header/sentence)."""
+    if not name or len(name) < 3 or len(name) > 60:
+        return False
+    if _is_blacklisted(name):
+        return False
+    # Must contain Chinese or alphanumeric product-like content
+    if '|' in name or name.startswith('>') or name.startswith('-'):
+        return False
+    # Sentences with 建议/需要/感兴趣 are headers, not products
+    if any(kw in name for kw in ['建议', '推荐', '需要', '感兴趣', '请问', '如果']):
+        return False
+    return True
 
 
 def generate_quick_replies(reply_text, quick_reply_fn=None):
