@@ -3,6 +3,7 @@ Products Blueprint — 产品相关 API 路由
 从 app.py 拆分出的所有 /api/products/* 路由及 /api/upload/image、/api/download-image
 """
 
+import json
 import os
 import io
 import re
@@ -705,6 +706,49 @@ def import_products():
 
 # ─── import_products 子函数 ────────────────────────────────────
 
+
+def _get_or_create_category(name):
+    """查找或创建设备分类，返回 category_id"""
+    if not name or not name.strip():
+        return None
+    name = name.strip()
+    from models import DeviceCategory
+    cat = DeviceCategory.query.filter_by(name=name).first()
+    if not cat:
+        cat = DeviceCategory(name=name, level=1, sort_order=0)
+        db.session.add(cat)
+        db.session.flush()
+    return cat.id
+
+
+def _get_or_create_supplier(name):
+    """查找或创建供应商，返回 supplier_id"""
+    if not name or not name.strip():
+        return None
+    name = name.strip()
+    from models import Supplier
+    sup = Supplier.query.filter_by(name=name).first()
+    if not sup:
+        sup = Supplier(name=name)
+        db.session.add(sup)
+        db.session.flush()
+    return sup.id
+
+
+def _get_or_create_manufacturer(name):
+    """查找或创建制造商，返回 manufacturer_id"""
+    if not name or not name.strip():
+        return None
+    name = name.strip()
+    from models import Manufacturer
+    mfr = Manufacturer.query.filter_by(name=name).first()
+    if not mfr:
+        mfr = Manufacturer(name=name)
+        db.session.add(mfr)
+        db.session.flush()
+    return mfr.id
+
+
 _FIELD_MAP = {
     'name': ['产品名称', '名称', '品名', 'name', 'product'],
     'sku': ['编号', 'sku', '编码', '货号', '产品编号', '料号'],
@@ -716,6 +760,10 @@ _FIELD_MAP = {
     'function_desc': ['功能描述'],
     'remark': ['备注', '说明', 'remark'],
     'image_url': ['图片', 'image', 'image_url', '产品图片'],
+    'model': ['型号', '产品型号', 'model', '型号/规格'],
+    'manufacturer': ['制造商', '品牌', 'manufacturer', '厂家', '生产商'],
+    'product_url': ['产品链接', '官网链接', 'product_url', '链接'],
+    'status': ['状态', 'status'],
 }
 
 
@@ -793,7 +841,7 @@ def _extract_embedded_image(emb_img):
         return ''
 
 
-def _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supplier_ref):
+def _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supplier_ref, rows=None, header_row_idx=0):
     """处理单行数据，返回 (Product对象, error_string_or_None)"""
     name_idx = col_idx['name']
     name = str(row[name_idx]).strip() if name_idx >= 0 and name_idx < len(row) and row[name_idx] else ''
@@ -830,6 +878,54 @@ def _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supp
         remark=str(row[col_idx['remark']]).strip() if col_idx.get('remark', -1) >= 0 and col_idx['remark'] < len(row) and row[col_idx['remark']] else '',
         created_by=g.current_user.id if hasattr(g, 'current_user') and g.current_user else None,
     )
+
+    # v2.6.0: populate new columns
+    # model from dedicated column or spec
+    model_idx = col_idx.get('model', -1)
+    if model_idx >= 0 and model_idx < len(row) and row[model_idx]:
+        product.model = str(row[model_idx]).strip()
+    elif spec_val:
+        product.model = spec_val[:100]
+
+    # category_id from sheet name (auto-create if missing)
+    product.category_id = _get_or_create_category(sheet_name)
+
+    # supplier_id (auto-create if missing)
+    if sup_val:
+        product.supplier_id = _get_or_create_supplier(sup_val)
+
+    # manufacturer_id (auto-create if missing)
+    mfr_idx = col_idx.get('manufacturer', -1)
+    if mfr_idx >= 0 and mfr_idx < len(row) and row[mfr_idx]:
+        mfr_name = str(row[mfr_idx]).strip()
+        product.manufacturer_id = _get_or_create_manufacturer(mfr_name)
+
+    # product_url
+    url_idx = col_idx.get('product_url', -1)
+    if url_idx >= 0 and url_idx < len(row) and row[url_idx]:
+        product.product_url = str(row[url_idx]).strip()[:500]
+
+    # status
+    status_idx = col_idx.get('status', -1)
+    if status_idx >= 0 and status_idx < len(row) and row[status_idx]:
+        status_val = str(row[status_idx]).strip().lower()
+        if status_val in ('active', 'archived', 'discontinued', 'planned', '在售', '停售', '规划中'):
+            status_map = {'在售': 'active', '停售': 'discontinued', '规划中': 'planned'}
+            product.status = status_map.get(status_val, status_val)
+
+    # specs JSON: store any unrecognized columns as custom specs
+    extra_specs = {}
+    known_indices = set(v for v in col_idx.values() if v >= 0)
+    known_indices.add(col_idx.get('image_url', -1))
+    if rows is not None:
+        for i, cell in enumerate(row):
+            if i not in known_indices and cell is not None and str(cell).strip():
+                header = rows[header_row_idx][i] if header_row_idx < len(rows) and i < len(rows[header_row_idx]) else ''
+                key = str(header).strip() if header else f'_col_{i}'
+                if key and key not in ('None', ''):
+                    extra_specs[key] = str(cell).strip()
+    if extra_specs:
+        product.specs = json.dumps(extra_specs, ensure_ascii=False)
 
     # 提取图片：嵌入图片优先，URL 文本次之
     if col_idx.get('image_url', -1) >= 0:
@@ -878,7 +974,7 @@ def _import_all_sheets(wb):
             if first_col in ('小计', '合计', '总计', 'subtotal', 'total', '注', '备注'):
                 continue
             try:
-                product, err = _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supplier_ref)
+                product, err = _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supplier_ref, rows, header_row_idx)
                 if product:
                     db.session.add(product)
                     imported += 1
@@ -906,14 +1002,33 @@ def export_all_products():
     products = query.order_by(Product.id.asc()).all()
 
     wb = openpyxl.Workbook()
+
+    # Preload category names
+    cat_ids = set(p.category_id for p in products if p.category_id)
+    cat_map = {}
+    if cat_ids:
+        from models import DeviceCategory
+        cats = DeviceCategory.query.filter(DeviceCategory.id.in_(cat_ids)).all()
+        cat_map = {c.id: c.name for c in cats}
+
+    # Preload manufacturer names
+    mfr_ids = set(p.manufacturer_id for p in products if p.manufacturer_id)
+    mfr_map = {}
+    if mfr_ids:
+        from models import Manufacturer
+        mfrs = Manufacturer.query.filter(Manufacturer.id.in_(mfr_ids)).all()
+        mfr_map = {m.id: m for m in mfrs}
+
     # 按 category 分 Sheet，未分类放「未分类」
     sheet_map = {}
     for p in products:
-        cats = [c.strip() for c in (p.category or '').split(',') if c.strip()] or ['未分类']
-        for cat in cats:
-            if cat not in sheet_map:
-                sheet_map[cat] = []
-            sheet_map[cat].append(p)
+        # Use new category name if available, else old string, else '未分类'
+        cat_name = cat_map.get(p.category_id) if p.category_id else None
+        if not cat_name:
+            cat_name = (p.category or '').strip() or '未分类'
+        if cat_name not in sheet_map:
+            sheet_map[cat_name] = []
+        sheet_map[cat_name].append(p)
 
     header_font = Font(bold=True, size=11)
     center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -921,7 +1036,7 @@ def export_all_products():
 
     for sheet_name, prods in sheet_map.items():
         ws = wb.create_sheet(title=sheet_name[:31])
-        headers = ['产品名称', '规格型号', '功能描述', '备注', '供应商', '单价', '成本价', '单位']
+        headers = ['产品名称', '型号', '规格型号', '功能描述', '备注', '供应商', '制造商', '单价', '成本价', '单位', '状态']
         if is_admin:
             headers.append('创建者')
         ws.append(headers)
@@ -929,22 +1044,30 @@ def export_all_products():
             cell = ws.cell(row=1, column=col)
             cell.font = header_font
             cell.alignment = center_align
-        widths = [20, 25, 30, 20, 15, 10, 10, 8]
+        widths = [20, 15, 20, 30, 20, 15, 15, 10, 10, 8, 10]
         if is_admin:
             widths.append(10)
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
         for p in prods:
+            # Get manufacturer name
+            mfr_name = ''
+            if p.manufacturer_id and p.manufacturer_id in mfr_map:
+                mfr_name = mfr_map[p.manufacturer_id].name if hasattr(mfr_map[p.manufacturer_id], 'name') else ''
+
             row_data = [
                 p.name or '',
+                p.model or '',
                 p.spec or '',
                 p.function_desc or '',
                 p.remark or '',
-                p.supplier or '',
+                p.supplier or '',  # old string fallback
+                mfr_name,
                 p.price or 0,
                 p.cost_price or 0,
                 p.unit or '',
+                p.status or 'active',
             ]
             if is_admin:
                 creator = ''
