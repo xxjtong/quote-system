@@ -114,7 +114,7 @@ def parse_reply_actions(reply_text):
         name_pos = text.find(name[:10]) if len(name) >= 10 else text.find(name)
         if name_pos >= 0:
             nearby = text[name_pos:name_pos + 200]
-            m = re.search(r'型号[：:]\s*([A-Za-z0-9\-/]+(?:\s*[A-Za-z0-9\-/]+)*)', nearby)
+            m = re.search(r'型号[：:]\s*([A-Za-z0-9\-]+(?:[\/][A-Za-z0-9\-]+)*)', nearby)
             if m:
                 p['model'] = m.group(1).strip()[:30]
         if 'model' not in p:
