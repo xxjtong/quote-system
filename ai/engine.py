@@ -42,10 +42,18 @@ class LlmEngine:
         providers_to_try = [mapping['provider']] if mapping else []
         providers_to_try += [p for p in FALLBACK_CHAIN if p not in providers_to_try]
 
+        # 每个 provider 的默认模型（降级时用）
+        _PROVIDER_DEFAULT_MODEL = {
+            'deepseek': 'deepseek-chat',
+            'xiaomi': 'mimo-v2.5-pro',
+        }
+
         last_err = None
         for p in providers_to_try:
             try:
-                cfg = self._cfg_for(p, mapping['model'] if mapping else model_id)
+                # 同 provider 用原模型名，切 provider 用新 provider 的默认模型
+                model = mapping['model'] if mapping and p == mapping['provider'] else _PROVIDER_DEFAULT_MODEL.get(p, model_id)
+                cfg = self._cfg_for(p, model)
                 if stream:
                     return self._do_stream(cfg, messages, tools, kwargs)
                 else:
