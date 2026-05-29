@@ -43,7 +43,8 @@ function navOrRefresh(tab) {
 // ─── Tabs ───
 const tabs = [
   { id: 'dashboard', label: '首页', icon: 'bi bi-speedometer2' },
-  { id: 'products', label: '产品管理', icon: 'bi bi-box-seam' },
+  { id: 'products', label: '报价产品管理', icon: 'bi bi-box-seam' },
+  { id: 'productsDb', label: '产品数据库', icon: 'bi bi-database', adminOnly: true },
   { id: 'quotes', label: '报价管理', icon: 'bi bi-file-earmark-text', badge: '+' },
   { id: 'import', label: '导入导出', icon: 'bi bi-upload' },
   { id: 'dicts', label: '字典管理', icon: 'bi bi-book', adminOnly: true },
@@ -52,9 +53,10 @@ const tabs = [
 ]
 
 const titles = {
-  dashboard: '首页', products: '产品管理', quotes: '报价管理',
+  dashboard: '首页', products: '报价产品管理', quotes: '报价管理',
   newquote: '新建报价单', import: '导入导出', dicts: '字典管理', categories: '分类管理', admin: '管理',
   compare: '产品对比', specSheet: '规格书',
+  productsDb: '产品数据库', productsDbNew: '新增产品', productsDbEdit: '编辑产品', productsDbDetail: '产品详情',
   login: '登录'
 }
 

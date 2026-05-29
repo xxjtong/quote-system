@@ -57,6 +57,7 @@ const dictData = reactive({
   commMethods: [], commProtocols: [], powerSupplies: [],
   hardwareInterfaces: [], sensorMetrics: [], manufacturers: [],
 })
+const categoryTree = ref([])
 
 onMounted(async () => {
   await loadAllDicts()
@@ -64,16 +65,27 @@ onMounted(async () => {
 
 async function loadAllDicts() {
   try {
-    const [cm, cp, ps, sm, mf] = await Promise.all([
+    const [cm, cp, ps, sm, mf, cats] = await Promise.all([
       dicts.commMethods(), dicts.commProtocols(), dicts.powerSupplies(),
-      dicts.sensorMetrics(), dicts.manufacturers(),
+      dicts.sensorMetrics(), dicts.manufacturers(), catApi.tree(),
     ])
     dictData.commMethods = cm?.items || []
     dictData.commProtocols = cp?.items || []
     dictData.powerSupplies = ps?.items || []
     dictData.sensorMetrics = sm?.items || []
     dictData.manufacturers = mf?.items || []
+    categoryTree.value = cats?.tree || []
   } catch (e) { /* silent */ }
+}
+
+// Flatten category tree for select options
+function flattenCategories(nodes, level = 0) {
+  let result = []
+  for (const n of nodes) {
+    result.push({ id: n.id, name: '  '.repeat(level) + n.name })
+    if (n.children?.length) result = result.concat(flattenCategories(n.children, level + 1))
+  }
+  return result
 }
 
 watch(() => advancedData.category_id, async (catId) => {
@@ -83,6 +95,10 @@ watch(() => advancedData.category_id, async (catId) => {
     specDefs.value = r?.items || []
   } catch (e) { /* silent */ }
 })
+
+function onCategoryIdChange() {
+  // spec loading handled by the watch above
+}
 
 // ─── Watch product prop → populate form ───
 watch(() => props.show, (visible) => {
@@ -341,7 +357,7 @@ async function saveProduct() {
 
             <div class="tab-content">
               <!-- Basic Tab -->
-              <div class="tab-pane" v-show="activeTab==='basic'">
+              <div :style="{ display: activeTab === 'basic' ? 'block' : 'none' }">
                 <div class="row g-2">
                   <div class="col-md-6">
                     <label class="form-label-modern">产品名称 <span class="text-danger">*</span></label>
@@ -353,6 +369,13 @@ async function saveProduct() {
                     <datalist id="catList">
                       <option v-for="c in categories" :key="c" :value="c"></option>
                     </datalist>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label-modern">设备分类 <small class="text-muted">(触发高级规格)</small></label>
+                    <select class="form-select" v-model.number="advancedData.category_id" @change="onCategoryIdChange">
+                      <option :value="null">-- 无 --</option>
+                      <option v-for="c in flattenCategories(categoryTree)" :key="c.id" :value="c.id">{{ c.name }}</option>
+                    </select>
                   </div>
                   <div class="col-md-6">
                     <label class="form-label-modern">厂商</label>
@@ -419,7 +442,7 @@ async function saveProduct() {
               </div>
 
               <!-- Specs Tab -->
-              <div class="tab-pane" v-show="activeTab==='specs'">
+              <div :style="{ display: activeTab === 'specs' ? 'block' : 'none' }">
                 <SpecFieldGroup
                   :specDefs="specDefs"
                   :modelValue="advancedData.specs"
@@ -428,7 +451,7 @@ async function saveProduct() {
               </div>
 
               <!-- Params Tab -->
-              <div class="tab-pane" v-show="activeTab==='params'">
+              <div :style="{ display: activeTab === 'params' ? 'block' : 'none' }">
                 <M2MSelector
                   :dictItems="dictData.commMethods"
                   :selectedItems="advancedData.comm_methods"
@@ -467,7 +490,7 @@ async function saveProduct() {
               </div>
 
               <!-- Images Tab -->
-              <div class="tab-pane" v-show="activeTab==='images'">
+              <div :style="{ display: activeTab === 'images' ? 'block' : 'none' }">
                 <MultiImageUpload
                   :images="advancedData.images"
                   @update:images="advancedData.images = $event"
