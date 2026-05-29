@@ -270,14 +270,18 @@ def ai_chat():
             msg = resp['choices'][0]['message']
             if not msg.get('tool_calls'):
                 reply = msg.get('content', '') or ''
+                sm.add_message(conv_pk, 'assistant', reply)
                 break
+            sm.add_message(conv_pk, 'assistant', msg.get('content') or '', tool_calls=msg['tool_calls'])
             loop_messages.append({'role': 'assistant', 'content': msg.get('content'), 'tool_calls': msg['tool_calls']})
             for tc in msg['tool_calls']:
                 fn = tc['function']
                 try: args = _json.loads(fn['arguments'])
                 except Exception: args = {}
                 result = agent.tools.execute(fn['name'], args)
-                loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': _json.dumps(result, ensure_ascii=False)})
+                result_str = _json.dumps(result, ensure_ascii=False)
+                sm.add_message(conv_pk, 'tool', result_str, tool_call_id=tc.get('id', ''), name=fn['name'])
+                loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': result_str})
         if not reply:
             reply = '抱歉，AI 暂时无法回答。'
         parsed = parse_reply_actions(reply)
