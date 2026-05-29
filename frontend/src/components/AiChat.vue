@@ -312,6 +312,14 @@ function createQuoteFromProducts(products) {
 
 // Handle quick reply button
 function quickReply(text) {
+  if (text === '创建报价单' || text === '一键创建报价') {
+    // 找到最后一条 AI 消息中的产品，跳转新建报价单
+    const lastAi = [...chatMessages.value].reverse().find(m => m.role === 'assistant' && m.parsed?.products?.length)
+    if (lastAi) {
+      createQuoteFromProducts(lastAi.parsed.products)
+      return
+    }
+  }
   sendMessage(text)
 }
 
