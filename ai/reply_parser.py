@@ -155,7 +155,9 @@ def parse_reply_actions(reply_text):
 
     # Pattern 7: 已创建报价单 #ID
     created_quote = None
-    created_match = re.search(r'(?:已创建|已生成|创建了?)\s*报价单?\s*#?(\d+)', text)
+    created_match = re.search(r'(?:已(?:成功)?创建|已生成|创建了?)\s*报价单?\s*#?(\d+)\s*|报价单\s*#?(\d+)\s*(?:已(?:成功)?创建|已生成)', text)
+    if created_match:
+        qid = int(created_match.group(1) or created_match.group(2))
     if created_match:
         qid = int(created_match.group(1))
         created_quote = {
