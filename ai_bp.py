@@ -194,25 +194,45 @@ def ai_chat():
 
     if stream:
         def generate():
-            with current_app.app_context():
-                # Direct engine call for first response (no tool loop for now)
-                try:
-                    engine = _get_engine()
-                    resp = engine.chat('deepseek-v4-flash', messages, tools=tool_defs, max_tokens=2000)
+            try:
+                engine = _get_engine()
+                yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
+
+                loop_messages = list(messages)
+                for turn in range(3):
+                    resp = engine.chat('deepseek-v4-flash', loop_messages, tools=tool_defs, max_tokens=2000)
                     msg = resp['choices'][0]['message']
-                    reply = msg.get('content', '')
-                    elapsed = time.time() - t0
-                    yield f'data: {_json.dumps({"type": "connect", "elapsed": f"{elapsed:.1f}s"})}\n\n'
-                    if reply:
-                        yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{elapsed:.1f}s"})}\n\n'
-                        for i in range(0, len(reply), 3):
-                            yield f'data: {_json.dumps({"type": "text", "text": reply[i:i+3]}, ensure_ascii=False)}\n\n'
-                    parsed = parse_reply_actions(reply)
-                    yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
-                except Exception as e:
-                    yield f'data: {_json.dumps({"type": "error", "error": str(e)})}\n\n'
-                finally:
-                    yield 'data: [DONE]\n\n'
+
+                    if not msg.get('tool_calls'):
+                        reply = msg.get('content', '')
+                        if reply:
+                            yield f'data: {_json.dumps({"type": "first_token", "ttft": f"{time.time()-t0:.1f}s"})}\n\n'
+                            for i in range(0, len(reply), 3):
+                                yield f'data: {_json.dumps({"type": "text", "text": reply[i:i+3]}, ensure_ascii=False)}\n\n'
+                        if turn > 0:
+                            yield f'data: {_json.dumps({"type": "tool"})}\n\n'
+                        parsed = parse_reply_actions(reply)
+                        yield f'data: {_json.dumps({"type": "done", "parsed": parsed, "elapsed": f"{time.time()-t0:.1f}s"}, ensure_ascii=False)}\n\n'
+                        return
+
+                    yield f'data: {_json.dumps({"type": "tool"})}\n\n'
+                    loop_messages.append({'role': 'assistant', 'content': msg.get('content'), 'tool_calls': msg['tool_calls']})
+                    for tc in msg['tool_calls']:
+                        fn = tc['function']
+                        try:
+                            args = _json.loads(fn['arguments'])
+                        except Exception:
+                            args = {}
+                        result = agent.tools.execute(fn['name'], args)
+                        loop_messages.append({'role': 'tool', 'tool_call_id': tc.get('id', ''), 'name': fn['name'], 'content': _json.dumps(result, ensure_ascii=False)})
+
+                yield f'data: {_json.dumps({"type": "done", "parsed": {}, "elapsed": f"{time.time()-t0:.1f}s"})}\n\n'
+            except Exception as e:
+                import traceback
+                err_msg = str(e)[:200]
+                yield f'data: {_json.dumps({"type": "error", "error": err_msg})}\n\n'
+            finally:
+                yield 'data: [DONE]\n\n'
 
         from utils import _log_ai_usage
         _log_ai_usage(user_id=uid, action='chat', model=model_id, elapsed=0, success=True)
@@ -221,7 +241,8 @@ def ai_chat():
 
     try:
         resp = _get_engine().chat('deepseek-v4-flash', messages, tools=tool_defs, max_tokens=2000)
-        reply = resp['choices'][0]['message'].get('content', '') or '抱歉，AI 暂时无法回答。'
+        msg = resp['choices'][0]['message']
+        reply = msg.get('content', '') or '抱歉，AI 暂时无法回答。'
         parsed = parse_reply_actions(reply)
         elapsed = time.time() - t0
 
