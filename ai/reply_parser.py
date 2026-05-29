@@ -153,13 +153,21 @@ def parse_reply_actions(reply_text):
             seen.add(short)
             unique_products.append(p)
 
-    # Pattern 7: 已创建报价单 #ID
+    # Pattern 7: 检测报价单创建（多模式匹配）
     created_quote = None
-    created_match = re.search(r'(?:已(?:成功)?创建|已生成|创建了?)\s*报价单?\s*#?(\d+)\s*|报价单\s*#?(\d+)\s*(?:已(?:成功)?创建|已生成)', text)
-    if created_match:
-        qid = int(created_match.group(1) or created_match.group(2))
-    if created_match:
-        qid = int(created_match.group(1))
+    qid = None
+    # 模式1: "已创建报价单 #123" 或 "报价单 #123 已成功创建"
+    m = re.search(r'(?:已(?:成功)?创建|已生成|创建了?)\s*报价单?\s*#?(\d+)', text)
+    if m: qid = int(m.group(1))
+    # 模式2: "报价单 #123 已成功创建"（倒装）
+    if not qid:
+        m = re.search(r'报价单\s*#?(\d+)\s*(?:已(?:成功)?创建|已生成)', text)
+        if m: qid = int(m.group(1))
+    # 模式3: 包含"草稿"且附近有#ID（报价单生成后都会有状态=草稿）
+    if not qid and '草稿' in text:
+        m = re.search(r'报价单\s*#?(\d+)', text)
+        if m: qid = int(m.group(1))
+    if qid:
         created_quote = {
             'id': qid,
             'download_url': f'/api/quotes/{qid}/export-excel',
