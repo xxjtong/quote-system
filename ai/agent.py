@@ -97,7 +97,9 @@ class Agent:
 
             if not msg.get('tool_calls'):
                 # No more tool calls — stream the final text response
-                final_text = msg.get('content', '')
+                final_text = msg.get('content', '') or ''
+                if not final_text and tool_called:
+                    final_text = '抱歉，查询过程中遇到问题，请尝试换个方式提问。'
                 if tool_called:
                     events.extend(SseAdapter.tool())
 
