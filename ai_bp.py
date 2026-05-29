@@ -34,6 +34,7 @@ from ai.context import ContextBuilder
 from ai.tools import ToolRegistry
 from ai.agent import Agent
 from ai.reply_parser import parse_reply_actions, generate_quick_replies
+from ai.context import _DEFAULT_PROMPT as _GW_SYSTEM_PROMPT  # admin_bp 需要
 
 _engine = None
 
