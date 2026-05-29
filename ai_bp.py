@@ -53,8 +53,9 @@ def _build_agent(user):
     return Agent(_get_engine(), tools), ctx
 
 def _quick_reply_llm(model_id, system_msg, user_msg, max_tokens):
+    # Quick reply 固定用 flash（任务简单，省 token）
     try:
-        resp = _get_engine().chat(model_id, [
+        resp = _get_engine().chat('deepseek-v4-flash', [
             {'role': 'system', 'content': system_msg},
             {'role': 'user', 'content': user_msg},
         ], max_tokens=max_tokens)
@@ -200,7 +201,7 @@ def ai_chat():
 
                 loop_messages = list(messages)
                 for turn in range(3):
-                    resp = engine.chat('deepseek-v4-flash', loop_messages, tools=tool_defs, max_tokens=2000)
+                    resp = engine.chat(model_id, loop_messages, tools=tool_defs, max_tokens=2000)
                     msg = resp['choices'][0]['message']
 
                     if not msg.get('tool_calls'):

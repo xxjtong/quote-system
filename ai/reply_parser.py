@@ -113,9 +113,11 @@ def parse_reply_actions(reply_text):
         name = (p.get('name') or '').strip()
         if not _valid_name(name):
             continue
-        key = (name, p.get('price'))
-        if key not in seen:
-            seen.add(key)
+        # Dedup by first 8 normalized chars (brand+prefix, ignores model suffix)
+        import re as _re
+        short = _re.sub(r'\s+', '', name)[:8]
+        if short not in seen:
+            seen.add(short)
             unique_products.append(p)
 
     return {
