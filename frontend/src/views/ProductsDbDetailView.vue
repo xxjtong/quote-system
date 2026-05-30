@@ -4,6 +4,9 @@
     <div class="page-header justify-content-between">
       <h5><i class="bi bi-database me-2"></i>{{ product?.name || '产品详情' }}</h5>
       <div style="display:flex;gap:8px">
+        <a v-if="product?.product_url" :href="product.product_url" target="_blank" class="btn btn-outline-primary btn-modern">
+          <i class="bi bi-link-45deg me-1"></i>产品链接
+        </a>
         <a v-if="product" :href="specSheetUrl" target="_blank" class="btn btn-outline-primary btn-modern">
           <i class="bi bi-file-text me-1"></i>规格书
         </a>
@@ -22,10 +25,10 @@
         <div class="card-modern">
           <div style="padding:12px">
             <img v-for="img in primaryImages" :key="img.id || img.url"
-              :src="img.url" style="max-height:180px;max-width:300px;border-radius:6px;border:1px solid #dee2e6" />
+              :src="getImageSrc(img.url)" style="max-height:180px;max-width:300px;border-radius:6px;border:1px solid #dee2e6" />
             <div v-if="product.images.length > 1" class="d-flex gap-2 flex-wrap mt-2">
               <img v-for="img in secondaryImages" :key="img.id || img.url"
-                :src="img.url" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:1px solid #dee2e6" />
+                :src="getImageSrc(img.url)" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:1px solid #dee2e6" />
             </div>
           </div>
         </div>
@@ -122,7 +125,7 @@
           <div>
             <table class="table table-modern">
               <thead>
-                <tr><th>方式</th><th>电压/规格</th><th>续航</th></tr>
+                <tr><th>方式</th><th>电池/电压/规格</th><th>续航/寿命</th></tr>
               </thead>
               <tbody>
                 <tr v-for="ps in product.power_supplies" :key="ps.power_id || ps.dict_id">
@@ -160,11 +163,11 @@
       <!-- Sensor Capabilities -->
       <div class="col-12" v-if="product.sensor_capabilities?.length">
         <div class="card-modern">
-          <div class="card-title-modern"><i class="bi bi-activity text-primary"></i>传感能力</div>
+          <div class="card-title-modern"><i class="bi bi-activity text-primary"></i>传感/控制能力</div>
           <div>
             <table class="table table-modern">
               <thead>
-                <tr><th>指标</th><th>单位</th><th>量程</th><th>精度</th><th>分辨率</th></tr>
+                <tr><th>指标</th><th>单位</th><th>量程/说明</th><th>精度</th><th>分辨率</th></tr>
               </thead>
               <tbody>
                 <tr v-for="sc in product.sensor_capabilities" :key="sc.metric_id || sc.dict_id">
@@ -282,6 +285,13 @@ import { useApi, BASE_URL } from '../composables/useApi'
 import { useAdvancedApi } from '../composables/useAdvancedApi'
 import TagBadge from '../components/TagBadge.vue'
 
+const FLASK_DEV = import.meta.env.DEV ? 'http://127.0.0.1:5001' : ''
+function getImageSrc(url) {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return FLASK_DEV + url
+}
+
 const route = useRoute()
 const { api } = useApi()
 const { categories } = useAdvancedApi()
@@ -291,17 +301,21 @@ const specDefs = ref([])
 
 const specSheetUrl = computed(() => {
   if (!product.value?.id) return '#'
-  return (BASE_URL || '') + '/api/products/' + product.value.id + '/spec-sheet'
+  const token = localStorage.getItem('quote_token') || ''
+  return (BASE_URL || '') + '/api/products/' + product.value.id + '/spec-sheet?token=' + encodeURIComponent(token)
 })
 
 const primaryImages = computed(() => {
-  if (!product.value?.images) return []
-  return product.value.images.filter(i => i.is_primary)
+  if (!product.value?.images?.length) return []
+  const primaries = product.value.images.filter(i => i.is_primary)
+  if (primaries.length) return primaries
+  return [product.value.images[0]]  // fallback: first image
 })
 
 const secondaryImages = computed(() => {
-  if (!product.value?.images) return []
-  return product.value.images.filter(i => !i.is_primary)
+  if (!product.value?.images?.length) return []
+  const primarySet = new Set(primaryImages.value.map(i => i.id || i.url))
+  return product.value.images.filter(i => !primarySet.has(i.id || i.url))
 })
 
 const specGroups = computed(() => {

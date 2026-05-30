@@ -29,6 +29,8 @@ export function useAdvancedApi() {
     updateManufacturer: (id, data) => api(`/api/dicts/manufacturers/${id}`, 'PUT', data),
     deleteManufacturer: (id) => api(`/api/dicts/manufacturers/${id}`, 'DELETE'),
 
+    productTypes: () => api('/api/dicts/product-types'),
+
     suppliers: (search) => api(`/api/dicts/suppliers${search ? '?search=' + encodeURIComponent(search) : ''}`),
     createSupplier: (data) => api('/api/dicts/suppliers', 'POST', data),
     updateSupplier: (id, data) => api(`/api/dicts/suppliers/${id}`, 'PUT', data),

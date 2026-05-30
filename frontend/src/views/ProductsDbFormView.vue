@@ -32,19 +32,29 @@
                 <label class="form-label small">SKU</label>
                 <input class="form-control form-control-sm" v-model="form.sku" />
               </div>
-              <div class="col-md-4">
-                <label class="form-label small">品类 <span class="text-danger">*</span></label>
-                <select class="form-select form-select-sm" v-model="form.category_id" @change="onCategoryChange">
+              <div class="col-md-2">
+                <label class="form-label small">单位</label>
+                <input class="form-control form-control-sm" v-model="form.unit" placeholder="个/台/套" />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small">类型</label>
+                <select class="form-select form-select-sm" v-model="typeMode" @change="onTypeChange">
                   <option :value="null">—</option>
-                  <option v-for="c in flatCategories" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  <option v-for="t in productTypes" :key="t.id" :value="t.id">{{ t.name }}</option>
+                  <option value="__custom__">✏️ 手动输入...</option>
                 </select>
+                <input v-if="typeMode === '__custom__'" class="form-control form-control-sm mt-1"
+                  v-model="form.product_type_name" placeholder="输入产品类型" />
               </div>
               <div class="col-md-4">
                 <label class="form-label small">厂商</label>
-                <select class="form-select form-select-sm" v-model="form.manufacturer_id">
+                <select class="form-select form-select-sm" v-model="manufacturerMode" @change="onManufacturerChange">
                   <option :value="null">—</option>
                   <option v-for="m in manufacturers" :key="m.id" :value="m.id">{{ m.name }}</option>
+                  <option value="__custom__">✏️ 手动输入...</option>
                 </select>
+                <input v-if="manufacturerMode === '__custom__'" class="form-control form-control-sm mt-1"
+                  v-model="form.manufacturer_name" placeholder="输入厂商名称" />
               </div>
               <div class="col-md-4">
                 <label class="form-label small">供应商</label>
@@ -69,6 +79,25 @@
                   <option value="planned">规划中</option>
                 </select>
               </div>
+              <div class="col-md-6">
+                <label class="form-label small">产品链接</label>
+                <input class="form-control form-control-sm" v-model="form.product_url" placeholder="https://..." />
+            </div>
+            <div class="row g-2 mt-2">
+              <div class="col-12">
+                <label class="form-label small">品类标签（可多选）</label>
+                <div class="d-flex flex-wrap gap-1">
+                  <span v-for="c in flatCategories" :key="c.id"
+                    class="badge rounded-pill" style="cursor:pointer;font-size:.75rem"
+                    :class="form.category_ids.includes(c.id) ? 'bg-primary' : 'bg-light text-dark'"
+                    @click="toggleCategoryTag(c)">{{ c.name }}</span>
+                  <span class="badge rounded-pill bg-light text-dark" style="cursor:pointer;font-size:.75rem"
+                    @click="showCategoryInput = !showCategoryInput">✏️ +</span>
+                </div>
+                <input v-if="showCategoryInput" class="form-control form-control-sm mt-1"
+                  v-model="newCategoryName" placeholder="输入新品类名称，回车添加" @keyup.enter="addCategoryTag" />
+              </div>
+            </div>
             </div>
           </div>
         </div>
@@ -81,7 +110,7 @@
           <div style="padding:16px">
             <div v-if="form.images.length" class="d-flex gap-2 flex-wrap mb-2">
               <div v-for="(img, idx) in form.images" :key="idx" style="position:relative">
-                <img :src="img.url" style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #dee2e6" />
+                <img :src="getImageSrc(img.url)" style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #dee2e6" />
                 <button class="btn btn-sm py-0 px-1 position-absolute top-0 end-0"
                   style="background:rgba(255,255,255,.9);font-size:.65rem;line-height:1;border-radius:0 4px 0 4px"
                   @click="form.images.splice(idx, 1)">
@@ -116,10 +145,12 @@
               <tbody>
                 <tr v-for="(cm, idx) in form.comm_methods" :key="idx">
                   <td>
-                    <select class="form-select form-select-sm" v-model="cm.dict_id">
+                    <select v-if="cm.dict_id !== '__custom__'" class="form-select form-select-sm" v-model="cm.dict_id">
                       <option :value="null">—</option>
                       <option v-for="m in commMethods" :key="m.id" :value="m.id">{{ m.name }}</option>
+                      <option value="__custom__">✏️ 手动输入...</option>
                     </select>
+                    <input v-else class="form-control form-control-sm" v-model="cm._custom_name" placeholder="输入名称" />
                   </td>
                   <td><input class="form-control form-control-sm" v-model="cm.detail" placeholder="e.g. CN470 8通道" /></td>
                   <td><button class="btn btn-sm btn-outline-danger btn-sm-icon" @click="form.comm_methods.splice(idx, 1)"><i class="bi bi-trash"></i></button></td>
@@ -147,10 +178,12 @@
               <tbody>
                 <tr v-for="(cp, idx) in form.comm_protocols" :key="idx">
                   <td>
-                    <select class="form-select form-select-sm" v-model="cp.dict_id">
+                    <select v-if="cp.dict_id !== '__custom__'" class="form-select form-select-sm" v-model="cp.dict_id">
                       <option :value="null">—</option>
                       <option v-for="p in commProtocols" :key="p.id" :value="p.id">{{ p.name }}</option>
+                      <option value="__custom__">✏️ 手动输入...</option>
                     </select>
+                    <input v-else class="form-control form-control-sm" v-model="cp._custom_name" placeholder="输入名称" />
                   </td>
                   <td>
                     <select class="form-select form-select-sm" v-model="cp.direction">
@@ -179,15 +212,17 @@
           <div>
             <table class="table table-modern">
               <thead>
-                <tr><th style="width:150px">方式</th><th>电压/规格</th><th>续航</th><th style="width:40px"></th></tr>
+                <tr><th style="width:150px">方式</th><th>电压/电池/规格</th><th>续航/寿命</th><th style="width:40px"></th></tr>
               </thead>
               <tbody>
                 <tr v-for="(ps, idx) in form.power_supplies" :key="idx">
                   <td>
-                    <select class="form-select form-select-sm" v-model="ps.dict_id">
+                    <select v-if="ps.dict_id !== '__custom__'" class="form-select form-select-sm" v-model="ps.dict_id">
                       <option :value="null">—</option>
                       <option v-for="p in powerSupplies" :key="p.id" :value="p.id">{{ p.name }}</option>
+                      <option value="__custom__">✏️ 手动输入...</option>
                     </select>
+                    <input v-else class="form-control form-control-sm" v-model="ps._custom_name" placeholder="输入名称" />
                   </td>
                   <td><input class="form-control form-control-sm" v-model="ps.voltage_range" placeholder="e.g. 9-24V DC" /></td>
                   <td><input class="form-control form-control-sm" v-model="ps.battery_life" placeholder="e.g. 5年" /></td>
@@ -234,7 +269,7 @@
       <!-- Sensor Capabilities -->
       <div class="col-12">
         <div class="card-modern">
-          <div class="card-title-modern"><i class="bi bi-activity text-primary"></i>传感能力</div>
+          <div class="card-title-modern"><i class="bi bi-activity text-primary"></i>传感/控制/功能</div>
           <div>
             <table class="table table-modern">
               <thead>
@@ -243,10 +278,12 @@
               <tbody>
                 <tr v-for="(sc, idx) in form.sensor_capabilities" :key="idx">
                   <td>
-                    <select class="form-select form-select-sm" v-model="sc.dict_id">
+                    <select v-if="sc.dict_id !== '__custom__'" class="form-select form-select-sm" v-model="sc.dict_id">
                       <option :value="null">—</option>
                       <option v-for="m in sensorMetrics" :key="m.id" :value="m.id">{{ m.name }}</option>
+                      <option value="__custom__">✏️ 手动输入...</option>
                     </select>
+                    <input v-else class="form-control form-control-sm" v-model="sc._custom_name" placeholder="输入名称" />
                   </td>
                   <td><input class="form-control form-control-sm" v-model="sc.measure_range" placeholder="e.g. -20°C~60°C" /></td>
                   <td><input class="form-control form-control-sm" v-model="sc.accuracy" placeholder="e.g. ±0.2°C" /></td>
@@ -297,7 +334,8 @@
         <div class="card-modern">
         <div class="card-title-modern"><i class="bi bi-text-paragraph text-primary"></i>描述</div>
           <div style="padding:16px">
-            <textarea class="form-control" v-model="form.function_desc" rows="3" placeholder="功能描述"></textarea>
+            <textarea class="form-control" v-model="form.function_desc" rows="3" placeholder="功能描述（对客户可见）"></textarea>
+            <textarea class="form-control mt-2" v-model="form.remark" rows="2" placeholder="内部备注（仅内部可见）"></textarea>
           </div>
         </div>
       </div>
@@ -319,6 +357,13 @@ import { useAdvancedApi } from '../composables/useAdvancedApi'
 
 const route = useRoute()
 const router = useRouter()
+const FLASK_DEV = import.meta.env.DEV ? 'http://127.0.0.1:5001' : ''
+function getImageSrc(url) {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return FLASK_DEV + url
+}
+
 const toast = inject('toast')
 const { api } = useApi()
 const { dicts, categories, productAdvanced } = useAdvancedApi()
@@ -331,6 +376,7 @@ const loaded = ref(false)
 const flatCategories = ref([])
 const suppliers = ref([])
 const manufacturers = ref([])
+const productTypes = ref([])
 const commMethods = ref([])
 const commProtocols = ref([])
 const powerSupplies = ref([])
@@ -341,8 +387,11 @@ const imageUrlInput = ref('')
 const imageDownloading = ref(false)
 
 const form = ref({
-  name: '', model: '', sku: '', category_id: null, manufacturer_id: null, supplier_id: null,
+  name: '', model: '', sku: '', category: '', category_id: null,
+  category_ids: [], manufacturer_id: null, supplier_id: null,
   price: 0, cost_price: 0, function_desc: '', status: 'active', parent_id: null,
+  unit: '', product_url: '', remark: '', product_type_id: null,
+  manufacturer_name: '', product_type_name: '',
   comm_methods: [], comm_protocols: [], power_supplies: [],
   hardware_interfaces: [], sensor_capabilities: [], images: [],
   specs: {},
@@ -374,6 +423,62 @@ async function onFileSelect(e) {
     toast('上传失败', 'danger')
   }
   e.target.value = ''
+}
+
+const manufacturerMode = ref(null)
+const categoryMode = ref(null)
+const typeMode = ref(null)
+const showCategoryInput = ref(false)
+const newCategoryName = ref('')
+
+function toggleCategoryTag(c) {
+  const idx = form.value.category_ids.indexOf(c.id)
+  if (idx >= 0) form.value.category_ids.splice(idx, 1)
+  else form.value.category_ids.push(c.id)
+}
+
+function addCategoryTag() {
+  const name = newCategoryName.value.trim()
+  if (!name) return
+  const existing = flatCategories.value.find(c => c.name === name)
+  if (existing) {
+    if (!form.value.category_ids.includes(existing.id)) {
+      form.value.category_ids.push(existing.id)
+    }
+  }
+  newCategoryName.value = ''
+  showCategoryInput.value = false
+}
+
+function onTypeChange() {
+  if (typeMode.value === '__custom__') {
+    form.value.product_type_id = null
+    form.value.product_type_name = ''
+  } else {
+    form.value.product_type_id = typeMode.value
+    form.value.product_type_name = ''
+  }
+}
+
+function onManufacturerChange() {
+  if (manufacturerMode.value !== '__custom__') {
+    form.value.manufacturer_id = manufacturerMode.value
+    form.value.manufacturer_name = ''
+  } else {
+    form.value.manufacturer_id = null
+  }
+}
+
+function onCategoryChange2() {
+  if (categoryMode.value === '__custom__') {
+    form.value.category_id = null
+    form.value.category = ''
+  } else if (categoryMode.value !== null) {
+    const match = flatCategories.value.find(c => c.id === categoryMode.value)
+    form.value.category_id = categoryMode.value
+    form.value.category = match ? match.name : ''
+    onCategoryChange()
+  }
 }
 
 async function onDownloadImage() {
@@ -428,8 +533,14 @@ async function save() {
       name: form.value.name.trim(),
       model: form.value.model.trim(),
       sku: form.value.sku.trim(),
-      category_id: form.value.category_id,
+      category_id: form.value.category_ids[0] || null,
+      category: form.value.category_ids.map(id => {
+        const c = flatCategories.value.find(x => x.id === id)
+        return c ? c.name : ''
+      }).filter(Boolean).join(', '),
+      category_ids: form.value.category_ids,
       manufacturer_id: form.value.manufacturer_id,
+      manufacturer_name: form.value.manufacturer_name || '',
       supplier_id: form.value.supplier_id,
       price: form.value.price || 0,
       cost_price: form.value.cost_price || 0,
@@ -437,18 +548,38 @@ async function save() {
       status: form.value.status,
       parent_id: form.value.parent_id,
       specs: form.value.specs || {},
+      unit: form.value.unit || '',
+      product_url: form.value.product_url || '',
+      remark: form.value.remark || '',
+      product_type_id: form.value.product_type_id,
+      product_type_name: form.value.product_type_name || '',
     }
 
-    // Set primary image URL
-    const primaryImg = form.value.images.find(i => i.is_primary)
+    // Ensure first image is primary, set image_url from it
+    if (form.value.images.length && !form.value.images.some(i => i.is_primary)) {
+      form.value.images[0].is_primary = true
+    }
+    const primaryImg = form.value.images.find(i => i.is_primary) || form.value.images[0]
     if (primaryImg) payload.image_url = primaryImg.url
 
-    // Extract M2M data
+    // Extract M2M data (map dict_id → backend field names, handle __custom__)
     const comm_methods = form.value.comm_methods.filter(m => m.dict_id)
+      .map(m => m.dict_id === '__custom__'
+        ? { _custom_name: m._custom_name, details: m.detail || '' }
+        : { method_id: m.dict_id, details: m.detail || '' })
     const comm_protocols = form.value.comm_protocols.filter(m => m.dict_id)
+      .map(m => m.dict_id === '__custom__'
+        ? { _custom_name: m._custom_name, direction: m.direction || 'both' }
+        : { protocol_id: m.dict_id, direction: m.direction || 'both' })
     const power_supplies = form.value.power_supplies.filter(m => m.dict_id)
+      .map(m => m.dict_id === '__custom__'
+        ? { _custom_name: m._custom_name, voltage_range: m.voltage_range || '', battery_life: m.battery_life || '' }
+        : { power_id: m.dict_id, voltage_range: m.voltage_range || '', battery_life: m.battery_life || '' })
     const hardware_interfaces = form.value.hardware_interfaces.filter(i => i.interface_name)
     const sensor_capabilities = form.value.sensor_capabilities.filter(s => s.dict_id)
+      .map(s => s.dict_id === '__custom__'
+        ? { _custom_name: s._custom_name, measure_range: s.measure_range || '', accuracy: s.accuracy || '', resolution: s.resolution || '' }
+        : { metric_id: s.dict_id, measure_range: s.measure_range || '', accuracy: s.accuracy || '', resolution: s.resolution || '' })
     const images = form.value.images
 
     let productId
@@ -485,9 +616,10 @@ async function save() {
 // ─── Lifecycle ───
 onMounted(async () => {
   try {
-    const [catRes, supRes, mfgRes, cmRes, cpRes, psRes, smRes] = await Promise.all([
+    const [catRes, supRes, mfgRes, cmRes, cpRes, psRes, smRes, ptRes] = await Promise.all([
       categories.list(), dicts.suppliers(), dicts.manufacturers(),
       dicts.commMethods(), dicts.commProtocols(), dicts.powerSupplies(), dicts.sensorMetrics(),
+      dicts.productTypes(),
     ])
     const cats = catRes?.items || []
     flatCategories.value = flattenTree(cats)
@@ -497,6 +629,7 @@ onMounted(async () => {
     commProtocols.value = cpRes?.items || []
     powerSupplies.value = psRes?.items || []
     sensorMetrics.value = smRes?.items || []
+    productTypes.value = ptRes?.items || []
 
     if (isEdit.value) {
       const res = await api('/api/products/' + route.params.id)
@@ -504,12 +637,17 @@ onMounted(async () => {
       if (p) {
         form.value = {
           name: p.name || '', model: p.model || '', sku: p.sku || '',
+          category: p.category || p.category_name || '',
           category_id: p.category_id || null,
+          category_ids: (p.category_ids || []).slice(),
           manufacturer_id: p.manufacturer_id || null,
+          manufacturer_name: p.manufacturer_name || '',
           supplier_id: p.supplier_id || null,
           price: p.price || 0, cost_price: p.cost_price || 0,
           function_desc: p.function_desc || '', status: p.status || 'active',
           parent_id: p.parent_id || null,
+          unit: p.unit || '', product_url: p.product_url || '', remark: p.remark || '',
+          product_type_id: p.product_type_id || null,
           comm_methods: p.comm_methods || [],
           comm_protocols: p.comm_protocols || [],
           power_supplies: p.power_supplies || [],
@@ -519,6 +657,9 @@ onMounted(async () => {
           specs: { ...(p.specs || {}) },
         }
         if (p.category_id) await onCategoryChange()
+        manufacturerMode.value = p.manufacturer_id || (p.manufacturer_name && '__custom__') || null
+        categoryMode.value = p.category_id || null
+        typeMode.value = p.product_type_id || null
       }
     }
     loaded.value = true

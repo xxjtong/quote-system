@@ -5,10 +5,21 @@ import { formatMoney } from '../composables/useUtils'
 import { usePagination } from '../composables/usePagination'
 import TagBadge from './TagBadge.vue'
 
-const emit = defineEmits(['edit', 'view', 'delete', 'toggle-active', 'export-template'])
+const emit = defineEmits(['edit', 'view', 'delete', 'toggle-active', 'export-template', 'createQuote'])
+const props = defineProps({
+  manufacturers: { type: Array, default: () => [] },
+  categoryList: { type: Array, default: () => [] }
+})
 
 const toast = inject('toast')
 const { api, isAdmin, currentUser } = useApi()
+
+const FLASK_DEV = import.meta.env.DEV ? 'http://127.0.0.1:5001' : ''
+function getImageSrc(url) {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return FLASK_DEV + url
+}
 
 // ─── State ───
 const products = ref([])
@@ -21,6 +32,8 @@ const { currentPage, perPage, totalItems, totalPages, pageNumbers, goPage, reset
 const searchTerm = ref('')
 const categoryFilter = ref('')
 const supplierFilter = ref('')
+const manufacturerFilter = ref('')
+const manufacturerList = computed(() => props.manufacturers || [])
 const selectedIds = reactive(new Set())
 const sortBy = ref('id')
 const sortOrder = ref('desc')
@@ -65,8 +78,9 @@ async function fetchProducts() {
       sort_order: sortOrder.value,
     })
     if (searchTerm.value) params.set('search', searchTerm.value)
-    if (categoryFilter.value) params.set('category', categoryFilter.value)
+    if (categoryFilter.value) params.set('category_id', categoryFilter.value)
     if (supplierFilter.value) params.set('supplier', supplierFilter.value)
+    if (manufacturerFilter.value) params.set('manufacturer_id', manufacturerFilter.value)
 
     const data = await api(`/api/products?${params}`)
     if (!data.error) {
@@ -98,9 +112,7 @@ function productTooltip(p) {
 }
 
 // ─── Select all / single ───
-const selectableProducts = computed(() =>
-  isAdmin() ? products.value : products.value.filter(p => p.created_by === currentUser.value?.id)
-)
+const selectableProducts = computed(() => products.value)
 const allSelected = computed(() =>
   selectableProducts.value.length > 0 && selectableProducts.value.every(p => selectedIds.has(p.id))
 )
@@ -185,14 +197,14 @@ onMounted(() => {
         <select class="form-select form-select-sm" style="border-radius:8px"
           v-model="categoryFilter" @change="currentPage = 1; fetchProducts()">
           <option value="">全部分类</option>
-          <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
+          <option v-for="c in categoryList" :key="c.id" :value="c.id">{{ c.name }}</option>
         </select>
       </div>
       <div class="col-md-2">
         <select class="form-select form-select-sm" style="border-radius:8px"
-          v-model="supplierFilter" @change="currentPage = 1; fetchProducts()">
+          v-model="manufacturerFilter" @change="currentPage = 1; fetchProducts()">
           <option value="">全部厂商</option>
-          <option v-for="s in suppliers" :key="s" :value="s">{{ s }}</option>
+          <option v-for="m in manufacturerList" :key="m.id" :value="m.id">{{ m.name }}</option>
         </select>
       </div>
       <div class="col-md-3 d-flex justify-content-md-end align-items-center gap-2" style="flex-wrap:wrap">
@@ -211,8 +223,8 @@ onMounted(() => {
     <div v-if="selectedIds.size > 0" class="d-flex align-items-center gap-2 p-2 rounded mb-3" style="position:sticky;top:0;z-index:10;background:var(--primary);color:#fff">
       <i class="bi bi-check2-square me-1"></i>
       <span class="small fw-medium">已选 {{ selectedIds.size }} 个产品</span>
-      <button class="btn btn-sm btn-light btn-modern ms-2" @click="batchDelete">
-        <i class="bi bi-trash"></i> 批量删除
+      <button class="btn btn-sm btn-light btn-modern ms-2" @click="$emit('createQuote', [...selectedIds])">
+        <i class="bi bi-file-earmark-text"></i> 新建报价单
       </button>
       <button class="btn btn-sm btn-outline-light btn-modern" @click="selectedIds.clear()">
         取消选择
@@ -238,9 +250,6 @@ onMounted(() => {
             <th>产品名称</th>
             <th class="d-none d-md-table-cell">型号</th>
             <th class="d-none d-md-table-cell">分类</th>
-            <th class="d-none d-md-table-cell">制造商</th>
-            <th class="d-none d-md-table-cell">厂商</th>
-            <th class="d-none d-md-table-cell">通讯</th>
             <th>销售单价</th>
             <th class="d-none d-md-table-cell">状态</th>
             <th>操作</th>
@@ -248,7 +257,7 @@ onMounted(() => {
         </thead>
         <tbody>
           <tr v-if="products.length === 0">
-            <td colspan="10">
+            <td colspan="7">
               <div class="empty-state">
                 <i class="bi bi-inbox"></i>
                 <p>暂无产品</p>
@@ -257,15 +266,20 @@ onMounted(() => {
             </td>
           </tr>
           <tr v-for="p in products" :key="p.id" :class="{ 'opacity-50': !p.is_active }">
-            <td v-if="isAdmin() || p.created_by === currentUser?.id">
+            <td>
               <input type="checkbox" class="form-check-input product-check"
                 :checked="selectedIds.has(p.id)"
                 @change="toggleSelect(p.id)">
             </td>
-            <td v-else></td>
             <td style="cursor:pointer" @click="$emit('view', p)">
-              <div class="text-truncate fw-medium" style="max-width:200px;color:var(--gray-800)">{{ p.name }}</div>
-              <div v-if="p.function_desc" class="text-truncate small text-muted" style="max-width:200px">{{ p.function_desc }}</div>
+              <div class="d-flex align-items-center gap-2">
+                <img v-if="p.image_url" :src="getImageSrc(p.image_url)"
+                  style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid #dee2e6;flex-shrink:0" />
+                <div>
+                  <div class="text-truncate fw-medium" style="max-width:200px;color:var(--gray-800)">{{ p.name }}</div>
+                  <div v-if="p.function_desc" class="text-truncate small text-muted" style="max-width:200px">{{ p.function_desc }}</div>
+                </div>
+              </div>
             </td>
             <!-- 型号 -->
             <td class="d-none d-md-table-cell">
@@ -275,20 +289,6 @@ onMounted(() => {
             <td class="d-none d-md-table-cell">
               <span v-if="p.category_name || p.category" class="badge bg-light text-dark" style="font-weight:400">{{ p.category_name || p.category }}</span>
               <span v-else class="text-muted">—</span>
-            </td>
-            <!-- 制造商 -->
-            <td class="d-none d-md-table-cell">
-              <span class="text-truncate d-inline-block" style="max-width:100px">{{ p.manufacturer_name || '—' }}</span>
-            </td>
-            <!-- 厂商 -->
-            <td class="td-name d-none d-md-table-cell" style="max-width:100px">{{ p.supplier_name || p.supplier || '—' }}</td>
-            <!-- 通讯 -->
-            <td class="d-none d-md-table-cell">
-              <span v-for="cm in (p.comm_methods || []).slice(0, 2)" :key="cm.id">
-                <TagBadge :label="cm.dict_name" />
-              </span>
-              <span v-if="p.comm_methods && p.comm_methods.length > 2" class="text-muted small ms-1">+{{ p.comm_methods.length - 2 }}</span>
-              <span v-if="!p.comm_methods || p.comm_methods.length === 0" class="text-muted">—</span>
             </td>
             <td class="text-end fw-medium">{{ formatMoney(p.price) }}</td>
             <!-- 状态 -->
@@ -301,9 +301,6 @@ onMounted(() => {
             </td>
             <td v-if="isAdmin() || p.created_by === currentUser?.id">
               <div class="d-flex gap-1">
-                <button class="btn btn-sm btn-outline-primary btn-sm-icon" @click="$emit('edit', p)" title="编辑">
-                  <i class="bi bi-pencil"></i>
-                </button>
                 <button v-if="isAdmin()" class="btn btn-sm btn-outline-warning btn-sm-icon"
                   @click="toggleActive(p.id)" :title="p.is_active ? '停用' : '恢复'">
                   <i :class="p.is_active ? 'bi bi-eye-slash' : 'bi bi-eye'"></i>

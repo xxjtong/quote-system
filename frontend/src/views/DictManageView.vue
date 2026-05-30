@@ -10,7 +10,7 @@ const tabs = [
   { id: 'commMethods', label: '通讯方式' },
   { id: 'commProtocols', label: '通讯协议' },
   { id: 'powerSupplies', label: '供电方式' },
-  { id: 'sensorMetrics', label: '传感指标' },
+  { id: 'sensorMetrics', label: '传感/控制功能' },
   { id: 'manufacturers', label: '制造商' },
   { id: 'suppliers', label: '供应商' },
 ]

@@ -15,9 +15,9 @@ from utils import _debug_log, _safe_number
 BASE_DIR = Path(__file__).parent
 
 
-def compress_image_if_needed(filepath, max_kb=95, max_dim=800):
+def compress_image_if_needed(filepath, max_kb=100, max_dim=1200):
     """压缩图片到指定大小以内，返回最终路径和文件名。
-    透明PNG自动贴白底转JPG。"""
+    透明PNG自动贴白底转JPG。同时生成缩略图。"""
     from PIL import Image
     filepath = Path(filepath)
     img = Image.open(str(filepath))
@@ -56,7 +56,7 @@ def compress_image_if_needed(filepath, max_kb=95, max_dim=800):
         img.save(str(out_path), 'JPEG', quality=85, optimize=True)
     else:
         # 渐进降质量
-        for quality in [75, 65, 55, 45, 35, 25]:
+        for quality in [85, 75, 65, 55, 50]:
             img.save(str(out_path), 'JPEG', quality=quality, optimize=True)
             if out_path.stat().st_size / 1024 <= max_kb:
                 break
@@ -64,6 +64,15 @@ def compress_image_if_needed(filepath, max_kb=95, max_dim=800):
     # 删除原始文件（如果扩展名变了）
     if out_path.suffix != filepath.suffix:
         filepath.unlink(missing_ok=True)
+
+    # 生成缩略图 64px
+    thumb_path = out_path.parent / f'{out_path.stem}_thumb.jpg'
+    try:
+        thumb = Image.open(str(out_path))
+        thumb.thumbnail((64, 64), Image.LANCZOS)
+        thumb.save(str(thumb_path), 'JPEG', quality=70, optimize=True)
+    except Exception:
+        pass
 
     return str(out_path), out_path.name
 

@@ -138,6 +138,8 @@ def check_auth():
         return None
     if not request.path.startswith('/api/') and not request.path.startswith('/uploads/'):
         return None
+    if request.path.startswith('/uploads/'):
+        return None  # 静态上传文件无需认证
     # 提取路由名
     endpoint = request.endpoint
     if endpoint in PUBLIC_ROUTES or (endpoint and endpoint.startswith('static')):

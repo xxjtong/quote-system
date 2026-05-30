@@ -21,6 +21,10 @@ const router = useRouter()
 const toast = inject('toast')
 const { productAdvanced } = useAdvancedApi()
 
+function directionLabel(d) {
+  return { acquisition: '采集', forwarding: '转发', both: '双向' }[d] || d || ''
+}
+
 // Comparison
 const compareIds = ref([])
 try {
@@ -56,6 +60,10 @@ function imageThumbSrc(imgUrl) {
   if (imgUrl.startsWith('http')) return imgUrl
   const token = authToken.value
   return BASE_URL + imgUrl + (token ? '?token=' + token : '')
+}
+
+function openImage(url) {
+  if (url) window.open(url, '_blank')
 }
 
 function openSpecSheet() {
@@ -99,22 +107,17 @@ function onEdit() {
             <button type="button" class="btn-close" @click="close"></button>
           </div>
           <div class="modal-body">
-            <div class="text-center mb-3">
-              <img v-if="product.has_image || product.image_url" :src="detailImageSrc(product)"
-                style="max-width:400px;max-height:300px;object-fit:contain;border-radius:8px;border:1px solid var(--gray-200)">
-              <div v-else class="text-muted py-3"><i class="bi bi-image" style="font-size:2rem"></i><p class="small mt-1">暂无图片</p></div>
-            </div>
             <table class="table table-sm" style="font-size:.85rem">
               <tbody>
-                <tr><td class="text-muted" style="width:80px">分类</td><td class="fw-medium">{{ product.category_name || product.category || '—' }}</td></tr>
+                <tr v-if="(product.category_names || []).length > 0">
+                  <td class="text-muted" style="width:80px">品类</td>
+                  <td><span v-for="c in product.category_names" :key="c" class="badge bg-light text-dark me-1">{{ c }}</span></td>
+                </tr>
                 <tr><td class="text-muted">型号</td><td>{{ product.model || product.spec || '—' }}</td></tr>
                 <tr><td class="text-muted">单位</td><td>{{ product.unit || '—' }}</td></tr>
-                <tr><td class="text-muted">制造商</td><td>{{ product.manufacturer_name || '—' }}</td></tr>
-                <tr><td class="text-muted">厂商</td><td>{{ product.supplier_name || product.supplier || '—' }}</td></tr>
+                <tr><td class="text-muted">厂商</td><td>{{ product.manufacturer_name || product.supplier_name || '—' }}</td></tr>
                 <tr><td class="text-muted">销售单价</td><td class="fw-medium text-primary">{{ formatMoney(product.price) }}</td></tr>
-                <tr v-if="isAdmin() && product.cost_price"><td class="text-muted">成本价</td><td>¥{{ product.cost_price }}</td></tr>
-                <tr v-if="product.function_desc"><td class="text-muted">功能描述</td><td>{{ product.function_desc }}</td></tr>
-                <tr v-if="product.remark"><td class="text-muted">备注</td><td>{{ product.remark }}</td></tr>
+                <tr v-if="product.cost_price"><td class="text-muted">成本价</td><td>¥{{ product.cost_price }}</td></tr>
               </tbody>
             </table>
 
@@ -140,54 +143,75 @@ function onEdit() {
               </h6>
               <details v-if="hasM2MData(product.comm_methods)" class="mb-1">
                 <summary class="small fw-medium text-secondary" style="cursor:pointer">通讯方式 ({{ product.comm_methods.length }})</summary>
-                <div class="mt-1 small" v-for="cm in product.comm_methods" :key="cm.id">
-                  <TagBadge :label="cm.dict_name" />
-                  <span v-if="cm.detail" class="text-muted">{{ cm.detail }}</span>
+                <div class="mt-1 small" v-for="cm in product.comm_methods" :key="cm.method_id || cm.dict_id">
+                  <TagBadge :label="cm.method_name || cm.dict_name" />
+                  <span v-if="cm.details || cm.detail" class="text-muted">{{ cm.details || cm.detail }}</span>
                 </div>
               </details>
               <details v-if="hasM2MData(product.comm_protocols)" class="mb-1">
                 <summary class="small fw-medium text-secondary" style="cursor:pointer">通讯协议 ({{ product.comm_protocols.length }})</summary>
-                <div class="mt-1 small" v-for="cp in product.comm_protocols" :key="cp.id">
-                  <span class="badge bg-info me-1">{{ cp.dict_name }}</span>
-                  <span v-if="cp.detail" class="text-muted">{{ cp.detail }}</span>
+                <div class="mt-1 small" v-for="cp in product.comm_protocols" :key="cp.protocol_id || cp.dict_id">
+                  <TagBadge :label="cp.protocol_name || cp.dict_name" />
+                  <span v-if="cp.direction" class="text-muted ms-1">{{ directionLabel(cp.direction) }}</span>
                 </div>
               </details>
               <details v-if="hasM2MData(product.power_supplies)" class="mb-1">
                 <summary class="small fw-medium text-secondary" style="cursor:pointer">供电方式 ({{ product.power_supplies.length }})</summary>
-                <div class="mt-1 small" v-for="ps in product.power_supplies" :key="ps.id">
-                  <span class="badge bg-warning text-dark me-1">{{ ps.dict_name }}</span>
-                  <span v-if="ps.voltage" class="text-muted me-1">电压: {{ ps.voltage }}</span>
-                  <span v-if="ps.power" class="text-muted">功率: {{ ps.power }}</span>
+                <div class="mt-1 small" v-for="ps in product.power_supplies" :key="ps.power_id || ps.dict_id">
+                  <TagBadge :label="ps.power_name || ps.dict_name" />
+                  <span v-if="ps.voltage_range" class="text-muted ms-1">{{ ps.voltage_range }}</span>
+                  <span v-if="ps.battery_life" class="text-muted ms-1">· {{ ps.battery_life }}</span>
                 </div>
               </details>
               <details v-if="hasM2MData(product.hardware_interfaces)" class="mb-1">
                 <summary class="small fw-medium text-secondary" style="cursor:pointer">硬件接口 ({{ product.hardware_interfaces.length }})</summary>
                 <div class="mt-1 small" v-for="hi in product.hardware_interfaces" :key="hi.id">
-                  <span class="badge bg-secondary me-1">{{ hi.dict_name }}</span>
-                  <span v-if="hi.quantity" class="text-muted">x{{ hi.quantity }}</span>
+                  <span class="badge bg-secondary me-1">{{ hi.interface_name }}</span>
+                  <span class="text-muted">×{{ hi.quantity || 1 }}</span>
+                  <span v-if="hi.description" class="text-muted ms-1">{{ hi.description }}</span>
                 </div>
               </details>
               <details v-if="hasM2MData(product.sensor_capabilities)" class="mb-1">
-                <summary class="small fw-medium text-secondary" style="cursor:pointer">传感能力 ({{ product.sensor_capabilities.length }})</summary>
-                <div class="mt-1 small" v-for="sc in product.sensor_capabilities" :key="sc.id">
-                  <span class="badge bg-success me-1">{{ sc.dict_name }}</span>
-                  <span v-if="sc.range" class="text-muted me-1">量程: {{ sc.range }}</span>
-                  <span v-if="sc.accuracy" class="text-muted">精度: {{ sc.accuracy }}</span>
+                <summary class="small fw-medium text-secondary" style="cursor:pointer">传感/控制功能 ({{ product.sensor_capabilities.length }})</summary>
+                <div class="mt-1 small" v-for="sc in product.sensor_capabilities" :key="sc.metric_id || sc.dict_id">
+                  <TagBadge :label="sc.metric_name || sc.dict_name" />
+                  <span v-if="sc.measure_range || sc.range" class="text-muted ms-1">{{ sc.measure_range || sc.range }}</span>
+                  <span v-if="sc.accuracy" class="text-muted ms-1">· {{ sc.accuracy }}</span>
+                  <span v-if="sc.resolution" class="text-muted ms-1">· {{ sc.resolution }}</span>
                 </div>
               </details>
             </div>
 
-            <!-- Multi images -->
-            <div v-if="productHasImages" class="mb-2">
+            <!-- Function description -->
+            <div v-if="product.function_desc" class="mb-2">
+              <h6 class="fw-semibold border-bottom pb-1">
+                <i class="bi bi-text-paragraph me-1"></i>功能描述
+              </h6>
+              <p class="small text-muted mb-0" style="white-space:pre-line">{{ product.function_desc }}</p>
+            </div>
+
+            <!-- Remark -->
+            <div v-if="product.remark" class="mb-2">
+              <h6 class="fw-semibold border-bottom pb-1">
+                <i class="bi bi-pencil me-1"></i>备注
+              </h6>
+              <p class="small text-muted mb-0">{{ product.remark }}</p>
+            </div>
+
+            <!-- Product image -->
+            <div v-if="product.image_url || product.has_image || productHasImages" class="mb-2">
               <h6 class="fw-semibold border-bottom pb-1">
                 <i class="bi bi-images me-1"></i>产品图片
               </h6>
-              <div class="d-flex flex-wrap gap-2">
+              <img v-if="product.image_url || product.has_image" :src="detailImageSrc(product)"
+                style="max-width:100%;max-height:400px;object-fit:contain;border-radius:8px;border:1px solid var(--gray-200);cursor:pointer"
+                @click="openImage(product.image_url || detailImageSrc(product))" />
+              <div class="d-flex flex-wrap gap-2 mt-2">
                 <img v-for="(img, idx) in (product.images || [])" :key="idx"
                   :src="imageThumbSrc(img.url)"
                   style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);cursor:pointer"
                   :title="img.is_primary ? '主图' : ''"
-                  @click="window.open(imageThumbSrc(img.url), '_blank')">
+                  @click="openImage(img.url)">
               </div>
             </div>
           </div>
@@ -202,9 +226,6 @@ function onEdit() {
             <div class="d-flex gap-2">
               <button class="btn btn-outline-info btn-modern btn-sm" @click="openSpecSheet">
                 <i class="bi bi-file-text"></i> 查看规格书
-              </button>
-              <button v-if="isAdmin() || product.created_by === currentUser?.id" class="btn btn-outline-primary btn-modern btn-sm" @click="onEdit">
-                <i class="bi bi-pencil"></i> 编辑
               </button>
               <button class="btn btn-secondary btn-modern btn-sm" @click="close">关闭</button>
             </div>

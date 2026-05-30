@@ -20,6 +20,14 @@ const categoryTree = ref([])
 const manufacturerList = ref([])
 const supplierList = ref([])
 
+function flattenTree(nodes, result = []) {
+  for (const n of nodes) {
+    result.push(n)
+    if (n.children?.length) flattenTree(n.children, result)
+  }
+  return result
+}
+
 onMounted(async () => {
   try {
     const [cats, mf, sup] = await Promise.all([
@@ -32,6 +40,11 @@ onMounted(async () => {
     supplierList.value = sup?.items || []
   } catch (e) { /* silent */ }
 })
+
+function onCreateQuote(productIds = []) {
+  const params = productIds.length ? '?product_ids=' + productIds.join(',') : ''
+  router.push('/new-quote' + params)
+}
 
 // ─── Product detail modal ───
 const detailProduct = ref(null)
@@ -97,16 +110,19 @@ function onView(product) {
         <button class="btn btn-outline-primary btn-modern" @click="productTable?.exportTemplate()">
           <i class="bi bi-download"></i> 下载模板
         </button>
-        <button class="btn btn-primary btn-modern" @click="showAddProduct">
-          <i class="bi bi-plus-lg"></i> 新增产品
+        <button class="btn btn-primary btn-modern" @click="onCreateQuote">
+          <i class="bi bi-file-earmark-text"></i> 新建报价单
         </button>
       </div>
     </div>
 
     <ProductTable
       ref="productTable"
+      :manufacturers="manufacturerList"
+      :categoryList="flattenTree(categoryTree)"
       @edit="onEdit"
       @view="onView"
+      @createQuote="onCreateQuote"
     />
 
     <!-- Product Form Modal -->

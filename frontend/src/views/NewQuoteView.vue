@@ -217,8 +217,9 @@ async function autoAddProductsById() {
   let added = 0
   for (const pid of ids) {
     try {
-      const data = await api(`/api/products/${pid}`)
-      if (data.error || !data.id) continue
+      const res = await api(`/api/products/${pid}`)
+      const data = res.product || res
+      if (res.error || !data || !data.id) continue
       const existing = items.find(i => i.product_id === data.id)
       if (existing) continue
       items.push({

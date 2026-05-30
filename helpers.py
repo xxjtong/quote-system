@@ -24,7 +24,7 @@ _field_cache_time = None
 def get_field_visibility():
     global _field_cache, _field_cache_time
     now = datetime.now()
-    if _field_cache and _field_cache_time and (now - _field_cache_time).seconds < 300:
+    if _field_cache and _field_cache_time and (now - _field_cache_time).seconds < 30:
         return _field_cache
     _field_cache = {f.field_name: f.user_visible for f in FieldSetting.query.all()}
     _field_cache_time = now
@@ -35,9 +35,9 @@ def filter_fields_for_user(data_dict, is_admin):
     if is_admin:
         return data_dict
     visibility = get_field_visibility()
-    for field in ['cost_price', 'remark', 'supplier', 'function_desc']:
+    for field in ['cost_price', 'remark', 'supplier', 'function_desc', 'manufacturer_name', 'supplier_name']:
         if field in data_dict and not visibility.get(field, True):
-            data_dict[field] = '(无权限查看)'
+            data_dict[field] = None
     return data_dict
 
 

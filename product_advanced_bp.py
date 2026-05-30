@@ -7,7 +7,7 @@ from extensions import db
 from models import (
     Product, ProductCommMethod, ProductCommProtocol, ProductPowerSupply,
     ProductHardwareInterface, ProductSensorCapability, ProductImage,
-    ProductDependency,
+    ProductDependency, User,
 )
 from auth import require_auth, require_admin
 from spec_service import compare_products
@@ -43,12 +43,21 @@ def replace_comm_methods(id):
     data = request.get_json()
     methods = data.get('methods', [])
     ProductCommMethod.query.filter_by(product_id=id).delete()
+    from models import DictCommMethod as DCM
     for m in methods:
-        db.session.add(ProductCommMethod(
-            product_id=id,
-            method_id=m['method_id'],
-            details=m.get('details', ''),
-        ))
+        mid = m.get('method_id')
+        if not mid and m.get('_custom_name'):
+            existing = DCM.query.filter_by(name=m['_custom_name']).first()
+            if not existing:
+                existing = DCM(name=m['_custom_name'], method_type='other')
+                db.session.add(existing)
+                db.session.flush()
+            mid = existing.id
+        if mid:
+            db.session.add(ProductCommMethod(
+                product_id=id, method_id=mid,
+                details=m.get('details', ''),
+            ))
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -64,14 +73,23 @@ def replace_comm_protocols(id):
     if not _check_product_permission(product):
         return jsonify({'error': '只能编辑自己创建的产品'}), 403
     data = request.get_json()
-    protocols = data.get('protocols', [])
+    protocols = data.get('methods', data.get('protocols', []))
     ProductCommProtocol.query.filter_by(product_id=id).delete()
+    from models import DictCommProtocol as DCP
     for p in protocols:
-        db.session.add(ProductCommProtocol(
-            product_id=id,
-            protocol_id=p['protocol_id'],
-            direction=p.get('direction', 'both'),
-        ))
+        pid = p.get('protocol_id')
+        if not pid and p.get('_custom_name'):
+            existing = DCP.query.filter_by(name=p['_custom_name']).first()
+            if not existing:
+                existing = DCP(name=p['_custom_name'])
+                db.session.add(existing)
+                db.session.flush()
+            pid = existing.id
+        if pid:
+            db.session.add(ProductCommProtocol(
+                product_id=id, protocol_id=pid,
+                direction=p.get('direction', 'both'),
+            ))
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -87,15 +105,24 @@ def replace_power_supplies(id):
     if not _check_product_permission(product):
         return jsonify({'error': '只能编辑自己创建的产品'}), 403
     data = request.get_json()
-    supplies = data.get('supplies', [])
+    supplies = data.get('methods', data.get('supplies', []))
     ProductPowerSupply.query.filter_by(product_id=id).delete()
+    from models import DictPowerSupply as DPS
     for s in supplies:
-        db.session.add(ProductPowerSupply(
-            product_id=id,
-            power_id=s['power_id'],
-            voltage_range=s.get('voltage_range', ''),
-            battery_life=s.get('battery_life', ''),
-        ))
+        pid = s.get('power_id')
+        if not pid and s.get('_custom_name'):
+            existing = DPS.query.filter_by(name=s['_custom_name']).first()
+            if not existing:
+                existing = DPS(name=s['_custom_name'], supply_category='other')
+                db.session.add(existing)
+                db.session.flush()
+            pid = existing.id
+        if pid:
+            db.session.add(ProductPowerSupply(
+                product_id=id, power_id=pid,
+                voltage_range=s.get('voltage_range', ''),
+                battery_life=s.get('battery_life', ''),
+            ))
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -123,7 +150,7 @@ def replace_hardware_interfaces(id):
     if not _check_product_permission(product):
         return jsonify({'error': '只能编辑自己创建的产品'}), 403
     data = request.get_json()
-    interfaces = data.get('interfaces', [])
+    interfaces = data.get('methods', data.get('interfaces', []))
     ProductHardwareInterface.query.filter_by(product_id=id).delete()
     for iface in interfaces:
         db.session.add(ProductHardwareInterface(
@@ -161,16 +188,25 @@ def replace_sensor_capabilities(id):
     if not _check_product_permission(product):
         return jsonify({'error': '只能编辑自己创建的产品'}), 403
     data = request.get_json()
-    capabilities = data.get('capabilities', [])
+    capabilities = data.get('methods', data.get('capabilities', []))
     ProductSensorCapability.query.filter_by(product_id=id).delete()
+    from models import DictSensorMetric as DSM
     for c in capabilities:
-        db.session.add(ProductSensorCapability(
-            product_id=id,
-            metric_id=c['metric_id'],
-            measure_range=c.get('measure_range', ''),
-            accuracy=c.get('accuracy', ''),
-            resolution=c.get('resolution', ''),
-        ))
+        mid = c.get('metric_id')
+        if not mid and c.get('_custom_name'):
+            existing = DSM.query.filter_by(name=c['_custom_name']).first()
+            if not existing:
+                existing = DSM(name=c['_custom_name'])
+                db.session.add(existing)
+                db.session.flush()
+            mid = existing.id
+        if mid:
+            db.session.add(ProductSensorCapability(
+                product_id=id, metric_id=mid,
+                measure_range=c.get('measure_range', ''),
+                accuracy=c.get('accuracy', ''),
+                resolution=c.get('resolution', ''),
+            ))
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -197,13 +233,29 @@ def replace_product_images(id):
         return jsonify({'error': '只能编辑自己创建的产品'}), 403
     data = request.get_json()
     images = data.get('images', [])
+    # 清理被移除的旧图片文件
+    from pathlib import Path
+    new_urls = {img.get('url', '') for img in images}
+    old_imgs = ProductImage.query.filter_by(product_id=id).all()
+    for oi in old_imgs:
+        if oi.url and oi.url.startswith('/uploads/') and oi.url not in new_urls:
+            fpath = Path(__file__).parent / oi.url.lstrip('/')
+            try:
+                fpath.unlink(missing_ok=True)
+                thumb = fpath.parent / (fpath.stem + '_thumb.jpg')
+                thumb.unlink(missing_ok=True)
+            except Exception:
+                pass
     ProductImage.query.filter_by(product_id=id).delete()
-    for img in images:
+    # Ensure at least one primary image
+    has_primary = any(img.get('is_primary') for img in images)
+    for i, img in enumerate(images):
+        is_primary = img.get('is_primary', False) or (not has_primary and i == 0)
         db.session.add(ProductImage(
             product_id=id,
             url=img['url'],
-            is_primary=img.get('is_primary', False),
-            sort_order=img.get('sort_order', 0),
+            is_primary=is_primary,
+            sort_order=img.get('sort_order', i),
             alt_text=img.get('alt_text', ''),
         ))
     db.session.commit()
@@ -313,8 +365,23 @@ def compare_products_endpoint():
 # ─── Spec Sheet ──────────────────────────────────────────────
 
 @product_advanced_bp.route('/api/products/<int:id>/spec-sheet', methods=['GET'])
-@require_auth
 def spec_sheet(id):
+    # 支持 query param token 认证（浏览器直接访问时无法设置 Authorization header）
+    from flask import request as _req
+    from flask import current_app
+    token = (_req.headers.get('Authorization', '').replace('Bearer ', '')
+             or _req.args.get('token', ''))
+    if not token:
+        return jsonify({'error': '请先登录'}), 401
+    try:
+        import jwt as _jwt
+        data = _jwt.decode(token, current_app.config['JWT_SECRET'], algorithms=['HS256'])
+        user = db.session.get(User, data['user_id'])
+        if not user or not user.is_active:
+            return jsonify({'error': '请先登录'}), 401
+    except Exception:
+        return jsonify({'error': '请先登录'}), 401
+
     product = db.session.get(Product, id)
     if not product:
         return jsonify({'error': '产品不存在'}), 404

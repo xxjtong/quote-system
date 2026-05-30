@@ -289,3 +289,13 @@ def delete_supplier(id):
     db.session.delete(item)
     db.session.commit()
     return jsonify({'ok': True})
+
+
+# ─── DictProductType ──────────────────────────────────────────
+
+@dict_bp.route('/api/dicts/product-types', methods=['GET'])
+@require_auth
+def list_product_types():
+    from models import DictProductType
+    items = DictProductType.query.order_by(DictProductType.sort_order).all()
+    return jsonify({'items': [t.to_dict() for t in items]})

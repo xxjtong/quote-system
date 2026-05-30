@@ -1,6 +1,7 @@
 """报价系统数据模型 — Product / Quote / QuoteItem / User / 辅助表"""
 import json
 from datetime import datetime
+import sqlalchemy as sa
 from extensions import db
 
 
@@ -27,11 +28,12 @@ class Product(db.Model):
     manufacturer_id = db.Column(db.Integer, db.ForeignKey('manufacturers.id'), nullable=True)
     supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
     product_url = db.Column(db.String(500), nullable=True)
-    status = db.Column(db.String(20), default='active', index=True)
+    status = db.Column(db.String(20), default='active', server_default=sa.text("'active'"), index=True)
     parent_id = db.Column(db.Integer, db.ForeignKey('products.id'), nullable=True, index=True)
     specs = db.Column(db.Text, nullable=True)        # JSON string
     urls = db.Column(db.Text, nullable=True)         # JSON string
     custom_fields = db.Column(db.Text, nullable=True) # JSON string
+    product_type_id = db.Column(db.Integer, db.ForeignKey('dict_product_types.id'), nullable=True, index=True)
     pinyin_search = db.Column(db.Text, nullable=True, index=True)  # 预计算拼音，搜索用
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -41,6 +43,7 @@ class Product(db.Model):
     device_category = db.relationship('DeviceCategory', foreign_keys=[category_id], backref='products')
     product_manufacturer = db.relationship('Manufacturer', foreign_keys=[manufacturer_id], backref='products')
     product_supplier = db.relationship('Supplier', foreign_keys=[supplier_id], backref='products')
+    product_type = db.relationship('DictProductType', foreign_keys=[product_type_id], backref='products')
     parent_product = db.relationship('Product', remote_side=[id], backref='variants')
 
     def to_dict(self, users_map=None):
@@ -77,6 +80,8 @@ class Product(db.Model):
             'manufacturer_name': '',
             'supplier_id': self.supplier_id,
             'supplier_name': '',
+            'product_type_id': self.product_type_id,
+            'product_type_name': '',
             'product_url': self.product_url or '',
             'status': self.status or 'active',
             'parent_id': self.parent_id,
@@ -104,7 +109,7 @@ class Quote(db.Model):
     phone = db.Column(db.String(50), nullable=True)
     quote_date = db.Column(db.String(20), nullable=True)
     valid_days = db.Column(db.Integer, default=15)
-    status = db.Column(db.String(20), default='draft', index=True)
+    status = db.Column(db.String(20), default='draft', server_default=sa.text("'draft'"), index=True)
     total_amount = db.Column(db.Numeric(12, 2, asdecimal=False), default=0)
     download_count = db.Column(db.Integer, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
@@ -345,6 +350,17 @@ class LoginLog(db.Model):
 # ═══════════════════════════════════════════════════════════════
 # v2.6.0 新增: 产品高级功能 — 字典表 / 分类树 / M2M 映射 / 规格定义
 # ═══════════════════════════════════════════════════════════════
+
+class DictProductType(db.Model):
+    """产品类型字典（传感器/控制器/网关/路由器/配件...）"""
+    __tablename__ = 'dict_product_types'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False, unique=True)
+    sort_order = db.Column(db.Integer, default=0)
+
+    def to_dict(self):
+        return {'id': self.id, 'name': self.name, 'sort_order': self.sort_order}
+
 
 class Manufacturer(db.Model):
     """制造商/品牌"""
@@ -612,3 +628,11 @@ class ProductDependency(db.Model):
             'description': self.description or '',
             'sort_order': self.sort_order,
         }
+
+
+class ProductCategory(db.Model):
+    """产品品类多标签 M2M"""
+    __tablename__ = 'product_categories'
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), primary_key=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('device_categories.id', ondelete='CASCADE'), primary_key=True)
+    category = db.relationship('DeviceCategory')

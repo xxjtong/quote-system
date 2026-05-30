@@ -27,7 +27,7 @@ def list_categories():
 @category_bp.route('/api/categories/tree', methods=['GET'])
 @require_auth
 def get_category_tree():
-    all_cats = DeviceCategory.query.order_by(DeviceCategory.level, DeviceCategory.sort_order).all()
+    all_cats = DeviceCategory.query.filter_by(is_active=True).order_by(DeviceCategory.level, DeviceCategory.sort_order).all()
     cat_map = {}
     for c in all_cats:
         d = c.to_dict()

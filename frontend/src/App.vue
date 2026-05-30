@@ -45,7 +45,7 @@ const tabs = [
   { id: 'dashboard', label: '首页', icon: 'bi bi-speedometer2' },
   { id: 'products', label: '报价产品', icon: 'bi bi-box-seam' },
   { id: 'quotes', label: '报价管理', icon: 'bi bi-file-earmark-text', badge: '+' },
-  { id: 'productsDb', label: '产品数据库', icon: 'bi bi-database', adminOnly: true },
+  { id: 'productsDb', label: '产品数据库', icon: 'bi bi-database' },
   { id: 'import', label: '导入导出', icon: 'bi bi-upload' },
   { id: 'dicts', label: '字典管理', icon: 'bi bi-book', adminOnly: true },
   { id: 'categories', label: '分类管理', icon: 'bi bi-diagram-3', adminOnly: true },

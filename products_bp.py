@@ -12,10 +12,12 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, request, jsonify, g, Response, send_file
-from sqlalchemy import func
+from sqlalchemy import func, distinct
 
 from extensions import db
-from models import Product, AIUsageLog, User
+from models import (Product, AIUsageLog, User, Quote,
+    ProductImage, ProductCommMethod, ProductCommProtocol,
+    ProductPowerSupply)
 from auth import require_auth, require_admin
 
 from utils import _debug_log, _log_ai_usage, _safe_number, _compute_pinyin_search
@@ -61,32 +63,33 @@ def _get_field_visibility():
 # ─── 辅助函数 ────────────────────────────────────────────────
 
 def _store_image_blob(product, data):
-    """从请求数据中提取图片并存入 BLOB。支持 image_data (base64) 和 image_url (本地路径)"""
-    import base64
-    # 优先: base64 图片数据
-    img_b64 = data.get('image_data', '')
-    if img_b64:
-        try:
-            if ',' in img_b64:
-                img_b64 = img_b64.split(',', 1)[1]
-            product.image_data = base64.b64decode(img_b64)
-            product.image_mime = data.get('image_mime', 'image/jpeg')
-            return
-        except Exception:
-            pass
-    # 次选: 从本地文件读取（image_url 为 /uploads/images/... 时）
-    image_url = (product.image_url or '').strip()
-    if image_url.startswith('/uploads/'):
-        filepath = BASE_DIR / image_url.lstrip('/')
-        if filepath.exists():
-            try:
-                product.image_data = filepath.read_bytes()
-                ext = filepath.suffix.lower()
-                mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-                            '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
-                product.image_mime = mime_map.get(ext, 'image/jpeg')
-            except Exception:
-                pass
+    """[DEPRECATED] 图片已通过 product_images 表和磁盘文件管理，不再写入 BLOB。
+    保留空函数以兼容旧调用点。"""
+    pass
+
+
+def _cleanup_image_files(image_url):
+    """删除磁盘上的图片文件（含缩略图）。"""
+    if not image_url or not image_url.startswith('/uploads/'):
+        return
+    fpath = BASE_DIR / image_url.lstrip('/')
+    try:
+        fpath.unlink(missing_ok=True)
+        # Also delete thumbnail
+        stem = fpath.stem
+        if not stem.endswith('_thumb'):
+            thumb = fpath.parent / f'{stem}_thumb.jpg'
+            thumb.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _cleanup_product_images(product_id):
+    """删除产品关联的所有磁盘图片文件。"""
+    from models import ProductImage as PImg
+    imgs = PImg.query.filter_by(product_id=product_id).all()
+    for img in imgs:
+        _cleanup_image_files(img.url)
 
 
 def add_pinyin_field(p_dict):
@@ -107,6 +110,21 @@ def add_pinyin_field(p_dict):
 
 # ─── 产品路由 ────────────────────────────────────────────────
 
+def _parse_int_list(raw):
+    """Parse comma-separated int list from query string, e.g. '1,3,5' → [1,3,5]"""
+    if not raw or not raw.strip():
+        return []
+    result = []
+    for part in raw.split(','):
+        part = part.strip()
+        if part:
+            try:
+                result.append(int(part))
+            except ValueError:
+                pass
+    return result
+
+
 @products_bp.route('/api/products', methods=['GET'])
 def list_products():
     """产品列表，支持搜索（含拼音）和分类筛选"""
@@ -116,6 +134,11 @@ def list_products():
     search = request.args.get('search', '').strip()
     category = request.args.get('category', '').strip()
     supplier = request.args.get('supplier', '').strip()
+    category_id = request.args.get('category_id', type=int)
+    comm_method = _parse_int_list(request.args.get('comm_method', ''))
+    power_supply = _parse_int_list(request.args.get('power_supply', ''))
+    sensor_metric = _parse_int_list(request.args.get('sensor_metric', ''))
+    manufacturer_id = request.args.get('manufacturer_id', type=int)
 
     # 排序
     sort_by = request.args.get('sort_by', 'id')
@@ -140,6 +163,37 @@ def list_products():
     if category:
         query = query.filter(Product.category.ilike(f'%{category}%'))
 
+    # v2.6.0 高级过滤参数
+    if category_id:
+        from models import ProductCategory
+        query = query.filter(Product.id.in_(
+            db.session.query(ProductCategory.product_id).filter(ProductCategory.category_id == category_id)
+        ))
+    if manufacturer_id:
+        query = query.filter(Product.manufacturer_id == manufacturer_id)
+    if comm_method:
+        query = query.filter(Product.id.in_(
+            db.session.query(ProductCommMethod.product_id)
+            .filter(ProductCommMethod.method_id.in_(comm_method))
+            .group_by(ProductCommMethod.product_id)
+            .having(func.count(distinct(ProductCommMethod.method_id)) == len(comm_method))
+        ))
+    if sensor_metric:
+        from models import ProductSensorCapability
+        query = query.filter(Product.id.in_(
+            db.session.query(ProductSensorCapability.product_id)
+            .filter(ProductSensorCapability.metric_id.in_(sensor_metric))
+            .group_by(ProductSensorCapability.product_id)
+            .having(func.count(distinct(ProductSensorCapability.metric_id)) == len(sensor_metric))
+        ))
+    if power_supply:
+        query = query.filter(Product.id.in_(
+            db.session.query(ProductPowerSupply.product_id)
+            .filter(ProductPowerSupply.power_id.in_(power_supply))
+            .group_by(ProductPowerSupply.product_id)
+            .having(func.count(distinct(ProductPowerSupply.power_id)) == len(power_supply))
+        ))
+
     # 拼音搜索：纯ASCII（无汉字）时启用
     is_pinyin = search and not re.search(r'[\u4e00-\u9fff]', search)
     if is_pinyin:
@@ -148,19 +202,16 @@ def list_products():
         query = query.filter(
             db.or_(Product.pinyin_search.like(like), Product.spec.ilike(like))
         )
-        query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
-        total = query.count()
-        products = query.offset((page - 1) * per_page).limit(per_page).all()
-    else:
-        query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
-        if search:
-            like = f'%{search}%'
-            query = query.filter(
-                db.or_(Product.name.ilike(like), Product.spec.ilike(like),
-                        Product.function_desc.ilike(like))
-            )
-        total = query.count()
-        products = query.offset((page - 1) * per_page).limit(per_page).all()
+    elif search:
+        like = f'%{search}%'
+        query = query.filter(
+            db.or_(Product.name.ilike(like), Product.spec.ilike(like),
+                    Product.function_desc.ilike(like))
+        )
+
+    query = query.order_by(col.asc() if sort_order == 'asc' else col.desc())
+    total = query.count()
+    products = query.offset((page - 1) * per_page).limit(per_page).all()
 
     # 获取所有分类标签（支持逗号分隔的多标签）
     from sqlalchemy import text as _text
@@ -184,8 +235,9 @@ def list_products():
         creator_users = User.query.filter(User.id.in_(creator_ids)).all()
         users_map = {u.id: u.username for u in creator_users}
 
-    # v2.6.0: 预加载分类/制造商/供应商名称
-    from models import DeviceCategory, Manufacturer, Supplier
+    # v2.6.0: 预加载分类/制造商/供应商/产品类型名称
+    from models import DeviceCategory, Manufacturer, Supplier, DictProductType
+    from models import DictCommMethod, DictPowerSupply
     cat_ids = [p.category_id for p in products if p.category_id]
     cat_map = {}
     if cat_ids:
@@ -201,6 +253,108 @@ def list_products():
     if sup_ids:
         sups = Supplier.query.filter(Supplier.id.in_(sup_ids)).all()
         sup_map = {s.id: s.name for s in sups}
+    type_ids = [p.product_type_id for p in products if p.product_type_id]
+    type_map = {}
+    if type_ids:
+        types = DictProductType.query.filter(DictProductType.id.in_(type_ids)).all()
+        type_map = {t.id: t.name for t in types}
+
+    # v2.6.0: 预加载 M2M 数据和主图
+    product_ids = [p.id for p in products]
+    comm_map = {}  # product_id → [{method_name, method_type, ...}, ...]
+    power_map = {}  # product_id → [{power_name, power_category, ...}, ...]
+    image_map = {}  # product_id → primary image url
+    if product_ids:
+        comm_rows = db.session.query(ProductCommMethod).filter(
+            ProductCommMethod.product_id.in_(product_ids)
+        ).all()
+        method_ids = [r.method_id for r in comm_rows]
+        dm_map = {}
+        if method_ids:
+            dms = DictCommMethod.query.filter(DictCommMethod.id.in_(method_ids)).all()
+            dm_map = {d.id: d for d in dms}
+        for r in comm_rows:
+            dm = dm_map.get(r.method_id)
+            comm_map.setdefault(r.product_id, []).append({
+                'method_id': r.method_id,
+                'method_name': dm.name if dm else '',
+                'method_type': dm.method_type if dm else '',
+                'details': r.details or '',
+            })
+
+        power_rows = db.session.query(ProductPowerSupply).filter(
+            ProductPowerSupply.product_id.in_(product_ids)
+        ).all()
+        power_ids = [r.power_id for r in power_rows]
+        dp_map = {}
+        if power_ids:
+            dps = DictPowerSupply.query.filter(DictPowerSupply.id.in_(power_ids)).all()
+            dp_map = {d.id: d for d in dps}
+        for r in power_rows:
+            dp = dp_map.get(r.power_id)
+            power_map.setdefault(r.product_id, []).append({
+                'power_id': r.power_id,
+                'power_name': dp.name if dp else '',
+                'power_category': dp.supply_category if dp else '',
+                'voltage_range': r.voltage_range or '',
+                'battery_life': r.battery_life or '',
+            })
+
+        from models import ProductSensorCapability, DictSensorMetric
+        sensor_rows = db.session.query(ProductSensorCapability).filter(
+            ProductSensorCapability.product_id.in_(product_ids)
+        ).all()
+        sensor_map = {}
+        if sensor_rows:
+            metric_ids = [r.metric_id for r in sensor_rows]
+            sm_dict = {}
+            if metric_ids:
+                sms = DictSensorMetric.query.filter(DictSensorMetric.id.in_(metric_ids)).all()
+                sm_dict = {s.id: s.name for s in sms}
+            for r in sensor_rows:
+                sensor_map.setdefault(r.product_id, []).append({
+                    'metric_id': r.metric_id,
+                    'metric_name': sm_dict.get(r.metric_id, ''),
+                    'measure_range': r.measure_range or '',
+                })
+
+        # Preload product_categories M2M
+        from models import ProductCategory
+        pc_rows = db.session.query(ProductCategory).filter(
+            ProductCategory.product_id.in_(product_ids)
+        ).all()
+        cat_names_map = {}
+        if pc_rows:
+            all_cat_ids = {r.category_id for r in pc_rows}
+            cat_name_lookup = {}
+            if all_cat_ids:
+                cat_objs = DeviceCategory.query.filter(DeviceCategory.id.in_(all_cat_ids)).all()
+                cat_name_lookup = {c.id: c.name for c in cat_objs}
+            for r in pc_rows:
+                name = cat_name_lookup.get(r.category_id, '')
+                if name:
+                    cat_names_map.setdefault(r.product_id, []).append(name)
+
+        primary_images = ProductImage.query.filter(
+            ProductImage.product_id.in_(product_ids),
+            ProductImage.is_primary == True
+        ).order_by(ProductImage.sort_order).all()
+        seen = set()
+        for img in primary_images:
+            if img.product_id not in seen:
+                image_map[img.product_id] = img.url
+                seen.add(img.product_id)
+
+    def _thumb_url(url):
+        """Convert image URL to thumbnail URL."""
+        if not url or url.startswith('http'):
+            return url
+        if '_thumb.' in url:
+            return url
+        dot = url.rfind('.')
+        if dot > 0:
+            return url[:dot] + '_thumb' + url[dot:]
+        return url
 
     products_json = []
     for p in products:
@@ -208,6 +362,16 @@ def list_products():
         p_dict['category_name'] = cat_map.get(p.category_id, '')
         p_dict['manufacturer_name'] = mfr_map.get(p.manufacturer_id, '')
         p_dict['supplier_name'] = sup_map.get(p.supplier_id, '')
+        p_dict['product_type_name'] = type_map.get(p.product_type_id, '')
+        p_dict['comm_methods'] = comm_map.get(p.id, [])
+        p_dict['power_supplies'] = power_map.get(p.id, [])
+        p_dict['sensor_capabilities'] = sensor_map.get(p.id, [])
+        p_dict['category_names'] = cat_names_map.get(p.id, [])
+        img_url = p_dict.get('image_url', '') or image_map.get(p.id, '')
+        p_dict['image_url'] = _thumb_url(img_url)
+        p_dict['full_image_url'] = img_url  # 保留原图给其他用途
+        if not is_admin:
+            p_dict = _filter_fields_for_user(p_dict, is_admin)
         products_json.append(p_dict)
 
     return jsonify({
@@ -256,9 +420,43 @@ def create_product():
     )
     _store_image_blob(product, data)
     product.pinyin_search = _compute_pinyin_search(name, spec, data.get('category', ''), data.get('supplier', ''))
+    # Auto-create product type from custom name
+    if data.get('product_type_name'):
+        from models import DictProductType
+        pt = DictProductType.query.filter_by(name=data['product_type_name'].strip()).first()
+        if not pt:
+            pt = DictProductType(name=data['product_type_name'].strip())
+            db.session.add(pt)
+            db.session.flush()
+        product.product_type_id = pt.id
+
+    # Auto-create manufacturer from custom name
+    if data.get('manufacturer_name'):
+        from models import Manufacturer
+        mfr = Manufacturer.query.filter_by(name=data['manufacturer_name'].strip()).first()
+        if not mfr:
+            mfr = Manufacturer(name=data['manufacturer_name'].strip())
+            db.session.add(mfr)
+            db.session.flush()
+        product.manufacturer_id = mfr.id
+
+    # Auto-match category string to device_category
+    if 'category' in data and data['category']:
+        primary_cat = data['category'].split(',')[0].strip()
+        from models import DeviceCategory
+        matched = DeviceCategory.query.filter_by(name=primary_cat, is_active=True).first()
+        if matched:
+            product.category_id = matched.id
+        elif 'category_id' not in data or data['category_id'] is None:
+            # Create new category if not found
+            new_cat = DeviceCategory(name=primary_cat, is_active=True)
+            db.session.add(new_cat)
+            db.session.flush()
+            product.category_id = new_cat.id
+
     # v2.6.0 new optional fields
     optional_new_fields = ['model', 'category_id', 'manufacturer_id', 'supplier_id',
-                           'product_url', 'status', 'parent_id']
+                           'product_url', 'status', 'parent_id', 'unit', 'remark', 'product_type_id']
     for f in optional_new_fields:
         if f in data and data[f] is not None:
             setattr(product, f, data[f])
@@ -266,6 +464,14 @@ def create_product():
         if json_field in data:
             val = data[json_field]
             setattr(product, json_field, json.dumps(val, ensure_ascii=False) if val else None)
+    # Save product_categories M2M
+    if 'category_ids' in data:
+        from models import ProductCategory
+        ProductCategory.query.filter_by(product_id=product.id).delete()
+        for cid in data['category_ids']:
+            if cid:
+                db.session.add(ProductCategory(product_id=product.id, category_id=cid))
+
     db.session.add(product)
     db.session.commit()
     return jsonify({'product': product.to_dict()}), 201
@@ -278,7 +484,8 @@ def get_product(product_id):
         return jsonify({'error': '产品不存在'}), 404
     p_dict = product.to_dict()
     # Load related names from FK tables
-    from models import DeviceCategory, Manufacturer, Supplier
+    from models import DeviceCategory, Manufacturer, Supplier, DictProductType
+    from models import DictCommMethod, DictPowerSupply
     _cat = db.session.get(DeviceCategory, product.category_id) if product.category_id else None
     _mfr = db.session.get(Manufacturer, product.manufacturer_id) if product.manufacturer_id else None
     _sup = db.session.get(Supplier, product.supplier_id) if product.supplier_id else None
@@ -288,6 +495,104 @@ def get_product(product_id):
         p_dict['manufacturer_name'] = _mfr.name
     if _sup:
         p_dict['supplier_name'] = _sup.name
+    _type = db.session.get(DictProductType, product.product_type_id) if product.product_type_id else None
+    if _type:
+        p_dict['product_type_name'] = _type.name
+
+    # Load M2M data
+    comm_rows = ProductCommMethod.query.filter_by(product_id=product_id).all()
+    method_ids = [r.method_id for r in comm_rows]
+    dm_map = {}
+    if method_ids:
+        dms = DictCommMethod.query.filter(DictCommMethod.id.in_(method_ids)).all()
+        dm_map = {d.id: d for d in dms}
+    p_dict['comm_methods'] = [{
+        'method_id': r.method_id,
+        'method_name': dm_map[r.method_id].name if r.method_id in dm_map else '',
+        'method_type': dm_map[r.method_id].method_type if r.method_id in dm_map else '',
+        'dict_id': r.method_id,
+        'detail': r.details or '',
+    } for r in comm_rows]
+
+    proto_rows = ProductCommProtocol.query.filter_by(product_id=product_id).all()
+    proto_ids = [r.protocol_id for r in proto_rows]
+    dp_map2 = {}
+    if proto_ids:
+        from models import DictCommProtocol
+        dcp_list = DictCommProtocol.query.filter(DictCommProtocol.id.in_(proto_ids)).all()
+        dp_map2 = {d.id: d.name for d in dcp_list}
+    p_dict['comm_protocols'] = [{
+        'protocol_id': r.protocol_id,
+        'protocol_name': dp_map2.get(r.protocol_id, ''),
+        'dict_id': r.protocol_id,
+        'dict_name': dp_map2.get(r.protocol_id, ''),
+        'direction': r.direction or 'both',
+    } for r in proto_rows]
+
+    power_rows = ProductPowerSupply.query.filter_by(product_id=product_id).all()
+    power_ids = [r.power_id for r in power_rows]
+    dp_map = {}
+    if power_ids:
+        dps = DictPowerSupply.query.filter(DictPowerSupply.id.in_(power_ids)).all()
+        dp_map = {d.id: d for d in dps}
+    p_dict['power_supplies'] = [{
+        'power_id': r.power_id,
+        'power_name': dp_map[r.power_id].name if r.power_id in dp_map else '',
+        'power_category': dp_map[r.power_id].supply_category if r.power_id in dp_map else '',
+        'dict_id': r.power_id,
+        'voltage_range': r.voltage_range or '',
+        'battery_life': r.battery_life or '',
+    } for r in power_rows]
+
+    # Load images from product_images table
+    img_rows = ProductImage.query.filter_by(product_id=product_id).order_by(ProductImage.sort_order).all()
+    p_dict['images'] = [img.to_dict() for img in img_rows]
+
+    # Load category names from M2M
+    from models import ProductCategory
+    pc_rows = ProductCategory.query.filter_by(product_id=product_id).all()
+    cat_ids = [r.category_id for r in pc_rows]
+    if cat_ids:
+        cat_objs = DeviceCategory.query.filter(DeviceCategory.id.in_(cat_ids)).all()
+        p_dict['category_names'] = [c.name for c in cat_objs]
+        p_dict['category_ids'] = [c.id for c in cat_objs]
+        if cat_objs:
+            p_dict['category_name'] = cat_objs[0].name
+    else:
+        p_dict['category_names'] = []
+        p_dict['category_ids'] = []
+
+    # Load hardware interfaces
+    from models import ProductHardwareInterface
+    hw_rows = ProductHardwareInterface.query.filter_by(product_id=product_id).order_by(ProductHardwareInterface.id).all()
+    p_dict['hardware_interfaces'] = [{
+        'id': hw.id,
+        'interface_name': hw.interface_name,
+        'quantity': hw.quantity or 1,
+        'description': hw.description or '',
+    } for hw in hw_rows]
+
+    # Load sensor capabilities
+    from models import ProductSensorCapability, DictSensorMetric
+    sn_rows = ProductSensorCapability.query.filter_by(product_id=product_id).all()
+    metric_ids = [s.metric_id for s in sn_rows]
+    sm_map = {}
+    if metric_ids:
+        sms = DictSensorMetric.query.filter(DictSensorMetric.id.in_(metric_ids)).all()
+        sm_map = {s.id: s for s in sms}
+    p_dict['sensor_capabilities'] = [{
+        'metric_id': s.metric_id,
+        'metric_name': sm_map[s.metric_id].name if s.metric_id in sm_map else '',
+        'unit': sm_map[s.metric_id].unit if s.metric_id in sm_map else '',
+        'dict_id': s.metric_id,
+        'measure_range': s.measure_range or '',
+        'accuracy': s.accuracy or '',
+        'resolution': s.resolution or '',
+    } for s in sn_rows]
+
+    is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
+    if not is_admin:
+        p_dict = _filter_fields_for_user(p_dict, is_admin)
     return jsonify({'product': p_dict})
 
 
@@ -310,9 +615,22 @@ def get_product_image(product_id):
     except Exception:
         return '', 401
     product = db.session.get(Product, product_id)
-    if not product or not product.image_data:
+    if not product:
         return '', 404
-    return Response(product.image_data, mimetype=product.image_mime or 'image/jpeg')
+    # 优先从 product_images 表获取主图 URL
+    from models import ProductImage as PImg
+    primary = PImg.query.filter_by(product_id=product_id, is_primary=True).first()
+    img_url = primary.url if primary else (product.image_url or '')
+    if not img_url:
+        return '', 404
+    if img_url.startswith('/uploads/'):
+        fpath = BASE_DIR / img_url.lstrip('/')
+        if fpath.exists():
+            return send_file(str(fpath))
+    # Fallback: 直接返回 BLOB 旧数据
+    if product.image_data:
+        return Response(product.image_data, mimetype=product.image_mime or 'image/jpeg')
+    return '', 404
 
 
 @products_bp.route('/api/products/<int:product_id>', methods=['PUT'])
@@ -347,9 +665,43 @@ def update_product(product_id):
         product.price = round(float(data['price']), 2)
     if 'cost_price' in data:
         product.cost_price = round(float(data['cost_price']), 2)
+    # Auto-create product type from custom name
+    if data.get('product_type_name'):
+        from models import DictProductType
+        pt = DictProductType.query.filter_by(name=data['product_type_name'].strip()).first()
+        if not pt:
+            pt = DictProductType(name=data['product_type_name'].strip())
+            db.session.add(pt)
+            db.session.flush()
+        product.product_type_id = pt.id
+
+    # Auto-create manufacturer from custom name
+    if data.get('manufacturer_name'):
+        from models import Manufacturer
+        mfr = Manufacturer.query.filter_by(name=data['manufacturer_name'].strip()).first()
+        if not mfr:
+            mfr = Manufacturer(name=data['manufacturer_name'].strip())
+            db.session.add(mfr)
+            db.session.flush()
+        product.manufacturer_id = mfr.id
+
+    # Auto-match category string to device_category
+    if 'category' in data and data['category']:
+        primary_cat = data['category'].split(',')[0].strip()
+        from models import DeviceCategory
+        matched = DeviceCategory.query.filter_by(name=primary_cat, is_active=True).first()
+        if matched:
+            product.category_id = matched.id
+        elif 'category_id' not in data or data['category_id'] is None:
+            # Create new category if not found
+            new_cat = DeviceCategory(name=primary_cat, is_active=True)
+            db.session.add(new_cat)
+            db.session.flush()
+            product.category_id = new_cat.id
+
     # v2.6.0 new optional fields
     optional_new_fields = ['model', 'category_id', 'manufacturer_id', 'supplier_id',
-                           'product_url', 'status', 'parent_id']
+                           'product_url', 'status', 'parent_id', 'unit', 'remark', 'product_type_id']
     for f in optional_new_fields:
         if f in data and data[f] is not None:
             setattr(product, f, data[f])
@@ -359,6 +711,15 @@ def update_product(product_id):
             setattr(product, json_field, json.dumps(val, ensure_ascii=False) if val else None)
     _store_image_blob(product, data)
     product.pinyin_search = _compute_pinyin_search(product.name, product.spec or '', product.category or '', product.supplier or '')
+
+    # Save product_categories M2M
+    if 'category_ids' in data:
+        from models import ProductCategory
+        ProductCategory.query.filter_by(product_id=product.id).delete()
+        for cid in data['category_ids']:
+            if cid:
+                db.session.add(ProductCategory(product_id=product.id, category_id=cid))
+
     db.session.commit()
     return jsonify({'product': product.to_dict()})
 
@@ -372,6 +733,7 @@ def delete_product(product_id):
     is_admin = hasattr(g, 'current_user') and g.current_user and g.current_user.role == 'admin'
     if not is_admin and product.created_by != g.current_user.id:
         return jsonify({'error': '只能删除自己创建的产品'}), 403
+    _cleanup_product_images(product_id)
     db.session.delete(product)
     db.session.commit()
     return jsonify({'message': '已删除'})
@@ -683,6 +1045,7 @@ def toggle_product_active(product_id):
 
 
 @products_bp.route('/api/products/import', methods=['POST'])
+@require_auth
 def import_products():
     """从Excel导入产品 — 支持多Sheet、自动识别分类、提取嵌入图片"""
     import openpyxl
@@ -702,6 +1065,173 @@ def import_products():
         })
     except Exception as e:
         return jsonify({'error': f'导入失败: {str(e)}'}), 400
+
+
+@products_bp.route('/api/products/import-preview', methods=['POST'])
+@require_auth
+def import_preview():
+    """上传Excel并返回解析预览数据（不导入）"""
+    import openpyxl
+    file = request.files.get('file')
+    if not file:
+        return jsonify({'error': '请上传Excel文件'}), 400
+
+    try:
+        wb = openpyxl.load_workbook(file, data_only=True)
+        preview_products = []
+        total = 0
+
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if len(rows) < 2:
+                continue
+
+            # Auto-detect header row (first row containing 名称, 产品, 型号 or price/单价)
+            header_row_idx = 0
+            header_keywords = ['名称', '型号', '产品名', 'name', 'product', '单价', 'price', '规格']
+            for i, row in enumerate(rows):
+                if not row:
+                    continue
+                cells = [str(c).strip() if c else '' for c in row]
+                if any(any(kw in c.lower() if isinstance(c, str) else False for kw in header_keywords) for c in cells):
+                    header_row_idx = i
+                    break
+
+            header_raw = [str(h).strip() if h else '' for h in rows[header_row_idx]]
+            header = [h.lower() for h in header_raw]
+            col_idx, _ = _parse_excel_header(ws, rows, header_row_idx)
+
+            for row in rows[header_row_idx + 1:]:
+                if not row:
+                    continue
+                try:
+                    name_idx = col_idx.get('name', -1)
+                    name = str(row[name_idx]).strip() if name_idx >= 0 and name_idx < len(row) and row[name_idx] else ''
+                    if not name:
+                        spec_idx = col_idx.get('spec', -1)
+                        if spec_idx >= 0 and spec_idx < len(row) and row[spec_idx]:
+                            name = str(row[spec_idx]).strip()
+                    if not name:
+                        continue
+
+                    model_val = str(row[col_idx['model']]).strip() if col_idx.get('model', -1) >= 0 and col_idx.get('model', -1) < len(row) and row[col_idx['model']] else ''
+                    if not model_val:
+                        sku_idx = col_idx.get('sku', -1)
+                        spec_idx = col_idx.get('spec', -1)
+                        if sku_idx >= 0 and sku_idx < len(row) and row[sku_idx]:
+                            model_val = str(row[sku_idx]).strip()
+                        elif spec_idx >= 0 and spec_idx < len(row) and row[spec_idx]:
+                            model_val = str(row[spec_idx]).strip()
+
+                    sup_idx = col_idx.get('supplier', -1)
+                    supplier_val = str(row[sup_idx]).strip() if sup_idx >= 0 and sup_idx < len(row) and row[sup_idx] else ''
+
+                    mfr_idx = col_idx.get('manufacturer', -1)
+                    mfr_val = str(row[mfr_idx]).strip() if mfr_idx >= 0 and mfr_idx < len(row) and row[mfr_idx] else supplier_val
+
+                    # Check if product exists
+                    from models import Product as Prod
+                    existing = Prod.query.filter_by(name=name).first() or (Prod.query.filter_by(spec=model_val).first() if model_val else None)
+
+                    # Smart classify product type
+                    type_name = ''
+                    text = f'{name} {model_val} {(str(row[col_idx["function_desc"]]) if col_idx.get("function_desc", -1) >= 0 and col_idx["function_desc"] < len(row) and row[col_idx["function_desc"]] else "")}'
+                    type_rules = [
+                        (r'网关|数传|DTU|RTU|采集器|gateway', '网关'),
+                        (r'路由器|CPE|router', '路由器'),
+                        (r'控制器|控制面板|集控|PLC|I/O|开关面板|插座|温控|窗帘|电机|执行器', '控制器'),
+                        (r'电源|适配器|供电|配电', '电源'),
+                        (r'支架|安装盒|线缆|天线|工具|附件|辅材|读卡器|打印机|磁力锁|按钮|蜂鸣器|机箱', '配件'),
+                        (r'平板|交互屏|一体机|访客机|考勤|商显|标牌|工位屏|触控|摄像头|相机', '终端设备'),
+                    ]
+                    for pattern, tname in type_rules:
+                        if re.search(pattern, text, re.IGNORECASE):
+                            type_name = tname
+                            break
+                    if not type_name:
+                        type_name = '传感器'  # default
+
+                    preview_products.append({
+                        'name': name,
+                        'model': model_val,
+                        'sku': model_val,
+                        'category': sheet_name,
+                        'product_type': type_name,
+                        'manufacturer': mfr_val,
+                        'supplier': supplier_val or mfr_val,
+                        'price': _safe_number(row[col_idx['price']]) if col_idx.get('price', -1) >= 0 and col_idx['price'] < len(row) else 0,
+                        'function_desc': str(row[col_idx['function_desc']]).strip() if col_idx.get('function_desc', -1) >= 0 and col_idx['function_desc'] < len(row) and row[col_idx['function_desc']] else '',
+                        '_selected': not bool(existing),
+                        '_status': 'exists' if existing else 'new',
+                    })
+                    total += 1
+                except Exception:
+                    continue
+
+        return jsonify({'products': preview_products, 'total': total, 'sheets': len(wb.sheetnames)})
+    except Exception as e:
+        return jsonify({'error': f'解析失败: {str(e)}'}), 400
+
+
+@products_bp.route('/api/products/import-confirm', methods=['POST'])
+@require_auth
+def import_confirm():
+    """确认导入预览中选中的产品"""
+    data = request.get_json()
+    products_data = data.get('products', [])
+    if not products_data:
+        return jsonify({'error': '没有选择产品'}), 400
+
+    imported = 0
+    skipped = 0
+    sheet_supplier_ref = ['']
+
+    for item in products_data:
+        name = (item.get('name') or '').strip()
+        if not name:
+            continue
+
+        from models import Product as Prod
+        existing = Prod.query.filter_by(name=name).first()
+        if existing and not item.get('model'):
+            existing.spec = item.get('model', '') or existing.spec
+            existing.price = item.get('price', 0) or existing.price
+            existing.function_desc = item.get('function_desc', '') or existing.function_desc
+            existing.supplier = item.get('supplier', '') or existing.supplier
+            existing.category = item.get('category', '') or existing.category
+            existing.pinyin_search = _compute_pinyin_search(existing.name, existing.spec or '', existing.category or '', existing.supplier or '')
+            db.session.add(existing)
+            imported += 1
+            continue
+
+        spec_val = item.get('model', '') or item.get('sku', '')
+        product = Product(
+            name=name,
+            sku=spec_val,
+            spec=spec_val,
+            category=item.get('category', ''),
+            supplier=item.get('supplier', ''),
+            function_desc=item.get('function_desc', ''),
+            price=float(item.get('price', 0) or 0),
+            created_by=g.current_user.id,
+            remark='',
+        )
+        product.model = spec_val[:100]
+        product.pinyin_search = _compute_pinyin_search(name, spec_val, item.get('category', ''), item.get('supplier', ''))
+        product.category_id = _get_or_create_category(item.get('category', ''))
+        mfr_name = item.get('manufacturer', '')
+        if mfr_name:
+            product.manufacturer_id = _get_or_create_manufacturer(mfr_name)
+        sup_name = item.get('supplier', '')
+        if sup_name:
+            product.supplier_id = _get_or_create_supplier(sup_name)
+
+        db.session.add(product)
+        imported += 1
+
+    db.session.commit()
+    return jsonify({'imported': imported, 'skipped': skipped})
 
 
 # ─── import_products 子函数 ────────────────────────────────────
@@ -778,12 +1308,81 @@ def _find_col(header, names):
     return -1
 
 
+def _llm_parse_columns(headers, sample_rows):
+    """使用LLM智能识别Excel列映射到数据库字段"""
+    try:
+        import urllib.request as _ur
+        api_key = os.environ.get('DEEPSEEK_API_KEY', '')
+        if not api_key:
+            return None
+
+        # Build prompt with headers and sample data
+        header_list = '\n'.join(f'  Col{i}: "{h}"' for i, h in enumerate(headers) if h)
+        sample_text = ''
+        for ri, row in enumerate(sample_rows[:3]):
+            row_text = ' | '.join(str(c)[:50] if c else '' for c in row)
+            sample_text += f'\nRow {ri+1}: {row_text}'
+
+        prompt = f"""你是一个产品数据库专家。请将以下Excel列映射到系统数据库字段。
+
+可用字段: name(产品名称), model(型号), sku(SKU/编号), spec(规格), unit(单位), price(单价), cost_price(成本价), supplier(供应商), manufacturer(制造商/品牌), function_desc(功能描述), remark(内部备注), product_url(产品链接), status(状态), category(品类分类), product_type(产品类型如传感器/网关/控制器)
+
+Excel表头:
+{header_list}
+
+数据样例:
+{sample_text}
+
+请分析每个表头和数据内容，返回JSON格式的列映射。格式: {{"字段名": 列索引}}
+只返回JSON，不要其他文字。"""
+
+        req = _ur.Request('https://api.deepseek.com/v1/chat/completions',
+            data=json.dumps({
+                'model': 'deepseek-chat',
+                'messages': [{'role': 'user', 'content': prompt}],
+                'max_tokens': 500,
+                'temperature': 0.1,
+            }).encode(),
+            headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
+            method='POST')
+        with _ur.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+            content = data['choices'][0]['message']['content'].strip()
+            # Extract JSON from response
+            m = re.search(r'\{[^}]+\}', content)
+            if m:
+                mapping = json.loads(m.group(0))
+                # Convert to col_idx format
+                result = {}
+                for field, col_num in mapping.items():
+                    field = field.strip().lower()
+                    col_num = int(col_num) if isinstance(col_num, str) else col_num
+                    if field in _FIELD_MAP or field in ['category', 'product_type', 'manufacturer']:
+                        result[field] = col_num
+                return result
+            return None
+    except Exception as e:
+        print(f'[LLM parse] Error: {e}')
+        return None
+
+
 def _parse_excel_header(ws, rows, header_row_idx):
     """解析Excel表头，返回列索引映射 + 嵌入图片索引"""
-    header = [str(h).strip().lower() if h else '' for h in rows[header_row_idx]]
+    header_raw = [str(h).strip() if h else '' for h in rows[header_row_idx]]
+    header = [h.lower() for h in header_raw]
+
+    # Try LLM first for intelligent column mapping
     col_idx = {}
-    for key, names in _FIELD_MAP.items():
-        col_idx[key] = _find_col(header, names)
+    sample_start = header_row_idx + 1
+    samples = rows[sample_start:sample_start + 5] if len(rows) > sample_start else []
+    llm_result = _llm_parse_columns(header_raw, samples)
+    if llm_result:
+        col_idx = llm_result
+        print(f'[Import] LLM mapped {len(col_idx)} columns')
+    else:
+        # Fallback: hardcoded mapping
+        for key, names in _FIELD_MAP.items():
+            col_idx[key] = _find_col(header, names)
 
     # 智能解析：备注 vs 内部备注 vs 图片
     inner_remark_col = _find_col(header, ['内部备注'])
@@ -900,6 +1499,24 @@ def _process_import_row(row, row_idx, col_idx, image_map, sheet_name, sheet_supp
         mfr_name = str(row[mfr_idx]).strip()
         product.manufacturer_id = _get_or_create_manufacturer(mfr_name)
 
+    # product_type (auto-create if missing)
+    type_idx = col_idx.get('product_type', -1)
+    if type_idx >= 0 and type_idx < len(row) and row[type_idx]:
+        type_name = str(row[type_idx]).strip()
+        from models import DictProductType
+        pt = DictProductType.query.filter_by(name=type_name).first()
+        if not pt:
+            pt = DictProductType(name=type_name)
+            db.session.add(pt)
+            db.session.flush()
+        product.product_type_id = pt.id
+
+    # category from explicit column (overrides sheet name)
+    cat_idx = col_idx.get('category', -1)
+    if cat_idx >= 0 and cat_idx < len(row) and row[cat_idx]:
+        cat_name = str(row[cat_idx]).strip()
+        product.category_id = _get_or_create_category(cat_name)
+
     # product_url
     url_idx = col_idx.get('product_url', -1)
     if url_idx >= 0 and url_idx < len(row) and row[url_idx]:
@@ -985,6 +1602,7 @@ def _import_all_sheets(wb):
 
 
 @products_bp.route('/api/products/export-all', methods=['GET'])
+@require_auth
 @require_auth
 def export_all_products():
     """导出全部产品为 Excel（按模板格式，管理员增加创建者列）"""
@@ -1151,13 +1769,9 @@ def upload_image():
     if compressed_fname != fname:
         fname = compressed_fname
 
-    # 返回相对URL（后面通过nginx /quote/uploads/images/ 访问）
+    # 返回相对URL
     image_url = f'/uploads/images/{fname}'
-    # 读取压缩后的图片返回 base64，方便前端直接存入 BLOB
-    import base64
-    with open(save_dir / fname, 'rb') as f:
-        img_b64 = base64.b64encode(f.read()).decode('utf-8')
-    return jsonify({'url': image_url, 'filename': fname, 'image_data': img_b64, 'image_mime': 'image/jpeg'})
+    return jsonify({'url': image_url, 'filename': fname})
 
 
 @products_bp.route('/api/download-image', methods=['POST'])
